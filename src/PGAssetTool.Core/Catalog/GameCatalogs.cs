@@ -62,9 +62,9 @@ public sealed partial class AssetLookup
         return new AssetLookup(map, byWeapon);
     }
 
-    /// Every asset path whose name carries this weapon's number, in any namespace.
-    public IReadOnlyList<string> PathsForWeapon(int weaponNumber)
-        => _pathsByWeapon.GetValueOrDefault(weaponNumber) ?? (IReadOnlyList<string>)[];
+    /// Every asset path whose name carries this prefab number, in any namespace.
+    public IReadOnlyList<string> PathsForWeapon(int prefabNumber)
+        => _pathsByWeapon.GetValueOrDefault(prefabNumber) ?? (IReadOnlyList<string>)[];
 
     /// Skin definitions store material paths relative to these roots rather than in full.
     public static readonly string[] SkinAssetRoots =

@@ -29,8 +29,10 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     {
         var unresolved = new List<string>();
 
+        // A hidden weapon has no localization key at all, so a missing name is expected rather than
+        // a gap worth reporting.
         var displayName = catalogs.Localization.Translate(record.LocalizationKey);
-        if (displayName is null)
+        if (displayName is null && !record.IsHidden)
             unresolved.Add($"no translation for '{record.LocalizationKey}' in {catalogs.Localization.Language}");
 
         var prefabPath = "Weapons/" + record.PrefabName;
@@ -54,7 +56,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             .ToList();
 
         // The skin materials are already listed under each skin, so they are left out here.
-        var related = catalogs.Lookup.PathsForWeapon(record.WeaponNumber)
+        var related = catalogs.Lookup.PathsForWeapon(record.PrefabNumber)
             .Where(p => p != prefabPath && !p.StartsWith("WeaponSkinsV2/WeaponSkinAssets/", StringComparison.Ordinal))
             .Select(p => new RelatedAsset(NamespaceOf(p), p, catalogs.Lookup.BundleFor(p)))
             .OrderBy(r => r.Namespace, StringComparer.Ordinal)
@@ -62,7 +64,8 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             .ToList();
 
         var icon = _icons.ForWeapon(record);
-        if (icon is null) unresolved.Add($"no icon texture named '{record.Slug}{IconResolver.Suffix}'");
+        if (icon is null && !record.IsHidden)
+            unresolved.Add($"no icon texture named '{record.Slug}{IconResolver.Suffix}'");
 
         return new WeaponTree(
             record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved);

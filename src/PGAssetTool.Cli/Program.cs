@@ -20,8 +20,10 @@ if (command is "-h" or "--help" or "help")
         pgassettool <command> [options]
 
           info                 Show the detected installation and version.
-          weapons [<filter>]   List weapons, optionally filtered by slug, tag or prefab name.
-          show <weapon>        Show one weapon and everything it references.
+          weapons [<filter>]   List weapons, optionally filtered by name, slug, tag or prefab.
+          show <weapon>        Show one weapon and everything it references. Takes the in-game
+                               number (819), a prefab name (Weapon1257) or a slug. Note that the
+                               in-game number and the prefab number are different sequences.
 
         Options:
           --game <directory>   Use this installation instead of the detected one.
@@ -70,7 +72,7 @@ if (command == "weapons")
     var filter = positional.FirstOrDefault();
     var matches = (filter is null ? catalogs.Items.Weapons : catalogs.Items.Search(filter, catalogs.Localization)).ToList();
     foreach (var w in matches)
-        Console.WriteLine($"{w.WeaponNumber,5}  "
+        Console.WriteLine($"{w.GameNumber,5}  "
             + $"{TextColumn.Pad(catalogs.Localization.Translate(w.LocalizationKey) ?? w.Slug, 34)} "
             + $"{TextColumn.Pad(w.Slug, 34)} {w.Tag}");
     Console.Error.WriteLine($"\n{matches.Count} of {catalogs.Items.Count} weapons  (catalogs {catalogTime}ms)");
@@ -93,8 +95,8 @@ if (record is null)
 
 var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 
-Console.WriteLine($"{tree.DisplayName}");
-Console.WriteLine($"  index {record.Index}  prefab {record.PrefabName}  slug {record.Slug}  tag {record.Tag}");
+Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}{(record.IsHidden ? "   (hidden: no localization key, absent from the in-game list)" : "")}");
+Console.WriteLine($"  prefab {record.PrefabName}  index {record.Index}  slug {record.Slug}  tag {record.Tag}");
 Console.WriteLine();
 if (tree.Icon is not null)
     Console.WriteLine($"  Icon     {tree.Icon.TextureName} @ {tree.Icon.Container}");

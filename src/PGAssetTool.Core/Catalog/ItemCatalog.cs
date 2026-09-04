@@ -26,13 +26,24 @@ public static class ItemIndex
     public static int ForWeapon(int weaponNumber) => For(weaponNumber, ItemCategory.Weapon);
 }
 
+/// A weapon carries two unrelated numbers, and confusing them points at the wrong weapon.
+///
+/// `GameNumber` is the one shown in game and the one players use: dense, unique, 1..N. It comes
+/// from `_weaponNumber`. `PrefabNumber` is the number embedded in the prefab name and in every
+/// related asset path, and it is sparse — it runs well past the weapon count. The two agree for
+/// only six of the 1517 weapons.
 public sealed record WeaponRecord(
     int Index,
-    int WeaponNumber,
+    int GameNumber,
+    int PrefabNumber,
     string PrefabName,
     string Slug,
     string Tag,
-    string LocalizationKey);
+    string LocalizationKey)
+{
+    /// Weapons with no localization key never appear in the game's own list.
+    public bool IsHidden => LocalizationKey.Length == 0;
+}
 
 /// The weapon registry in the `it_d` bundle: `itemDatas` gives every item a slug, `itemRecords`
 /// carries the weapon-specific fields.
@@ -58,7 +69,8 @@ public sealed class ItemCatalog
             var prefab = e["_prefabName"].AsString;
             byIndex.TryAdd(index, new WeaponRecord(
                 Index: index,
-                WeaponNumber: ItemIndex.Ordinal(index),
+                GameNumber: e["_weaponNumber"].AsInt,
+                PrefabNumber: ItemIndex.Ordinal(index),
                 PrefabName: prefab,
                 Slug: slugs.GetValueOrDefault(index, prefab),
                 Tag: e["_tag"].AsString,
@@ -68,15 +80,18 @@ public sealed class ItemCatalog
     }
 
     public int Count => _byIndex.Count;
-    public IEnumerable<WeaponRecord> Weapons => _byIndex.Values.OrderBy(w => w.WeaponNumber);
+    public IEnumerable<WeaponRecord> Weapons => _byIndex.Values.OrderBy(w => w.GameNumber);
 
     public WeaponRecord? ByIndex(int index) => _byIndex.GetValueOrDefault(index);
-    public WeaponRecord? ByNumber(int weaponNumber) => ByIndex(ItemIndex.ForWeapon(weaponNumber));
+    public WeaponRecord? ByPrefabNumber(int prefabNumber) => ByIndex(ItemIndex.ForWeapon(prefabNumber));
+    public WeaponRecord? ByGameNumber(int gameNumber)
+        => _byIndex.Values.FirstOrDefault(w => w.GameNumber == gameNumber);
 
-    /// Accepts a weapon number, a prefab name ("Weapon25"), or a slug ("Beretta").
+    /// Accepts an in-game number, a prefab name ("Weapon1257"), or a slug. A bare number is the
+    /// in-game one, since that is what a player reads off the weapon list.
     public WeaponRecord? Find(string query)
     {
-        if (int.TryParse(query, out var number) && ByNumber(number) is { } byNumber) return byNumber;
+        if (int.TryParse(query, out var number) && ByGameNumber(number) is { } byGame) return byGame;
         return _byIndex.Values.FirstOrDefault(w =>
                    string.Equals(w.PrefabName, query, StringComparison.OrdinalIgnoreCase))
             ?? _byIndex.Values.FirstOrDefault(w =>
