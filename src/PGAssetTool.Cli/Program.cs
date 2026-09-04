@@ -74,7 +74,8 @@ if (command == "weapons")
     foreach (var w in matches)
         Console.WriteLine($"{w.GameNumber,5}  "
             + $"{TextColumn.Pad(catalogs.Localization.Translate(w.LocalizationKey) ?? w.Slug, 34)} "
-            + $"{TextColumn.Pad(w.Slug, 34)} {w.Tag}");
+            + $"{TextColumn.Pad(w.Slug, 34)} {TextColumn.Pad(w.PrefabName, 12)}"
+            + $"{(w.IsHidden ? "  (hidden)" : "")}");
     Console.Error.WriteLine($"\n{matches.Count} of {catalogs.Items.Count} weapons  (catalogs {catalogTime}ms)");
     return 0;
 }

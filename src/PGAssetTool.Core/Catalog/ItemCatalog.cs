@@ -53,6 +53,9 @@ public sealed class ItemCatalog
 
     private ItemCatalog(Dictionary<int, WeaponRecord> byIndex) => _byIndex = byIndex;
 
+    public static ItemCatalog FromRecords(IEnumerable<WeaponRecord> records)
+        => new(records.ToDictionary(r => r.Index));
+
     public static ItemCatalog Load(BundleSet bundles)
     {
         var storage = bundles.MonoBehaviour("it_d", "ItemsDataStorage");
@@ -98,13 +101,23 @@ public sealed class ItemCatalog
                    string.Equals(w.Slug, query, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// Matches against the slug, tag and prefab name, which are always English, plus the display
-    /// name when a localization is supplied — otherwise a search in any other language finds nothing.
+    /// A bare number is the in-game number, matched exactly. Matching it as text would instead find
+    /// whichever weapons happen to carry those digits in their prefab name, which is a different
+    /// numbering entirely: "819" would return the weapon whose prefab is Weapon819, in-game #401.
+    ///
+    /// Anything else matches the slug, tag and prefab name, which are always English, plus the
+    /// display name when a localization is supplied — otherwise searching in any other language
+    /// finds nothing.
     public IEnumerable<WeaponRecord> Search(string text, Localization? localization = null)
-        => Weapons.Where(w =>
+    {
+        if (int.TryParse(text, out var gameNumber))
+            return Weapons.Where(w => w.GameNumber == gameNumber);
+
+        return Weapons.Where(w =>
             w.Slug.Contains(text, StringComparison.OrdinalIgnoreCase)
             || w.Tag.Contains(text, StringComparison.OrdinalIgnoreCase)
             || w.PrefabName.Contains(text, StringComparison.OrdinalIgnoreCase)
             || localization?.Translate(w.LocalizationKey) is { } name
                && name.Contains(text, StringComparison.OrdinalIgnoreCase));
+    }
 }

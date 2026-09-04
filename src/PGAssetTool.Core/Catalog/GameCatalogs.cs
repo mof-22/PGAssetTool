@@ -96,6 +96,9 @@ public sealed class Localization
 
     public string Language { get; }
 
+    public static Localization FromTerms(string language, IEnumerable<KeyValuePair<string, string>> terms)
+        => new(language, terms.ToDictionary(t => t.Key, t => t.Value, StringComparer.Ordinal));
+
     public static Localization Load(BundleSet bundles, string language)
     {
         var terms = new Dictionary<string, string>(StringComparer.Ordinal);
