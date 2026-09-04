@@ -4,6 +4,10 @@
     <ProjectReference Include="..\PGAssetTool.Core\PGAssetTool.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\third_party\classdata.tpk" CopyToOutputDirectory="PreserveNewest" Link="classdata.tpk" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>pgassettool</AssemblyName>

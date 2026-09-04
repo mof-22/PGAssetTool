@@ -37,9 +37,11 @@ AssetBundle と `.assets` を読み取り、多数のバンドルに散らばっ
 
 - Windows x64
 - .NET 10 SDK（ビルド時）
-- `classdata.tpk` — Unity のエンジン標準クラスの型定義。`*_Data` 配下のファイルは TypeTree を
-  持たずにビルドされているため、読み取りに必要です。実行ファイルと同じ場所に置いてください。
-  これは Unity 標準クラスの定義のみを含むもので、ゲーム独自のコードとは無関係です。
+
+Unity のエンジン標準クラスの型定義である `classdata.tpk` は `third_party/` に同梱しており、
+ビルド時に実行ファイルの隣へコピーされます。`*_Data` 配下のファイルは TypeTree を持たずに
+ビルドされているため読み取りに必要です。Unity 標準クラスの定義のみを含むもので、ゲーム独自の
+コードとは無関係です。[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
 
 ## ビルド
 

@@ -37,9 +37,11 @@ Early development. See the roadmap below for what exists today.
 
 - Windows x64
 - .NET 10 SDK (to build)
-- `classdata.tpk` — Unity's engine class database, required to read files under `*_Data`
-  because those are built without a TypeTree. Place it next to the executable. It describes
-  stock Unity classes only and has nothing to do with the game's own code.
+
+`classdata.tpk`, Unity's engine class database, is bundled in `third_party/` and copied next to
+the executable at build time. It is needed because the files under `*_Data` are built without a
+TypeTree. It describes stock Unity classes only and has nothing to do with the game's own code.
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Build
 

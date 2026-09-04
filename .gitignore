@@ -4,8 +4,6 @@ obj/
 .idea/
 *.user
 
-# Engine class database — redistribution terms not yet cleared; keep it out of the repo for now.
-classdata.tpk
 
 # Local index cache and mod working directories
 *.db
