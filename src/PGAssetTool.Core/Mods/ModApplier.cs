@@ -21,6 +21,9 @@ public sealed record ReconcileResult(
 /// already-modified bundles would stack changes; rebuilding from the originals avoids both.
 public sealed class ModApplier(GameInstallation game, ModStore store)
 {
+    /// Accept a bundle that is already modified as the baseline for its backup.
+    public bool Force { get; init; }
+
     public ReconcileResult Install(string packPath, string gameVersion)
     {
         var manifest = PackBuilder.ReadManifest(packPath);
@@ -122,6 +125,16 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 }
 
                 var live = Path.Combine(game.BundlesDirectory, group.Key, hash, group.Key);
+
+                // Backing up a bundle something else already edited would record that edit as the
+                // original, leaving no way back to the shipped file.
+                if (!store.HasBackup(group.Key, hash) && !BundleIntegrity.IsPristine(live, hash) && !Force)
+                {
+                    failed.Add($"{mod.Id}: '{group.Key}' has already been modified by something else "
+                        + "and there is no backup of it. Restore it, or pass --force to accept its "
+                        + "current contents as the original.");
+                    continue;
+                }
                 store.Backup(group.Key, hash, live);
 
                 var rewritten = Path.Combine(staging.FullName, group.Key);

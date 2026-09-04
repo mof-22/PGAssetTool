@@ -88,6 +88,22 @@ public class ModStoreTests : IDisposable
     }
 
     [Fact]
+    public void ABundleIsPristineWhileItsContentStillMatchesItsCacheDirectory()
+    {
+        // The game names each bundle's cache directory after the file's MD5, which is what makes
+        // "has something else already edited this?" answerable at all.
+        var path = Path.Combine(_root, "sample");
+        File.WriteAllText(path, "shipped bytes");
+        var hash = BundleIntegrity.Md5(path);
+
+        Assert.True(BundleIntegrity.IsPristine(path, hash));
+        Assert.True(BundleIntegrity.IsPristine(path, hash.ToUpperInvariant()));
+
+        File.AppendAllText(path, "!");
+        Assert.False(BundleIntegrity.IsPristine(path, hash));
+    }
+
+    [Fact]
     public void InstalledModsRoundTrip()
     {
         _store.Write([

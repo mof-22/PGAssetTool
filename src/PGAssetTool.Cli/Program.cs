@@ -35,6 +35,7 @@ if (command is "-h" or "--help" or "help")
                                extract are included.
 
           apply <pack>         Install a .pgmod into the game.
+          verify               Check every bundle against the hash the game recorded for it.
           mods                 List installed mods.
           enable <id>          Turn a mod back on.
           disable <id>         Turn a mod off without uninstalling it.
@@ -45,6 +46,7 @@ if (command is "-h" or "--help" or "help")
           --language <bundle>  Localization bundle to read names from (default l_en-gb).
           --out <directory>    Where extract writes (default ./workspace).
           --author <name>      Recorded in the manifest by extract --workspace.
+          --force              Let apply back up a bundle that is already modified.
         """);
     return 0;
 }
@@ -98,10 +100,35 @@ if (command == "info")
     return 0;
 }
 
+if (command == "verify")
+{
+    var store = new ModStore(game);
+    var expected = store.Read().SelectMany(m => m.TouchedBundles.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var modified = new List<(string Bundle, bool Known)>();
+    var missing = 0;
+
+    foreach (var entry in game.ReadManifest())
+    {
+        var path = entry.PathUnder(game.BundlesDirectory);
+        if (!File.Exists(path)) { missing++; continue; }
+        if (!BundleIntegrity.IsPristine(path, entry.Hash))
+            modified.Add((entry.Name, expected.Contains(entry.Name)));
+    }
+
+    Console.WriteLine($"{modified.Count} bundle(s) differ from the hash the game recorded for them"
+        + (missing > 0 ? $", {missing} not downloaded" : "") + ".");
+    foreach (var (bundle, known) in modified.OrderBy(m => m.Bundle))
+        Console.WriteLine($"  {TextColumn.Pad(bundle, 40)} {(known ? "modified by an installed mod" : "modified by something else")}");
+    if (modified.Any(m => !m.Known))
+        Console.WriteLine("\nBundles in the second group have no backup here. Verify the game's files "
+            + "through Steam before installing mods over them.");
+    return 0;
+}
+
 if (command is "apply" or "mods" or "enable" or "disable" or "remove")
 {
     var store = new ModStore(game);
-    var applier = new ModApplier(game, store);
+    var applier = new ModApplier(game, store) { Force = args.Contains("--force") };
 
     if (command == "mods")
     {
