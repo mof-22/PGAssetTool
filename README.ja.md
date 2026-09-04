@@ -51,12 +51,30 @@ dotnet build -c Release
 
 ## 使い方
 
+リポジトリのルートで `dotnet run` を使うと、出力先のパスを打たずに実行できます。
+
 ```
-pgassettool info [--game <ディレクトリ>]
+dotnet run --project src/PGAssetTool.Cli -- <コマンド>
 ```
 
-`--game` には想定のディレクトリ構成を持つ任意の場所を指定できます。実際のインストール先ではなく
-コピーしたデータを対象にして安全に検証できます。
+ビルドされた実行ファイルを直接呼びたい場合は
+`src/PGAssetTool.Cli/bin/Release/net10.0-windows/win-x64/pgassettool.exe` にあります。
+
+| コマンド | 内容 |
+| --- | --- |
+| `info` | 検出したインストール先とバージョンを表示します。 |
+| `weapons [<絞り込み>]` | 武器を一覧表示します。スラッグ・タグ・プレハブ名で絞り込めます。 |
+| `show <武器>` | 武器1件と、それが参照している全てを表示します。番号・プレハブ名（`Weapon25`）・スラッグ（`Beretta`）のいずれでも指定できます。 |
+
+```
+dotnet run --project src/PGAssetTool.Cli -- info
+dotnet run --project src/PGAssetTool.Cli -- weapons crystal
+dotnet run --project src/PGAssetTool.Cli -- show 25
+```
+
+`--game <ディレクトリ>` には想定の構成を持つ任意の場所を指定できます。実際のインストール先では
+なくコピーしたデータを対象にして安全に検証できます。`--language <バンドル>` で名前を読み取る
+ローカライズバンドルを選べます（既定は `l_en-gb`）。
 
 ## ライセンス
 

@@ -51,12 +51,31 @@ dotnet build -c Release
 
 ## Usage
 
+Run it from the repository root with `dotnet run`, which avoids typing the output path:
+
 ```
-pgassettool info [--game <directory>]
+dotnet run --project src/PGAssetTool.Cli -- <command>
 ```
 
-`--game` accepts any directory with the expected layout, so you can point the tool at a copy of
-the game data instead of the live installation.
+The built executable is at
+`src/PGAssetTool.Cli/bin/Release/net10.0-windows/win-x64/pgassettool.exe` if you would rather call
+it directly.
+
+| Command | What it does |
+| --- | --- |
+| `info` | Show the detected installation and version. |
+| `weapons [<filter>]` | List weapons, optionally filtered by slug, tag or prefab name. |
+| `show <weapon>` | Show one weapon and everything it references. Accepts a number, a prefab name (`Weapon25`) or a slug (`Beretta`). |
+
+```
+dotnet run --project src/PGAssetTool.Cli -- info
+dotnet run --project src/PGAssetTool.Cli -- weapons crystal
+dotnet run --project src/PGAssetTool.Cli -- show 25
+```
+
+`--game <directory>` accepts any directory with the expected layout, so you can point the tool at a
+copy of the game data instead of the live installation. `--language <bundle>` selects the
+localization bundle names are read from (default `l_en-gb`).
 
 ## License
 
