@@ -18,9 +18,12 @@ public static class Workspace
         ["png"] = PackOperations.ReplaceTexture,
     };
 
+    /// `alreadyModified` marks a workspace whose files are the modification rather than a starting
+    /// point — the output of converting someone's existing mod, say. Those carry no baseline, so
+    /// packing takes them as they are instead of waiting for an edit that already happened.
     public static PackManifest Create(
         string directory, string id, string name, string author, string? gameVersion,
-        IEnumerable<ExportedAsset> assets)
+        IEnumerable<ExportedAsset> assets, bool alreadyModified = false)
     {
         var operations = new List<PackOperation>();
         foreach (var asset in assets)
@@ -33,7 +36,7 @@ public static class Workspace
                 Op = op,
                 Target = asset.Address,
                 Source = Relative(directory, asset.Path),
-                BaselineSha256 = HashFile(asset.Path),
+                BaselineSha256 = alreadyModified ? null : HashFile(asset.Path),
             });
         }
 

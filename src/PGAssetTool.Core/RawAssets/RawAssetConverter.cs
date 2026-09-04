@@ -1,6 +1,7 @@
 using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Export;
+using PGAssetTool.Core.Pack;
 
 namespace PGAssetTool.Core.RawAssets;
 
@@ -18,6 +19,19 @@ public sealed record ConversionResult(
 public sealed class RawAssetConverter(BundleSet bundles, CabIndex cabs)
 {
     private readonly AssetExporter _exporter = new(bundles);
+
+    /// Converts a set and writes a pack manifest over the result, so an existing mod becomes a
+    /// packable workspace in one step. The converted files are the modification already, so they
+    /// are recorded without a baseline: there is no edit still to come.
+    public PackManifest ConvertToWorkspace(
+        IEnumerable<RawAssetFile> sources, string outputDirectory, string id, string author,
+        string? gameVersion, Action<RawAssetFile, Exception> onError, out List<ConversionResult> results)
+    {
+        results = ConvertAll(sources, outputDirectory, onError).ToList();
+        return Workspace.Create(
+            outputDirectory, id, name: id, author: author, gameVersion: gameVersion,
+            assets: results.SelectMany(r => r.Written), alreadyModified: true);
+    }
 
     /// Converts a set together, so names shared by more than one asset can be qualified with the
     /// path id instead of silently overwriting each other.

@@ -36,7 +36,8 @@ if (command is "-h" or "--help" or "help")
                                extract are included.
 
           convert <path>       Turn raw .dat assets exported by an asset editor into editable
-                               formats, recovering each one's type from the game.
+                               formats, recovering each one's type from the game. The result
+                               is a packable workspace.
 
           apply <pack>         Install a .pgmod into the game.
           verify               Check every bundle against the hash the game recorded for it.
@@ -124,19 +125,35 @@ if (command == "convert")
 
     var destination = Option("out") ?? Path.Combine(Path.GetFullPath(input), "converted");
     var converter = new RawAssetConverter(bundles, CabIndex.Build(bundles));
-    int converted = 0;
+    var id = Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(input)));
 
-    foreach (var result in converter.ConvertAll(sources, destination,
-                 (source, ex) => Console.Error.WriteLine($"  {TextColumn.Pad(source.Name, 34)} {ex.Message}")))
-    {
+    var manifest = converter.ConvertToWorkspace(
+        sources, destination, id,
+        author: Option("author") ?? "",
+        gameVersion: bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null,
+        onError: (source, ex) => Console.Error.WriteLine($"  {TextColumn.Pad(source.Name, 34)} {ex.Message}"),
+        results: out var results);
+
+    foreach (var result in results)
         foreach (var asset in result.Written)
             Console.WriteLine($"  {TextColumn.Pad(result.Source.Name, 34)} {result.Class,-12} "
                 + $"@ {TextColumn.Pad(result.Bundle, 12)} -> {Path.GetFileName(asset.Path)}");
-        converted++;
-    }
 
-    Console.WriteLine($"\n{converted} of {sources.Count} converted into {destination}");
-    return converted == sources.Count ? 0 : 1;
+    Console.WriteLine($"\n{results.Count} of {sources.Count} converted into {destination}");
+    Console.WriteLine($"{PackManifest.FileName} has {manifest.Operations.Count} operation(s).");
+
+    var unusable = results.SelectMany(r => r.Written)
+        .Where(a => !manifest.Operations.Any(o => o.Source == Path.GetFileName(a.Path)))
+        .Select(a => $"{Path.GetFileName(a.Path)} ({a.Class})")
+        .ToList();
+    if (unusable.Count > 0)
+    {
+        Console.WriteLine($"\nLeft out, because nothing can write these back yet:");
+        foreach (var name in unusable.Take(8)) Console.WriteLine($"  {name}");
+        if (unusable.Count > 8) Console.WriteLine($"  and {unusable.Count - 8} more");
+    }
+    Console.WriteLine($"\n  pgassettool pack \"{destination}\"");
+    return results.Count == sources.Count ? 0 : 1;
 }
 
 if (command == "verify")

@@ -96,6 +96,34 @@ public class PackTests : IDisposable
     }
 
     [Fact]
+    public void AWorkspaceOfAlreadyModifiedFilesPacksWithoutBeingEdited()
+    {
+        // Converting an existing mod produces files that are the modification already. Waiting for
+        // an edit that has happened would leave nothing to pack.
+        var path = System.IO.Path.Combine(_workspace, "a.png");
+        File.WriteAllText(path, "the mod's own artwork");
+        File.WriteAllText(System.IO.Path.Combine(_workspace, PackManifest.FileName),
+            new PackManifest
+            {
+                Id = "converted",
+                Name = "converted",
+                Operations =
+                [
+                    new PackOperation
+                    {
+                        Op = PackOperations.ReplaceTexture,
+                        Target = new AssetAddress("ecw_0", "Texture2D", "a", 0, 1),
+                        Source = "a.png",
+                        BaselineSha256 = null,
+                    },
+                ],
+            }.ToJson());
+
+        var output = System.IO.Path.Combine(_workspace, "out.pgmod");
+        Assert.Equal(1, PackBuilder.Build(_workspace, output).Operations);
+    }
+
+    [Fact]
     public void APackFromAFutureFormatIsRefused()
     {
         var json = new PackManifest { Id = "x", Name = "x", FormatVersion = PackManifest.CurrentFormatVersion + 1 }
