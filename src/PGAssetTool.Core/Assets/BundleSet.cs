@@ -51,5 +51,21 @@ public sealed class BundleSet : IDisposable
         return null;
     }
 
+    /// Texture and audio payloads are not stored in the serialized object; they sit in a sibling
+    /// .resS or .resource entry that the object points into. This reads that slice.
+    public byte[] ReadResource(string bundle, string sourcePath, long offset, long size)
+    {
+        var wanted = Path.GetFileName(sourcePath);
+        var file = _context.OpenBundle(PathOf(bundle));
+        foreach (var entry in file.file.BlockAndDirInfo.DirectoryInfos)
+        {
+            if (!string.Equals(entry.Name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+            var reader = file.file.DataReader;
+            reader.Position = entry.Offset + offset;
+            return reader.ReadBytes((int)size);
+        }
+        throw new FileNotFoundException($"Bundle '{bundle}' has no stream entry '{wanted}'.");
+    }
+
     public void Dispose() => _context.Dispose();
 }

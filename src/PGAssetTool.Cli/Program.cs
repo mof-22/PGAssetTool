@@ -3,6 +3,7 @@ using System.Text;
 using PGAssetTool.Cli;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
+using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Weapons;
 
@@ -25,9 +26,13 @@ if (command is "-h" or "--help" or "help")
                                number (819), a prefab name (Weapon1257) or a slug. Note that the
                                in-game number and the prefab number are different sequences.
 
+          extract <weapon>     Write out everything belonging to a weapon: images as PNG, audio as
+                               WAV, the object graph as JSON.
+
         Options:
           --game <directory>   Use this installation instead of the detected one.
           --language <bundle>  Localization bundle to read names from (default l_en-gb).
+          --out <directory>    Where extract writes (default ./workspace).
         """);
     return 0;
 }
@@ -57,7 +62,7 @@ if (command == "info")
     return 0;
 }
 
-if (command is not ("weapons" or "show"))
+if (command is not ("weapons" or "show" or "extract"))
 {
     Console.Error.WriteLine($"Unknown command '{command}'. Try --help.");
     return 2;
@@ -95,6 +100,29 @@ if (record is null)
 }
 
 var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
+
+if (command == "extract")
+{
+    var outputRoot = Option("out") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace");
+    var export = new WeaponExporter(bundles, catalogs).Export(tree, outputRoot);
+
+    Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
+    Console.WriteLine($"  -> {export.Directory}");
+    foreach (var group in export.Assets.GroupBy(a => Path.GetDirectoryName(a.Path)).OrderBy(g => g.Key))
+    {
+        var folder = Path.GetRelativePath(export.Directory, group.Key!).Replace('\\', '/');
+        Console.WriteLine($"    {folder}/  ({group.Count()})");
+        foreach (var asset in group.OrderBy(a => a.Path))
+            Console.WriteLine($"      {TextColumn.Pad(Path.GetFileName(asset.Path), 52)} {asset.Bytes,10:N0}");
+    }
+    if (export.Skipped.Count > 0)
+    {
+        Console.WriteLine($"\n  Skipped ({export.Skipped.Count})");
+        foreach (var reason in export.Skipped.Take(10)) Console.WriteLine($"    {reason}");
+    }
+    Console.Error.WriteLine($"\n{export.Assets.Count} files, total {timer.ElapsedMilliseconds}ms");
+    return 0;
+}
 
 Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}{(record.IsHidden ? "   (hidden: no localization key, absent from the in-game list)" : "")}");
 Console.WriteLine($"  prefab {record.PrefabName}  index {record.Index}  slug {record.Slug}  tag {record.Tag}");
