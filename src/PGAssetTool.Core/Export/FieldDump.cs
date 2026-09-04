@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Nodes;
 using AssetsTools.NET;
 
@@ -8,7 +9,12 @@ namespace PGAssetTool.Core.Export;
 /// format, and the reference an author edits against when writing a field patch.
 public static class FieldDump
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+    // Bounds and curve limits are routinely stored as infinity, which JSON has no literal for.
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        WriteIndented = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+    };
 
     public static string ToJson(AssetTypeValueField field) => Convert(field).ToJsonString(Options);
 

@@ -19,8 +19,11 @@ public sealed class AssetExporter(BundleSet bundles)
 
     public ContainerIndex Index { get; } = new(bundles.Context);
 
+    /// `fileNameOverride` keeps distinct assets that share a name from overwriting each other's
+    /// output; the caller knows which names repeat and can qualify them.
     public IReadOnlyList<ExportedAsset> Export(
-        string bundle, AssetsFileInstance file, AssetFileInfo info, string directory)
+        string bundle, AssetsFileInstance file, AssetFileInfo info, string directory,
+        string? fileNameOverride = null)
     {
         Directory.CreateDirectory(directory);
         var field = bundles.Context.Deserialize(file, info);
@@ -28,7 +31,7 @@ public sealed class AssetExporter(BundleSet bundles)
         var named = field?["m_Name"] is { IsDummy: false } n && n.AsString.Length > 0 ? n.AsString : null;
         var name = named ?? $"{cls}_{info.PathId}";
         var address = Index.AddressOf(bundle, file, info, named ?? "");
-        var stem = Path.Combine(directory, Sanitize(name));
+        var stem = Path.Combine(directory, Sanitize(fileNameOverride ?? name));
 
         if (field is not null)
         {

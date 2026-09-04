@@ -3,6 +3,7 @@ using System.Text;
 using PGAssetTool.Cli;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
+using PGAssetTool.Core.RawAssets;
 using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Game;
@@ -33,6 +34,9 @@ if (command is "-h" or "--help" or "help")
                                pgmod.json naming every replaceable file.
           pack [<directory>]   Build a .pgmod from a workspace. Only files edited since the
                                extract are included.
+
+          convert <path>       Turn raw .dat assets exported by an asset editor into editable
+                               formats, recovering each one's type from the game.
 
           apply <pack>         Install a .pgmod into the game.
           verify               Check every bundle against the hash the game recorded for it.
@@ -98,6 +102,41 @@ if (command == "info")
         ? GameVersion.Read(bundles.Context, game)
         : $"unavailable ({ClassPackage.FileName} not found)")}");
     return 0;
+}
+
+if (command == "convert")
+{
+    var input = positional.FirstOrDefault();
+    if (input is null)
+    {
+        Console.Error.WriteLine("convert requires a .dat file or a directory of them.");
+        return 2;
+    }
+
+    var sources = RawAssetFile.Discover(input).ToList();
+    if (sources.Count == 0)
+    {
+        Console.Error.WriteLine(
+            $"No files in '{input}' are named '<asset>-CAB-<hash>-<pathId>.dat', which is what "
+            + "carries the information needed to recover an asset's type.");
+        return 1;
+    }
+
+    var destination = Option("out") ?? Path.Combine(Path.GetFullPath(input), "converted");
+    var converter = new RawAssetConverter(bundles, CabIndex.Build(bundles));
+    int converted = 0;
+
+    foreach (var result in converter.ConvertAll(sources, destination,
+                 (source, ex) => Console.Error.WriteLine($"  {TextColumn.Pad(source.Name, 34)} {ex.Message}")))
+    {
+        foreach (var asset in result.Written)
+            Console.WriteLine($"  {TextColumn.Pad(result.Source.Name, 34)} {result.Class,-12} "
+                + $"@ {TextColumn.Pad(result.Bundle, 12)} -> {Path.GetFileName(asset.Path)}");
+        converted++;
+    }
+
+    Console.WriteLine($"\n{converted} of {sources.Count} converted into {destination}");
+    return converted == sources.Count ? 0 : 1;
 }
 
 if (command == "verify")
