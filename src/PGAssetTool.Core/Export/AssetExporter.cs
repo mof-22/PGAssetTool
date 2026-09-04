@@ -20,10 +20,12 @@ public sealed class AssetExporter(BundleSet bundles)
     public ContainerIndex Index { get; } = new(bundles.Context);
 
     /// `fileNameOverride` keeps distinct assets that share a name from overwriting each other's
-    /// output; the caller knows which names repeat and can qualify them.
+    /// output; the caller knows which names repeat and can qualify them. `sourceBytes` is the data
+    /// the asset was actually read from, which differs from what the bundle holds when the caller
+    /// has staged a replacement over it.
     public IReadOnlyList<ExportedAsset> Export(
         string bundle, AssetsFileInstance file, AssetFileInfo info, string directory,
-        string? fileNameOverride = null)
+        string? fileNameOverride = null, byte[]? sourceBytes = null)
     {
         Directory.CreateDirectory(directory);
         var field = bundles.Context.Deserialize(file, info);
@@ -44,19 +46,40 @@ public sealed class AssetExporter(BundleSet bundles)
             if (exported is not null) return [exported with { Class = cls, Name = name, Address = address }];
         }
 
-        // No editable interchange format for this type: dump the fields so the values are readable,
-        // and keep the raw bytes so nothing is lost.
+        // No editable interchange format for this type, so dump the fields. Whether that dump holds
+        // everything is checked rather than assumed: if writing the parsed asset back reproduces the
+        // bytes it came from, nothing was lost and the raw copy would only repeat it. If it does
+        // not, the raw bytes are kept so the difference is never silently discarded.
+        var raw = sourceBytes ?? ReadRaw(file, info);
         var results = new List<ExportedAsset>();
         if (field is not null)
         {
             var jsonPath = stem + ".json";
             File.WriteAllText(jsonPath, FieldDump.ToJson(field));
             results.Add(new ExportedAsset(jsonPath, cls, name, "json", new FileInfo(jsonPath).Length, address));
+            if (Reproduces(field, raw)) return results;
         }
+
         var rawPath = stem + ".dat";
-        File.WriteAllBytes(rawPath, ReadRaw(file, info));
+        File.WriteAllBytes(rawPath, raw);
         results.Add(new ExportedAsset(rawPath, cls, name, "dat", new FileInfo(rawPath).Length, address));
         return results;
+    }
+
+    /// A raw asset can carry slack past the object — an editor that wrote a smaller asset into a
+    /// buffer sized for a larger one leaves the old tail behind — so matching the leading bytes is
+    /// what completeness means here.
+    private static bool Reproduces(AssetTypeValueField field, byte[] source)
+    {
+        try
+        {
+            var written = field.WriteToByteArray();
+            return written.Length <= source.Length && source.AsSpan(0, written.Length).SequenceEqual(written);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private ExportedAsset? ExportTexture(string bundle, AssetTypeValueField field, string stem)

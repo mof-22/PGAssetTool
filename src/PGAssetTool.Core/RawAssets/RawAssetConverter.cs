@@ -59,11 +59,12 @@ public sealed class RawAssetConverter(BundleSet bundles, CabIndex cabs)
                 $"'{bundle}' has no asset {source.PathId}. The game may have been updated since this was exported.");
 
         var cls = (AssetClassID)info.TypeId;
-        info.SetNewData(File.ReadAllBytes(source.Path));
+        var bytes = File.ReadAllBytes(source.Path);
+        info.SetNewData(bytes);
 
         try
         {
-            var written = _exporter.Export(bundle, file, info, outputDirectory, fileName);
+            var written = _exporter.Export(bundle, file, info, outputDirectory, fileName, bytes);
             return new ConversionResult(source, bundle, cls, written);
         }
         finally

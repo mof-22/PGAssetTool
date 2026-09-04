@@ -23,6 +23,12 @@ public static class FieldDump
 
     public static JsonNode Convert(AssetTypeValueField field)
     {
+        // Raw byte payloads — vertex buffers, index buffers, baked collision meshes — are arrays
+        // with no child fields. Taking the array branch would render them as [] and drop the
+        // contents without saying so, which for a mesh is the entire geometry.
+        if (field.Value?.ValueType == AssetValueType.ByteArray)
+            return new JsonObject { ["base64"] = JsonValue.Create(System.Convert.ToBase64String(field.AsByteArray)) };
+
         if (field.TemplateField.IsArray)
             return new JsonArray(field.Children.Select(Convert).ToArray());
 
@@ -52,7 +58,6 @@ public static class FieldDump
         AssetValueType.Float => JsonValue.Create(field.AsFloat),
         AssetValueType.Double => JsonValue.Create(field.AsDouble),
         AssetValueType.String => JsonValue.Create(field.AsString),
-        AssetValueType.ByteArray => JsonValue.Create($"<{field.AsByteArray.Length} bytes>"),
         _ => JsonValue.Create(field.AsString),
     };
 }
