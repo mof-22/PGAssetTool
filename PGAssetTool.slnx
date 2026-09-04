@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PGAssetTool.Cli/PGAssetTool.Cli.csproj" />
+    <Project Path="src/PGAssetTool.Core/PGAssetTool.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PGAssetTool.Core.Tests/PGAssetTool.Core.Tests.csproj" />
+  </Folder>
+</Solution>
