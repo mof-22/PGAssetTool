@@ -6,6 +6,7 @@ using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Game;
+using PGAssetTool.Core.Mods;
 using PGAssetTool.Core.Weapons;
 
 // Names come from twelve localization bundles; the Windows console defaults to a legacy code page
@@ -32,6 +33,12 @@ if (command is "-h" or "--help" or "help")
                                pgmod.json naming every replaceable file.
           pack [<directory>]   Build a .pgmod from a workspace. Only files edited since the
                                extract are included.
+
+          apply <pack>         Install a .pgmod into the game.
+          mods                 List installed mods.
+          enable <id>          Turn a mod back on.
+          disable <id>         Turn a mod off without uninstalling it.
+          remove <id>          Uninstall a mod.
 
         Options:
           --game <directory>   Use this installation instead of the detected one.
@@ -89,6 +96,61 @@ if (command == "info")
         ? GameVersion.Read(bundles.Context, game)
         : $"unavailable ({ClassPackage.FileName} not found)")}");
     return 0;
+}
+
+if (command is "apply" or "mods" or "enable" or "disable" or "remove")
+{
+    var store = new ModStore(game);
+    var applier = new ModApplier(game, store);
+
+    if (command == "mods")
+    {
+        var installed = store.Read();
+        if (installed.Count == 0) Console.WriteLine("Nothing installed.");
+        foreach (var mod in installed.OrderBy(m => m.InstalledAt))
+            Console.WriteLine($"{(mod.Enabled ? "[on ]" : "[off]")} {TextColumn.Pad(mod.Id, 28)} "
+                + $"{TextColumn.Pad(mod.Name, 30)} {mod.Version,-8} "
+                + $"{mod.TouchedBundles.Count} bundle(s), installed {mod.InstalledAt:yyyy-MM-dd} for {mod.GameVersion}");
+        Console.WriteLine($"\nBackups: {store.BackupRoot}");
+        return 0;
+    }
+
+    var target = positional.FirstOrDefault();
+    if (target is null)
+    {
+        Console.Error.WriteLine($"{command} requires " + (command == "apply" ? "a .pgmod path." : "a mod id."));
+        return 2;
+    }
+
+    try
+    {
+        var version = bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : "unknown";
+        var result = command switch
+        {
+            "apply" => applier.Install(target, version),
+            "enable" => applier.SetEnabled(target, true),
+            "disable" => applier.SetEnabled(target, false),
+            "remove" => applier.Remove(target),
+            _ => throw new UnreachableException(),
+        };
+
+        foreach (var operation in result.Applied)
+            Console.WriteLine($"  {operation.Mod}  {operation.Op}  {operation.Target}  "
+                + $"[{operation.Detail}{(operation.ResolvedByPathId ? "" : ", matched by name")}]");
+        if (result.Restored.Count > 0)
+            Console.WriteLine($"  restored from backup: {string.Join(", ", result.Restored)}");
+        if (result.PrunedBackups.Count > 0)
+            Console.WriteLine($"  removed stale backups: {string.Join(", ", result.PrunedBackups)}");
+        foreach (var failure in result.Failed) Console.Error.WriteLine($"  FAILED {failure}");
+
+        Console.WriteLine($"\n{result.Applied.Count} operation(s) applied, {result.Failed.Count} failed.");
+        return result.Failed.Count > 0 ? 1 : 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
 }
 
 if (command is not ("weapons" or "show" or "extract"))
