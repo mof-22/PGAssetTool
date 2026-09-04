@@ -96,6 +96,8 @@ var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 Console.WriteLine($"{tree.DisplayName}");
 Console.WriteLine($"  index {record.Index}  prefab {record.PrefabName}  slug {record.Slug}  tag {record.Tag}");
 Console.WriteLine();
+if (tree.Icon is not null)
+    Console.WriteLine($"  Icon     {tree.Icon.TextureName} @ {tree.Icon.Container}");
 Console.WriteLine($"  Prefab   Weapons/{record.PrefabName} @ {tree.PrefabBundle ?? "?"}");
 foreach (var group in tree.PrefabAssets.GroupBy(a => a.Class).OrderByDescending(g => g.Count()))
 {
@@ -115,6 +117,18 @@ foreach (var skin in tree.Skins)
         Console.WriteLine(hit is null
             ? $"      material  {path} @ ?"
             : $"      material  {hit.Value.Path} @ {hit.Value.Bundle}");
+    }
+}
+
+if (tree.Related.Count > 0)
+{
+    Console.WriteLine();
+    Console.WriteLine($"  Related ({tree.Related.Count})");
+    foreach (var group in tree.Related.GroupBy(r => r.Namespace))
+    {
+        Console.WriteLine($"    {group.Key} ({group.Count()})");
+        foreach (var asset in group)
+            Console.WriteLine($"      {TextColumn.Pad(asset.Path, 66)} @ {asset.Bundle ?? "?"}");
     }
 }
 

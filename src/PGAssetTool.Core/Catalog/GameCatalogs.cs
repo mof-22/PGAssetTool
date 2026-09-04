@@ -1,4 +1,4 @@
-using AssetsTools.NET;
+using System.Text.RegularExpressions;
 using PGAssetTool.Core.Assets;
 
 namespace PGAssetTool.Core.Catalog;
@@ -26,21 +26,45 @@ public sealed class GameCatalogs
 
 /// Maps a logical asset path such as "Weapons/Weapon25" to the bundle holding it. The game resolves
 /// these strings at runtime, so following binary PPtr references alone leaves the graph disconnected.
-public sealed class AssetLookup
+public sealed partial class AssetLookup
 {
     private readonly Dictionary<string, string> _bundleByPath;
+    private readonly Dictionary<int, List<string>> _pathsByWeapon;
 
-    private AssetLookup(Dictionary<string, string> bundleByPath) => _bundleByPath = bundleByPath;
+    private AssetLookup(Dictionary<string, string> bundleByPath, Dictionary<int, List<string>> pathsByWeapon)
+        => (_bundleByPath, _pathsByWeapon) = (bundleByPath, pathsByWeapon);
+
+    /// A weapon's assets are spread over a dozen namespaces, tied together only by the number in
+    /// their name. Extracting that token rather than enumerating known namespaces means namespaces
+    /// added by a future update are picked up without a code change. Rays use both spellings.
+    [GeneratedRegex(@"\b(?:Weapon|Ray)(\d+)")]
+    private static partial Regex WeaponToken { get; }
 
     public static AssetLookup Load(BundleSet bundles)
     {
         var entries = bundles.MonoBehaviour("assets_lookup_table", "*")["TableEntries"]["Array"];
         // Paths collide when compared case-insensitively; the first entry wins, as with localization.
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var byWeapon = new Dictionary<int, List<string>>();
+
         foreach (var e in entries.Children)
-            map.TryAdd(e["AssetPath"].AsString, e["BundleName"].AsString);
-        return new AssetLookup(map);
+        {
+            var path = e["AssetPath"].AsString;
+            if (!map.TryAdd(path, e["BundleName"].AsString)) continue;
+
+            foreach (Match match in WeaponToken.Matches(path))
+            {
+                if (!int.TryParse(match.Groups[1].ValueSpan, out var number)) continue;
+                if (!byWeapon.TryGetValue(number, out var list)) byWeapon[number] = list = [];
+                if (!list.Contains(path)) list.Add(path);
+            }
+        }
+        return new AssetLookup(map, byWeapon);
     }
+
+    /// Every asset path whose name carries this weapon's number, in any namespace.
+    public IReadOnlyList<string> PathsForWeapon(int weaponNumber)
+        => _pathsByWeapon.GetValueOrDefault(weaponNumber) ?? (IReadOnlyList<string>)[];
 
     /// Skin definitions store material paths relative to these roots rather than in full.
     public static readonly string[] SkinAssetRoots =

@@ -1,4 +1,5 @@
 bin/
+workspace/
 obj/
 .vs/
 .idea/

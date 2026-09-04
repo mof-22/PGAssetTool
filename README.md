@@ -28,7 +28,7 @@ Early development. See the roadmap below for what exists today.
 | Phase | Scope | State |
 | --- | --- | --- |
 | P0 | Project foundation, installation discovery, bundle and `.assets` reading | done |
-| P1 | Indexer (all bundles → SQLite), CLI item tree | next |
+| P1 | CLI item tree: catalogs, related namespaces, icons | in progress |
 | P2 | Texture extraction and replacement, mod packs, backup and toggling | planned |
 | P3 | Avalonia GUI with texture and model preview | planned |
 | P4 | `.assets` writing, sprite atlases | planned |
