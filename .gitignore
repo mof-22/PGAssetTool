@@ -9,3 +9,7 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+
+# Command output dumped while exploring. These contain game-derived data.
+*.txt
+!requirements*.txt

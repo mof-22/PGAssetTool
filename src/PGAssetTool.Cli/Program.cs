@@ -1,8 +1,14 @@
 using System.Diagnostics;
+using System.Text;
+using PGAssetTool.Cli;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Weapons;
+
+// Names come from twelve localization bundles; the Windows console defaults to a legacy code page
+// that mangles all of them.
+try { Console.OutputEncoding = Encoding.UTF8; } catch (IOException) { }
 
 var command = args.FirstOrDefault() ?? "help";
 var positional = args.Skip(1).TakeWhile(a => !a.StartsWith("--")).ToArray();
@@ -62,9 +68,11 @@ var catalogTime = timer.ElapsedMilliseconds;
 if (command == "weapons")
 {
     var filter = positional.FirstOrDefault();
-    var matches = (filter is null ? catalogs.Items.Weapons : catalogs.Items.Search(filter)).ToList();
+    var matches = (filter is null ? catalogs.Items.Weapons : catalogs.Items.Search(filter, catalogs.Localization)).ToList();
     foreach (var w in matches)
-        Console.WriteLine($"{w.WeaponNumber,5}  {catalogs.Localization.Translate(w.LocalizationKey) ?? w.Slug,-34} {w.Slug,-34} {w.Tag}");
+        Console.WriteLine($"{w.WeaponNumber,5}  "
+            + $"{TextColumn.Pad(catalogs.Localization.Translate(w.LocalizationKey) ?? w.Slug, 34)} "
+            + $"{TextColumn.Pad(w.Slug, 34)} {w.Tag}");
     Console.Error.WriteLine($"\n{matches.Count} of {catalogs.Items.Count} weapons  (catalogs {catalogTime}ms)");
     return 0;
 }

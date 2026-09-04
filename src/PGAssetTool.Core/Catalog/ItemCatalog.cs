@@ -83,8 +83,13 @@ public sealed class ItemCatalog
                    string.Equals(w.Slug, query, StringComparison.OrdinalIgnoreCase));
     }
 
-    public IEnumerable<WeaponRecord> Search(string text) => Weapons.Where(w =>
-        w.Slug.Contains(text, StringComparison.OrdinalIgnoreCase)
-        || w.Tag.Contains(text, StringComparison.OrdinalIgnoreCase)
-        || w.PrefabName.Contains(text, StringComparison.OrdinalIgnoreCase));
+    /// Matches against the slug, tag and prefab name, which are always English, plus the display
+    /// name when a localization is supplied — otherwise a search in any other language finds nothing.
+    public IEnumerable<WeaponRecord> Search(string text, Localization? localization = null)
+        => Weapons.Where(w =>
+            w.Slug.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || w.Tag.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || w.PrefabName.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || localization?.Translate(w.LocalizationKey) is { } name
+               && name.Contains(text, StringComparison.OrdinalIgnoreCase));
 }
