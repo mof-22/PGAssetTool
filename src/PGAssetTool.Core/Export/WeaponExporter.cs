@@ -60,8 +60,9 @@ public sealed class WeaponExporter(BundleSet bundles, GameCatalogs catalogs)
             {
                 var path = Path.Combine(directory, "prefab.json");
                 File.WriteAllText(path, FieldDump.ToJson(closure));
+                // The document covers the whole closure, so it has no single asset to address.
                 assets.Add(new ExportedAsset(path, AssetClassID.GameObject, tree.Record.PrefabName,
-                    "json", new FileInfo(path).Length));
+                    "json", new FileInfo(path).Length, new AssetAddress("", "", "")));
             }
         }
 
@@ -79,6 +80,21 @@ public sealed class WeaponExporter(BundleSet bundles, GameCatalogs catalogs)
         }
 
         return new WeaponExport(directory, assets, skipped);
+    }
+
+    /// Exports, then writes a pack manifest naming every replaceable file. Editing a file and
+    /// running pack turns it into a mod; untouched files are left out on their own.
+    public WeaponExport ExportAsWorkspace(WeaponTree tree, string outputRoot, string author, string? gameVersion)
+    {
+        var export = Export(tree, outputRoot);
+        Pack.Workspace.Create(
+            export.Directory,
+            id: $"{AssetExporter.Sanitize(tree.Record.Slug).ToLowerInvariant()}",
+            name: tree.DisplayName,
+            author: author,
+            gameVersion: gameVersion,
+            assets: export.Assets);
+        return export;
     }
 
     private void ExportByName(

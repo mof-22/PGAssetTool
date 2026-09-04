@@ -4,6 +4,7 @@ using PGAssetTool.Cli;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export;
+using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Weapons;
 
@@ -27,14 +28,42 @@ if (command is "-h" or "--help" or "help")
                                in-game number and the prefab number are different sequences.
 
           extract <weapon>     Write out everything belonging to a weapon: images as PNG, audio as
-                               WAV, the object graph as JSON.
+                               WAV, the object graph as JSON. With --workspace, also writes a
+                               pgmod.json naming every replaceable file.
+          pack [<directory>]   Build a .pgmod from a workspace. Only files edited since the
+                               extract are included.
 
         Options:
           --game <directory>   Use this installation instead of the detected one.
           --language <bundle>  Localization bundle to read names from (default l_en-gb).
           --out <directory>    Where extract writes (default ./workspace).
+          --author <name>      Recorded in the manifest by extract --workspace.
         """);
     return 0;
+}
+
+// Packing reads a workspace directory and nothing else, so it needs no game installation.
+if (command == "pack")
+{
+    var workspace = positional.FirstOrDefault() ?? Directory.GetCurrentDirectory();
+    var output = Option("out")
+        ?? Path.Combine(workspace, Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace)) + PackBuilder.Extension);
+    try
+    {
+        var result = PackBuilder.Build(workspace, output);
+        Console.WriteLine($"{result.Path}");
+        Console.WriteLine($"  {result.Operations} operations, {result.Bytes:N0} bytes");
+        foreach (var operation in PackBuilder.ReadManifest(result.Path).Operations)
+            Console.WriteLine($"    {operation.Op}  {operation.Target}  <- {operation.Source}");
+        if (result.Unchanged.Count > 0)
+            Console.WriteLine($"  {result.Unchanged.Count} unedited files left out.");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
 }
 
 GameInstallation game;
@@ -104,7 +133,13 @@ var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 if (command == "extract")
 {
     var outputRoot = Option("out") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace");
-    var export = new WeaponExporter(bundles, catalogs).Export(tree, outputRoot);
+    var exporter = new WeaponExporter(bundles, catalogs);
+    var asWorkspace = args.Contains("--workspace");
+    var export = asWorkspace
+        ? exporter.ExportAsWorkspace(tree, outputRoot,
+            Option("author") ?? "",
+            bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null)
+        : exporter.Export(tree, outputRoot);
 
     Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
     Console.WriteLine($"  -> {export.Directory}");
@@ -119,6 +154,14 @@ if (command == "extract")
     {
         Console.WriteLine($"\n  Skipped ({export.Skipped.Count})");
         foreach (var reason in export.Skipped.Take(10)) Console.WriteLine($"    {reason}");
+    }
+    if (asWorkspace)
+    {
+        var manifest = Workspace.Read(export.Directory);
+        Console.WriteLine();
+        Console.WriteLine($"  {PackManifest.FileName} lists {manifest.Operations.Count} replaceable files.");
+        Console.WriteLine("  Edit any of them, then run:");
+        Console.WriteLine($"    pgassettool pack \"{export.Directory}\"");
     }
     Console.Error.WriteLine($"\n{export.Assets.Count} files, total {timer.ElapsedMilliseconds}ms");
     return 0;
