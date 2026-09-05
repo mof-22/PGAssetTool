@@ -89,4 +89,27 @@ public class Fsb5WriterTests
         Assert.Throws<NotSupportedException>(
             () => Fsb5Writer.Write(new short[600], channels: 6, frequency: 44100, "surround"));
     }
+
+    [Theory]
+    [InlineData(1, 44100)]
+    [InlineData(1, 31000)]   // the rate the game's own weapon sounds use, which needs a chunk
+    [InlineData(2, 48000)]
+    public void FmodReadsBackEverySampleThatWentIn(int channels, int frequency)
+    {
+        // Fmod5Sharp is the same parser the exporter uses, so this is the bank going out through the
+        // door it will come back in through.
+        var samples = new short[1500 * channels];
+        for (int i = 0; i < samples.Length; i++) samples[i] = (short)(i * 37 % 60000 - 30000);
+
+        var fsb = Fsb5Writer.Write(samples, channels, frequency, "round_trip");
+
+        Assert.True(Fmod5Sharp.FsbLoader.TryLoadFsbFromByteArray(fsb, out var bank));
+        var sample = Assert.Single(bank!.Samples);
+        Assert.Equal(channels, (int)sample.Metadata.Channels);
+        Assert.Equal(frequency, (int)sample.Metadata.Frequency);
+        Assert.Equal(1500, (int)sample.Metadata.SampleCount);
+
+        Assert.True(sample.RebuildAsStandardFileFormat(out var wav, out _));
+        Assert.Equal(samples, WaveFile.Parse(wav!, "round_trip.wav").Samples[..samples.Length]);
+    }
 }

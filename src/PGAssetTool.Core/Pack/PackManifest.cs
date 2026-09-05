@@ -8,6 +8,7 @@ public static class PackOperations
 {
     public const string ReplaceTexture = "replaceTexture";
     public const string ReplaceMesh = "replaceMesh";
+    public const string ReplaceAudio = "replaceAudio";
 }
 
 public sealed record PackOperation

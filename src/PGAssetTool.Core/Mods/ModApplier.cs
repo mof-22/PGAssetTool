@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Game;
+using PGAssetTool.Core.Import.Audio;
 using PGAssetTool.Core.Import.Meshes;
 using PGAssetTool.Core.Pack;
 
@@ -200,6 +201,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 {
                     PackOperations.ReplaceTexture => TextureImporter.Replace(field, source),
                     PackOperations.ReplaceMesh => MeshImporter.Replace(field, GltfMeshReader.Read(source)),
+                    PackOperations.ReplaceAudio => AudioImporter.Replace(field, source, (into, bank) => editor.AppendToStream(into, bank)),
                     _ => throw new NotSupportedException($"unknown operation '{operation.Op}'"),
                 };
                 editor.Stage(info, field);

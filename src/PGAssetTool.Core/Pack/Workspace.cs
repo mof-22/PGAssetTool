@@ -17,6 +17,7 @@ public static class Workspace
     {
         ["png"] = PackOperations.ReplaceTexture,
         ["glb"] = PackOperations.ReplaceMesh,
+        ["wav"] = PackOperations.ReplaceAudio,
     };
 
     /// `alreadyModified` marks a workspace whose files are the modification rather than a starting
