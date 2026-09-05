@@ -80,8 +80,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         foreach (var bundle in mods.SelectMany(m => m.TouchedBundles.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!hashes.TryGetValue(bundle, out var hash)) continue;
-            var live = Path.Combine(game.BundlesDirectory, bundle, hash, bundle);
-            if (store.RestoreIfBackedUp(bundle, hash, live)) restored.Add(bundle);
+            if (game.Resolve(bundle, hash) is not { } resolved) continue;
+            if (store.RestoreIfBackedUp(resolved.Cache, bundle, hash, resolved.Path))
+                restored.Add($"{bundle} ({resolved.Cache})");
         }
 
         var touchedByMod = new Dictionary<string, Dictionary<string, string>>();
@@ -124,18 +125,25 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                     continue;
                 }
 
-                var live = Path.Combine(game.BundlesDirectory, group.Key, hash, group.Key);
+                // Only the copy the game would actually load is worth writing to. Editing the shipped
+                // copy of a bundle the downloaded cache claims changes nothing and says nothing.
+                if (game.Resolve(group.Key, hash) is not { } resolved)
+                {
+                    failed.Add($"{mod.Id}: no copy of '{group.Key}' is present in any cache");
+                    continue;
+                }
+                var (cache, live) = (resolved.Cache, resolved.Path);
 
                 // Backing up a bundle something else already edited would record that edit as the
                 // original, leaving no way back to the shipped file.
-                if (!store.HasBackup(group.Key, hash) && !BundleIntegrity.IsPristine(live, hash) && !Force)
+                if (!store.HasBackup(cache, group.Key, hash) && !BundleIntegrity.IsPristine(live, hash) && !Force)
                 {
-                    failed.Add($"{mod.Id}: '{group.Key}' has already been modified by something else "
-                        + "and there is no backup of it. Restore it, or pass --force to accept its "
-                        + "current contents as the original.");
+                    failed.Add($"{mod.Id}: '{group.Key}' in the {cache.ToString().ToLowerInvariant()} cache "
+                        + "has already been modified by something else and there is no backup of it. "
+                        + "Restore it, or pass --force to accept its contents as the original.");
                     continue;
                 }
-                store.Backup(group.Key, hash, live);
+                store.Backup(cache, group.Key, hash, live);
 
                 var rewritten = Path.Combine(staging.FullName, group.Key);
                 if (!EditBundle(mod, live, rewritten, group, archive, staging.FullName, applied, failed)) continue;

@@ -95,22 +95,22 @@ public sealed class ModStore
 
     /// Backups are filed under the bundle's hash, so a backup taken before an update stays
     /// distinguishable from the version that replaced it.
-    public string BackupPathFor(string bundle, string hash)
-        => Path.Combine(BackupRoot, bundle, hash, bundle);
+    public string BackupPathFor(CacheKind cache, string bundle, string hash)
+        => Path.Combine(BackupRoot, cache.ToString().ToLowerInvariant(), bundle, hash, bundle);
 
-    public bool HasBackup(string bundle, string hash) => File.Exists(BackupPathFor(bundle, hash));
+    public bool HasBackup(CacheKind cache, string bundle, string hash) => File.Exists(BackupPathFor(cache, bundle, hash));
 
-    public void Backup(string bundle, string hash, string livePath)
+    public void Backup(CacheKind cache, string bundle, string hash, string livePath)
     {
-        var destination = BackupPathFor(bundle, hash);
+        var destination = BackupPathFor(cache, bundle, hash);
         if (File.Exists(destination)) return;
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         File.Copy(livePath, destination);
     }
 
-    public bool RestoreIfBackedUp(string bundle, string hash, string livePath)
+    public bool RestoreIfBackedUp(CacheKind cache, string bundle, string hash, string livePath)
     {
-        var source = BackupPathFor(bundle, hash);
+        var source = BackupPathFor(cache, bundle, hash);
         if (!File.Exists(source)) return false;
         File.Copy(source, livePath, overwrite: true);
         return true;
@@ -118,23 +118,38 @@ public sealed class ModStore
 
     /// A game update replaces a bundle and gives it a new hash directory. The modified copy under
     /// the old hash and the backup beside it are both dead weight at that point.
-    public IReadOnlyList<string> PruneStaleBackups(IReadOnlyDictionary<string, string> currentHashes)
+    ///
+    /// Which hash counts as current depends on the cache: the shipped copy follows the manifest, the
+    /// downloaded one follows its own ledger, and the two can disagree.
+    public IReadOnlyList<string> PruneStaleBackups(IReadOnlyDictionary<string, string> manifestHashes)
     {
         if (!Directory.Exists(BackupRoot)) return [];
 
         var removed = new List<string>();
-        foreach (var bundleDirectory in Directory.GetDirectories(BackupRoot))
+        foreach (var cacheDirectory in Directory.GetDirectories(BackupRoot))
         {
-            var bundle = Path.GetFileName(bundleDirectory);
-            currentHashes.TryGetValue(bundle, out var currentHash);
-            foreach (var hashDirectory in Directory.GetDirectories(bundleDirectory))
+            var cacheName = Path.GetFileName(cacheDirectory);
+            var downloaded = string.Equals(cacheName, nameof(CacheKind.Downloaded),
+                StringComparison.OrdinalIgnoreCase);
+
+            foreach (var bundleDirectory in Directory.GetDirectories(cacheDirectory))
             {
-                if (Path.GetFileName(hashDirectory) == currentHash) continue;
-                Directory.Delete(hashDirectory, recursive: true);
-                removed.Add($"{bundle}/{Path.GetFileName(hashDirectory)}");
+                var bundle = Path.GetFileName(bundleDirectory);
+                var current = downloaded
+                    ? _game.Downloaded?.Claimed.GetValueOrDefault(bundle)
+                    : manifestHashes.GetValueOrDefault(bundle);
+
+                foreach (var hashDirectory in Directory.GetDirectories(bundleDirectory))
+                {
+                    if (Path.GetFileName(hashDirectory) == current) continue;
+                    Directory.Delete(hashDirectory, recursive: true);
+                    removed.Add($"{cacheName}/{bundle}/{Path.GetFileName(hashDirectory)}");
+                }
+                if (Directory.GetFileSystemEntries(bundleDirectory).Length == 0)
+                    Directory.Delete(bundleDirectory);
             }
-            if (Directory.GetFileSystemEntries(bundleDirectory).Length == 0)
-                Directory.Delete(bundleDirectory);
+            if (Directory.GetFileSystemEntries(cacheDirectory).Length == 0)
+                Directory.Delete(cacheDirectory);
         }
         return removed;
     }

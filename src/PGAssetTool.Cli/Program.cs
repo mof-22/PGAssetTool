@@ -97,7 +97,17 @@ using var bundles = new BundleSet(game);
 if (command == "info")
 {
     Console.WriteLine($"Install    {game.RootDirectory}");
-    Console.WriteLine($"Bundles    {bundles.BundleNames.Count}");
+    Console.WriteLine($"Bundles    {bundles.BundleNames.Count} in the manifest");
+    Console.WriteLine($"Shipped    {game.BundlesDirectory}");
+    if (game.Downloaded is { } dl)
+    {
+        Console.WriteLine($"Downloaded {dl.Claimed.Count} claimed  {dl.BundlesDirectory}");
+        var broken = dl.ClaimedButMissing().ToList();
+        if (broken.Count > 0)
+            Console.WriteLine($"           {broken.Count} claimed with no file; the game logs a read "
+                + "failure for each and falls back to the shipped copy");
+    }
+    else Console.WriteLine("Downloaded none yet; everything loads from the shipped cache");
     Console.WriteLine($"Data files {game.EnumerateSerializedFiles().Count()}");
     Console.WriteLine($"Version    {(bundles.Context.HasClassDatabase
         ? GameVersion.Read(bundles.Context, game)
@@ -163,13 +173,16 @@ if (command == "verify")
     var modified = new List<(string Bundle, bool Known)>();
     var missing = 0;
 
+    var fromDownloaded = 0;
     foreach (var entry in game.ReadManifest())
     {
-        var path = entry.PathUnder(game.BundlesDirectory);
-        if (!File.Exists(path)) { missing++; continue; }
-        if (!BundleIntegrity.IsPristine(path, entry.Hash))
+        if (game.Resolve(entry.Name, entry.Hash) is not { } resolved) { missing++; continue; }
+        if (resolved.Cache == CacheKind.Downloaded) fromDownloaded++;
+        if (!BundleIntegrity.IsPristine(resolved.Path, entry.Hash))
             modified.Add((entry.Name, expected.Contains(entry.Name)));
     }
+    if (fromDownloaded > 0)
+        Console.WriteLine($"{fromDownloaded} bundle(s) load from the downloaded cache rather than the shipped one.");
 
     Console.WriteLine($"{modified.Count} bundle(s) differ from the hash the game recorded for them"
         + (missing > 0 ? $", {missing} not downloaded" : "") + ".");

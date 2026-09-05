@@ -10,14 +10,29 @@ public sealed record BundleEntry(string Name, string Hash)
 
 /// A game installation on disk. Accepts any directory with the expected layout, so a copy of the
 /// game data can be used instead of the live install.
+public enum CacheKind
+{
+    /// Shipped with the game under StreamingAssets.
+    Shipped,
+
+    /// Downloaded into the player's profile at runtime. Takes precedence.
+    Downloaded,
+}
+
+public sealed record ResolvedBundle(CacheKind Cache, string Path);
+
 public sealed class GameInstallation
 {
     public string RootDirectory { get; }
     public string DataDirectory { get; }
     public string BundlesDirectory { get; }
 
-    private GameInstallation(string root, string data, string bundles)
-        => (RootDirectory, DataDirectory, BundlesDirectory) = (root, data, bundles);
+    /// Present once the game has downloaded anything. Its ledger decides which copy of a bundle is
+    /// live, so resolution has to go through it rather than assuming the shipped copy.
+    public DownloadedBundleCache? Downloaded { get; }
+
+    private GameInstallation(string root, string data, string bundles, DownloadedBundleCache? downloaded)
+        => (RootDirectory, DataDirectory, BundlesDirectory, Downloaded) = (root, data, bundles, downloaded);
 
     public static GameInstallation Open(string rootDirectory)
     {
@@ -27,7 +42,28 @@ public sealed class GameInstallation
         var bundles = Path.Combine(data, "StreamingAssets", "Cache", "bundles");
         if (!Directory.Exists(bundles))
             throw new DirectoryNotFoundException($"Bundle cache not found at '{bundles}'.");
-        return new GameInstallation(root, data, bundles);
+        return new GameInstallation(root, data, bundles, DownloadedBundleCache.Find(data));
+    }
+
+    /// Opens with a specific downloaded cache instead of the one under the player's profile, for
+    /// tests and for pointing at a copy of it.
+    public static GameInstallation OpenWith(string rootDirectory, DownloadedBundleCache? downloaded)
+    {
+        var opened = Open(rootDirectory);
+        return new GameInstallation(
+            opened.RootDirectory, opened.DataDirectory, opened.BundlesDirectory, downloaded);
+    }
+
+    /// Where the game would load this bundle from. The downloaded cache wins when its ledger claims
+    /// the bundle and the file is really there; a claim with no file makes the game log an error and
+    /// fall back, so that case resolves to the shipped copy too.
+    public ResolvedBundle? Resolve(string bundle, string hash)
+    {
+        if (Downloaded?.ClaimedPath(bundle) is { } claimed && File.Exists(claimed))
+            return new ResolvedBundle(CacheKind.Downloaded, claimed);
+
+        var shipped = Path.Combine(BundlesDirectory, bundle, hash, bundle);
+        return File.Exists(shipped) ? new ResolvedBundle(CacheKind.Shipped, shipped) : null;
     }
 
     public static GameInstallation OpenDetected()

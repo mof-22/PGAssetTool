@@ -64,10 +64,10 @@ public class ModStoreTests : IDisposable
     public void BackupAndRestoreReturnTheOriginalBytes()
     {
         var live = WriteLiveBundle("woi_0", "aaa", "original");
-        _store.Backup("woi_0", "aaa", live);
+        _store.Backup(CacheKind.Shipped, "woi_0", "aaa", live);
         File.WriteAllText(live, "modified");
 
-        Assert.True(_store.RestoreIfBackedUp("woi_0", "aaa", live));
+        Assert.True(_store.RestoreIfBackedUp(CacheKind.Shipped, "woi_0", "aaa", live));
         Assert.Equal("original", File.ReadAllText(live));
     }
 
@@ -75,11 +75,11 @@ public class ModStoreTests : IDisposable
     public void BackingUpTwiceKeepsTheFirstCopy()
     {
         var live = WriteLiveBundle("woi_0", "aaa", "original");
-        _store.Backup("woi_0", "aaa", live);
+        _store.Backup(CacheKind.Shipped, "woi_0", "aaa", live);
         File.WriteAllText(live, "modified");
-        _store.Backup("woi_0", "aaa", live);
+        _store.Backup(CacheKind.Shipped, "woi_0", "aaa", live);
 
-        _store.RestoreIfBackedUp("woi_0", "aaa", live);
+        _store.RestoreIfBackedUp(CacheKind.Shipped, "woi_0", "aaa", live);
         Assert.Equal("original", File.ReadAllText(live));
     }
 
@@ -87,27 +87,27 @@ public class ModStoreTests : IDisposable
     public void RestoringWithoutABackupSaysSo()
     {
         var live = WriteLiveBundle("woi_0", "aaa", "original");
-        Assert.False(_store.RestoreIfBackedUp("woi_0", "bbb", live));
+        Assert.False(_store.RestoreIfBackedUp(CacheKind.Shipped, "woi_0", "bbb", live));
     }
 
     [Fact]
     public void BackupsAreFiledUnderTheBundleVersionTheyCameFrom()
     {
         var oldLive = WriteLiveBundle("woi_0", "aaa", "v1");
-        _store.Backup("woi_0", "aaa", oldLive);
+        _store.Backup(CacheKind.Shipped, "woi_0", "aaa", oldLive);
         var newLive = WriteLiveBundle("woi_0", "bbb", "v2");
-        _store.Backup("woi_0", "bbb", newLive);
+        _store.Backup(CacheKind.Shipped, "woi_0", "bbb", newLive);
 
-        Assert.True(_store.HasBackup("woi_0", "aaa"));
-        Assert.True(_store.HasBackup("woi_0", "bbb"));
+        Assert.True(_store.HasBackup(CacheKind.Shipped, "woi_0", "aaa"));
+        Assert.True(_store.HasBackup(CacheKind.Shipped, "woi_0", "bbb"));
     }
 
     [Fact]
     public void AnUpdateLeavesTheBackupForTheSupersededVersionToBePruned()
     {
-        _store.Backup("woi_0", "aaa", WriteLiveBundle("woi_0", "aaa", "v1"));
-        _store.Backup("woi_0", "bbb", WriteLiveBundle("woi_0", "bbb", "v2"));
-        _store.Backup("bhlw", "ccc", WriteLiveBundle("bhlw", "ccc", "unchanged"));
+        _store.Backup(CacheKind.Shipped, "woi_0", "aaa", WriteLiveBundle("woi_0", "aaa", "v1"));
+        _store.Backup(CacheKind.Shipped, "woi_0", "bbb", WriteLiveBundle("woi_0", "bbb", "v2"));
+        _store.Backup(CacheKind.Shipped, "bhlw", "ccc", WriteLiveBundle("bhlw", "ccc", "unchanged"));
 
         var pruned = _store.PruneStaleBackups(new Dictionary<string, string>
         {
@@ -115,10 +115,10 @@ public class ModStoreTests : IDisposable
             ["bhlw"] = "ccc",
         });
 
-        Assert.Equal(["woi_0/aaa"], pruned);
-        Assert.False(_store.HasBackup("woi_0", "aaa"));
-        Assert.True(_store.HasBackup("woi_0", "bbb"));
-        Assert.True(_store.HasBackup("bhlw", "ccc"));
+        Assert.Equal(["shipped/woi_0/aaa"], pruned);
+        Assert.False(_store.HasBackup(CacheKind.Shipped, "woi_0", "aaa"));
+        Assert.True(_store.HasBackup(CacheKind.Shipped, "woi_0", "bbb"));
+        Assert.True(_store.HasBackup(CacheKind.Shipped, "bhlw", "ccc"));
     }
 
     [Fact]
