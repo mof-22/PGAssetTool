@@ -102,15 +102,31 @@ internal static class SelfTest
 
                 if (want == AssetClassID.Mesh && model.Preview.Mesh is { } mesh)
                 {
-                    // Draw a frame the way the control would, so a rasterizer that throws or leaves
-                    // an empty image is caught here rather than by a person looking at a blank pane.
+                    // Drawn the way the control would, so a rasterizer that throws or leaves an
+                    // empty image is caught here rather than by a person looking at a blank pane.
                     var target = new RenderTarget();
                     target.Resize(320, 320);
-                    MeshRenderer.Render(mesh, new Camera(), target);
+                    MeshRenderer.Render(mesh, new Camera(), target, model.Preview.MeshTextures);
+
                     var drawn = 0;
-                    for (var i = 3; i < target.Bgra.Length; i += 4) if (target.Bgra[i] != 0) drawn++;
-                    Console.WriteLine($"         rasterised {drawn:N0} of {320 * 320:N0} pixels");
+                    var coloured = 0;
+                    for (var i = 0; i < target.Bgra.Length; i += 4)
+                    {
+                        if (target.Bgra[i + 3] == 0) continue;
+                        drawn++;
+                        // Untextured shading writes equal channels; a texture almost never does.
+                        if (target.Bgra[i] != target.Bgra[i + 1] || target.Bgra[i + 1] != target.Bgra[i + 2])
+                            coloured++;
+                    }
+
+                    var slots = model.Preview.MeshTextures;
+                    Console.WriteLine($"         rasterised {drawn:N0} of {320 * 320:N0} pixels, "
+                        + $"{coloured:N0} of them coloured; textures "
+                        + $"{(slots is null ? "none" : string.Join(", ", slots.Select(s => s is null ? "-" : $"{s.Width}x{s.Height}")))}");
+
                     if (drawn == 0) return Fail($"'{node.Label}' rendered to an empty image");
+                    if (slots?.Any(s => s is not null) == true && coloured == 0)
+                        return Fail($"'{node.Label}' has a texture but drew in flat grey");
                 }
             }
 

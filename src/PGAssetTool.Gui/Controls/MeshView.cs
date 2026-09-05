@@ -19,10 +19,21 @@ public sealed class MeshView : Control
     public static readonly StyledProperty<UnityMesh?> MeshProperty =
         AvaloniaProperty.Register<MeshView, UnityMesh?>(nameof(Mesh));
 
+    /// One texture per submesh, in Unity order. Null entries and a short list are both fine; those
+    /// parts are drawn plain.
+    public static readonly StyledProperty<IReadOnlyList<PreviewImage?>?> TexturesProperty =
+        AvaloniaProperty.Register<MeshView, IReadOnlyList<PreviewImage?>?>(nameof(Textures));
+
     public UnityMesh? Mesh
     {
         get => GetValue(MeshProperty);
         set => SetValue(MeshProperty, value);
+    }
+
+    public IReadOnlyList<PreviewImage?>? Textures
+    {
+        get => GetValue(TexturesProperty);
+        set => SetValue(TexturesProperty, value);
     }
 
     private WriteableBitmap? _bitmap;
@@ -33,7 +44,7 @@ public sealed class MeshView : Control
 
     static MeshView()
     {
-        AffectsRender<MeshView>(MeshProperty);
+        AffectsRender<MeshView>(MeshProperty, TexturesProperty);
         MeshProperty.Changed.AddClassHandler<MeshView>((view, _) =>
         {
             // A new model gets a fresh viewpoint; keeping the old one leaves the next mesh at
@@ -88,7 +99,7 @@ public sealed class MeshView : Control
             _target.Resize(width, height);
         }
 
-        MeshRenderer.Render(mesh, _camera, _target);
+        MeshRenderer.Render(mesh, _camera, _target, Textures);
 
         using (var locked = _bitmap.Lock())
             System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);

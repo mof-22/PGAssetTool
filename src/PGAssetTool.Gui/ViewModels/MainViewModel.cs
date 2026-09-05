@@ -24,13 +24,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Guards the bundle reader, which is not safe to use from two threads at once.
     private readonly SemaphoreSlim _reading = new(1, 1);
 
+    public MainViewModel()
+    {
+        Preview = new PreviewViewModel();
+        Preview.PropertyChanged += OnPreviewChanged;
+    }
+
     [ObservableProperty] private string _status = "Looking for the game…";
     [ObservableProperty] private bool _busy = true;
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private WeaponListItem? _selected;
     [ObservableProperty] private WeaponDetailViewModel? _detail;
 
-    public PreviewViewModel Preview { get; } = new();
+    public PreviewViewModel Preview { get; }
 
     /// The resolved weapon behind the current tree, kept so the tree can be rebuilt when the filter
     /// changes without reading the bundles again.
@@ -322,6 +328,83 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (IOException) { }
     }
 
+    /// Decodes the textures the renderer drawing this mesh uses, one per submesh.
+    ///
+    /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
+    /// geometry and the thing being judged — how a texture sits on the model — is invisible.
+    private IReadOnlyList<PreviewImage?>? TexturesFor(long meshPathId)
+    {
+        if (_tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == meshPathId) is not { } slots) return null;
+
+        return slots.BySubMesh.Select(node =>
+        {
+            if (node is null) return null;
+            try
+            {
+                if (AssetPreview.Locate(_bundles!, node.Bundle, AssetClassID.Texture2D, node.PathId, node.Name)
+                    is not var (file, info)) return null;
+
+                var field = _bundles!.Context.Deserialize(file, info);
+                return field is null ? null : AssetPreview.Texture(_bundles, node.Bundle, field);
+            }
+            catch (Exception)
+            {
+                // A preview is never worth failing a selection over.
+                return null;
+            }
+        }).ToList();
+    }
+
+    partial void OnDetailChanged(WeaponDetailViewModel? value) => OfferTextures();
+
+    /// A chosen texture is loaded when it is first picked, not when the list is built: a weapon
+    /// offers a dozen or more and almost none of them will be looked at.
+    private async void OnPreviewChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PreviewViewModel.ChosenTexture)) return;
+        if (Preview.ChosenTexture is not { PathId: not 0, Image: null } choice) return;
+
+        try
+        {
+            await _reading.WaitAsync();
+            try
+            {
+                var loaded = await Task.Run(() =>
+                {
+                    if (AssetPreview.Locate(_bundles!, choice.Bundle, AssetClassID.Texture2D, choice.PathId, choice.Name)
+                        is not var (file, info)) return null;
+                    var field = _bundles!.Context.Deserialize(file, info);
+                    return field is null ? null : AssetPreview.Texture(_bundles, choice.Bundle, field);
+                });
+
+                if (loaded is not null && ReferenceEquals(Preview.ChosenTexture, choice))
+                    Preview.ChosenTexture = choice with { Image = loaded };
+            }
+            finally { _reading.Release(); }
+        }
+        catch (Exception ex) { Status = ex.Message; }
+    }
+
+    /// Every texture the weapon reaches, offered so a skin can be tried on a mesh by hand.
+    private void OfferTextures()
+    {
+        Preview.TextureChoices.Clear();
+        Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0, null));
+
+        if (Detail is null) return;
+
+        var seen = new HashSet<(string, long)>();
+        foreach (var node in AllNodes(Detail.Roots))
+        {
+            if (node.Class != AssetClassID.Texture2D || node.Bundle.Length == 0) continue;
+            if (!seen.Add((node.Bundle, node.PathId))) continue;
+            Preview.TextureChoices.Add(new TextureChoice(node.Label, node.Bundle, node.PathId, null));
+        }
+    }
+
+    private static IEnumerable<TreeNode> AllNodes(IEnumerable<TreeNode> nodes)
+        => nodes.SelectMany(n => new[] { n }.Concat(AllNodes(n.Children)));
+
     private async void ShowPreview(TreeNode? node)
     {
         if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh))
@@ -360,7 +443,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         Preview.Show(picture, $"{node.Label}   @ {node.Bundle}", node.AlphaIsCoverage);
                         break;
                     case UnityMesh mesh:
-                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}");
+                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(node.PathId));
                         break;
                     default:
                         Preview.Clear(_bundles!.Context.HasClassDatabase || !node.Bundle.Contains('.')

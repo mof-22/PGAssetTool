@@ -54,7 +54,13 @@ public sealed class RenderTarget
 
 public static class MeshRenderer
 {
-    public static void Render(UnityMesh mesh, Camera camera, RenderTarget target)
+    /// <param name="textures">
+    /// One per submesh, in Unity's order: submesh <c>i</c> is drawn with the texture of material
+    /// <c>i</c>. A null entry, or a mesh with more submeshes than textures, falls back to plain
+    /// shading rather than to whatever texture happened to be first.
+    /// </param>
+    public static void Render(
+        UnityMesh mesh, Camera camera, RenderTarget target, IReadOnlyList<PreviewImage?>? textures = null)
     {
         if (target.IsEmpty) return;
 
@@ -65,6 +71,7 @@ public static class MeshRenderer
         if (positions is null || mesh.VertexCount == 0) return;
 
         var normals = mesh.Get(VertexAttribute.Normal);
+        var uvs = mesh.Get(VertexAttribute.TexCoord0);
         var (centre, size, radius) = Bounds(mesh, positions);
         var upright = Upright.For(size);
         if (radius <= 0) radius = 1;
@@ -80,30 +87,47 @@ public static class MeshRenderer
         Span<float> sy = stackalloc float[3];
         Span<float> sz = stackalloc float[3];
         Span<float> shade = stackalloc float[3];
+        Span<float> u = stackalloc float[3];
+        Span<float> v = stackalloc float[3];
 
-        for (var i = 0; i + 2 < mesh.Indices.Length; i += 3)
+        // Submesh by submesh, because which material draws a triangle is decided by which submesh
+        // it belongs to. A mesh with no submeshes recorded is drawn whole.
+        var parts = mesh.SubMeshes.Count > 0
+            ? mesh.SubMeshes
+            : [new SubMesh(0, mesh.Indices.Length, 0, 0)];
+
+        for (var part = 0; part < parts.Count; part++)
         {
-            var ok = true;
-            for (var corner = 0; corner < 3; corner++)
+            var texture = textures is not null && part < textures.Count ? textures[part] : null;
+            var from = Math.Max(parts[part].IndexStart, 0);
+            var to = Math.Min(from + parts[part].IndexCount, mesh.Indices.Length);
+
+            for (var i = from; i + 2 < to + 1 && i + 2 < mesh.Indices.Length; i += 3)
             {
-                var vertex = mesh.Indices[i + corner];
-                if (vertex < 0 || vertex >= mesh.VertexCount) { ok = false; break; }
+                var ok = true;
+                for (var corner = 0; corner < 3; corner++)
+                {
+                    var vertex = mesh.Indices[i + corner];
+                    if (vertex < 0 || vertex >= mesh.VertexCount) { ok = false; break; }
 
-                var (mx, my, mz) = upright.Apply(
-                    positions[vertex * 3] - centre.X,
-                    positions[vertex * 3 + 1] - centre.Y,
-                    positions[vertex * 3 + 2] - centre.Z);
-                var (x, y, z) = view.Apply(mx, my, mz);
+                    var (mx, my, mz) = upright.Apply(
+                        positions[vertex * 3] - centre.X,
+                        positions[vertex * 3 + 1] - centre.Y,
+                        positions[vertex * 3 + 2] - centre.Z);
+                    var (x, y, z) = view.Apply(mx, my, mz);
 
-                sx[corner] = width * 0.5f + x * scale;
-                sy[corner] = height * 0.5f - y * scale;
-                sz[corner] = z;
+                    sx[corner] = width * 0.5f + x * scale;
+                    sy[corner] = height * 0.5f - y * scale;
+                    sz[corner] = z;
 
-                shade[corner] = normals is null ? 1f : Lambert(view, upright, normals, vertex);
+                    shade[corner] = normals is null ? 1f : Lambert(view, upright, normals, vertex);
+                    u[corner] = uvs is null ? 0 : uvs[vertex * 2];
+                    v[corner] = uvs is null ? 0 : uvs[vertex * 2 + 1];
+                }
+                if (!ok) continue;
+
+                Fill(bgra, depth, width, height, sx, sy, sz, shade, u, v, texture);
             }
-            if (!ok) continue;
-
-            Fill(bgra, depth, width, height, sx, sy, sz, shade);
         }
     }
 
@@ -123,7 +147,8 @@ public static class MeshRenderer
 
     private static void Fill(
         byte[] bgra, float[] depth, int width, int height,
-        ReadOnlySpan<float> sx, ReadOnlySpan<float> sy, ReadOnlySpan<float> sz, ReadOnlySpan<float> shade)
+        ReadOnlySpan<float> sx, ReadOnlySpan<float> sy, ReadOnlySpan<float> sz, ReadOnlySpan<float> shade,
+        ReadOnlySpan<float> u, ReadOnlySpan<float> v, PreviewImage? texture)
     {
         var area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
         if (Math.Abs(area) < 1e-6f) return;
@@ -152,13 +177,40 @@ public static class MeshRenderer
             depth[at] = z;
 
             var lit = Math.Clamp(w0 * shade[0] + w1 * shade[1] + w2 * shade[2], 0f, 1f);
-            var value = (byte)(40 + 200 * lit);
 
-            bgra[at * 4] = value;
-            bgra[at * 4 + 1] = value;
-            bgra[at * 4 + 2] = value;
+            byte blue = 240, green = 240, red = 240;
+            if (texture is not null)
+                Sample(texture, w0 * u[0] + w1 * u[1] + w2 * u[2], w0 * v[0] + w1 * v[1] + w2 * v[2],
+                    out blue, out green, out red);
+
+            // Ambient floor so a face turned away stays readable rather than going black.
+            bgra[at * 4] = (byte)(blue * (0.17f + 0.83f * lit));
+            bgra[at * 4 + 1] = (byte)(green * (0.17f + 0.83f * lit));
+            bgra[at * 4 + 2] = (byte)(red * (0.17f + 0.83f * lit));
             bgra[at * 4 + 3] = 255;
         }
+    }
+
+    /// Nearest texel, deliberately. Every texture in this game is small and hand-drawn — 256x256 at
+    /// the largest, most of them 64 or 128 — and smoothing them would show something the game never
+    /// does. Coordinates wrap, because a mesh is free to use them outside the unit square.
+    private static void Sample(PreviewImage texture, float u, float v, out byte blue, out byte green, out byte red)
+    {
+        var x = (int)MathF.Floor(Wrap(u) * texture.Width);
+        // Unity puts the texture origin at the bottom left; the decoded rows run top down.
+        var y = (int)MathF.Floor((1f - Wrap(v)) * texture.Height);
+
+        x = Math.Clamp(x, 0, texture.Width - 1);
+        y = Math.Clamp(y, 0, texture.Height - 1);
+
+        var at = (y * texture.Width + x) * 4;
+        (blue, green, red) = (texture.Bgra[at], texture.Bgra[at + 1], texture.Bgra[at + 2]);
+    }
+
+    private static float Wrap(float value)
+    {
+        var fraction = value - MathF.Floor(value);
+        return fraction is >= 0 and < 1 ? fraction : 0;
     }
 
     /// Stands the model up before the camera looks at it: longest side across the screen, next

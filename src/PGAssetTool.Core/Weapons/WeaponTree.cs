@@ -1,3 +1,4 @@
+using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
@@ -12,6 +13,10 @@ public sealed record WeaponSkinView(
 
 public sealed record SkinMaterial(string Path, string Bundle, string Name, IReadOnlyList<AssetNode> Textures);
 
+/// The textures a mesh is drawn with, in submesh order: entry i belongs to submesh i, and a null
+/// entry is a material slot whose texture could not be found.
+public sealed record MeshTextures(long MeshPathId, IReadOnlyList<AssetNode?> BySubMesh);
+
 /// An asset tied to the weapon by the number in its name rather than by a binary reference.
 public sealed record RelatedAsset(string Namespace, string Path, string? Bundle);
 
@@ -23,7 +28,8 @@ public sealed record WeaponTree(
     IReadOnlyList<WeaponSkinView> Skins,
     IReadOnlyList<RelatedAsset> Related,
     IconLocation? Icon,
-    IReadOnlyList<string> UnresolvedReasons);
+    IReadOnlyList<string> UnresolvedReasons,
+    IReadOnlyList<MeshTextures> MeshTextures);
 
 /// Assembles everything belonging to one weapon. Resolution happens on demand: the catalogs plus
 /// the single bundle holding the prefab are enough, so nothing is precomputed.
@@ -79,7 +85,111 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             unresolved.Add($"no icon texture named '{record.Slug}{IconResolver.Suffix}'");
 
         return new WeaponTree(
-            record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved);
+            record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved,
+            prefabBundle is null ? [] : TexturesForMeshes(prefabBundle, assets));
+    }
+
+    /// Which textures each mesh in the weapon is actually drawn with.
+    ///
+    /// A Mesh asset says nothing about its appearance; the renderer that draws it holds the
+    /// materials, and Unity pairs submesh i with material i. A SkinnedMeshRenderer names its own
+    /// mesh, while a MeshRenderer leaves that to a MeshFilter on the same GameObject, so both
+    /// shapes have to be followed to cover every weapon.
+    private IReadOnlyList<MeshTextures> TexturesForMeshes(string prefabBundle, IReadOnlyList<AssetNode> assets)
+    {
+        var found = new List<MeshTextures>();
+        var meshOfGameObject = new Dictionary<long, long>();
+        var renderers = new List<(long GameObject, long Mesh, AssetTypeValueField Field, string Bundle)>();
+
+        foreach (var node in assets)
+        {
+            var bundle = node.Bundle.Length > 0 ? node.Bundle : prefabBundle;
+            AssetsFileInstance file;
+            AssetTypeValueField? field;
+            try
+            {
+                file = bundles.Open(bundle);
+                var info = file.file.GetAssetInfo(node.PathId);
+                field = info is null ? null : bundles.Context.Deserialize(file, info);
+            }
+            catch (Exception e) when (e is IOException or FileNotFoundException) { continue; }
+            if (field is null) continue;
+
+            var owner = field["m_GameObject"];
+            var on = owner.IsDummy ? 0 : owner["m_PathID"].AsLong;
+
+            switch (node.Class)
+            {
+                case AssetClassID.MeshFilter:
+                    meshOfGameObject[on] = field["m_Mesh"]["m_PathID"].AsLong;
+                    break;
+                case AssetClassID.SkinnedMeshRenderer:
+                    renderers.Add((on, field["m_Mesh"]["m_PathID"].AsLong, field, bundle));
+                    break;
+                case AssetClassID.MeshRenderer:
+                    renderers.Add((on, 0, field, bundle));
+                    break;
+            }
+        }
+
+        foreach (var (gameObject, named, renderer, bundle) in renderers)
+        {
+            var mesh = named != 0 ? named : meshOfGameObject.GetValueOrDefault(gameObject);
+            if (mesh == 0 || found.Any(f => f.MeshPathId == mesh)) continue;
+
+            var slots = renderer["m_Materials"]["Array"].Children
+                .Select(m => MainTextureOf(bundle, m["m_FileID"].AsInt, m["m_PathID"].AsLong))
+                .ToList();
+
+            if (slots.Any(s => s is not null)) found.Add(new MeshTextures(mesh, slots));
+        }
+
+        return found;
+    }
+
+    /// The texture bound to a material's main slot, wherever the material and the texture live.
+    private AssetNode? MainTextureOf(string from, int fileId, long pathId)
+    {
+        if (pathId == 0) return null;
+
+        var (file, bundle) = fileId == 0
+            ? (SafeOpen(from), from)
+            : _graph.Resolve(SafeOpen(from) ?? throw new InvalidOperationException(), fileId) is { } next
+                ? (next.File, next.Bundle)
+                : (null, "");
+
+        if (file is null) return null;
+
+        var info = file.file.GetAssetInfo(pathId);
+        var material = info is null ? null : bundles.Context.Deserialize(file, info);
+        if (material is null) return null;
+
+        // _MainTex first; some materials only bind another slot, and showing that beats showing
+        // nothing at all.
+        var slots = material["m_SavedProperties"]["m_TexEnvs"]["Array"].Children;
+        var main = slots.FirstOrDefault(s => s["first"].AsString == "_MainTex") ?? slots.FirstOrDefault();
+        if (main is null) return null;
+
+        var pointer = main["second"]["m_Texture"];
+        var textureId = pointer["m_PathID"].AsLong;
+        if (textureId == 0) return null;
+
+        var (textureFile, textureBundle) = pointer["m_FileID"].AsInt == 0
+            ? (file, bundle)
+            : _graph.Resolve(file, pointer["m_FileID"].AsInt) is { } other ? (other.File, other.Bundle) : (null, "");
+        if (textureFile is null) return null;
+
+        var textureInfo = textureFile.file.GetAssetInfo(textureId);
+        if (textureInfo is null || textureInfo.TypeId != (int)AssetClassID.Texture2D) return null;
+
+        var name = bundles.Context.Deserialize(textureFile, textureInfo)?["m_Name"].AsString ?? "";
+        return new AssetNode(textureId, AssetClassID.Texture2D, name, textureBundle);
+    }
+
+    private AssetsFileInstance? SafeOpen(string bundle)
+    {
+        try { return bundles.Open(bundle); }
+        catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
     }
 
     /// The materials a skin names, and the textures each of them uses.

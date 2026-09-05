@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Preview;
@@ -14,6 +15,15 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     [ObservableProperty] private Bitmap? _image;
     [ObservableProperty] private UnityMesh? _mesh;
+
+    /// One per submesh, resolved from the materials the renderer drawing this mesh holds.
+    [ObservableProperty] private IReadOnlyList<PreviewImage?>? _meshTextures;
+
+    /// Every texture in the weapon, so a skin can be tried on the model the automatic answer does
+    /// not know about. Null means the automatic one.
+    public ObservableCollection<TextureChoice> TextureChoices { get; } = [];
+
+    [ObservableProperty] private TextureChoice? _chosenTexture;
     [ObservableProperty] private string _caption = "";
     [ObservableProperty] private string? _nothing = "Select a texture or a mesh.";
 
@@ -56,17 +66,32 @@ public sealed partial class PreviewViewModel : ObservableObject
         if (unchanged) Redraw();
     }
 
-    public void Show(UnityMesh mesh, string caption)
+    public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures)
     {
         _picture = null;
+        _automatic = textures;
         Image?.Dispose();
         Image = null;
         Mesh = mesh;
+        MeshTextures = textures;
+        ChosenTexture = null;
         Caption = $"{caption}   {mesh.VertexCount:N0} vertices, {mesh.Indices.Length / 3:N0} triangles"
-            + (mesh.IsSkinned ? $", {mesh.BindPoses.Count} bones" : "");
+            + (mesh.IsSkinned ? $", {mesh.BindPoses.Count} bones" : "")
+            + (textures?.Any(t => t is not null) == true ? "" : ", no texture found");
         Nothing = null;
         Changed();
     }
+
+    /// A texture chosen by hand covers the whole model, which is the point: it answers what this
+    /// mesh looks like wearing a different skin, and a skin is not per-submesh.
+    partial void OnChosenTextureChanged(TextureChoice? value)
+    {
+        MeshTextures = value?.Image is { } picture
+            ? Enumerable.Repeat<PreviewImage?>(picture, Math.Max(Mesh?.SubMeshes.Count ?? 1, 1)).ToList()
+            : _automatic;
+    }
+
+    private IReadOnlyList<PreviewImage?>? _automatic;
 
     private void Redraw()
     {
@@ -95,4 +120,10 @@ public sealed partial class PreviewViewModel : ObservableObject
 
         return bitmap;
     }
+}
+
+/// A texture offered for a mesh preview, loaded when it is first picked.
+public sealed record TextureChoice(string Name, string Bundle, long PathId, PreviewImage? Image)
+{
+    public override string ToString() => Name;
 }

@@ -288,4 +288,113 @@ public class MeshRendererTests
     [Fact]
     public void ATargetWithNoSizeYetDrawsNothingRatherThanThrowing()
         => MeshRenderer.Render(Quad(), new Camera(), new RenderTarget());
+
+    /// A solid image of one colour, to see where it lands.
+    private static PreviewImage Swatch(byte blue, byte green, byte red, int size = 4)
+    {
+        var pixels = new byte[size * size * 4];
+        for (var i = 0; i < pixels.Length; i += 4)
+            (pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]) = (blue, green, red, (byte)255);
+        return new PreviewImage(size, size, pixels);
+    }
+
+    private static UnityMesh Textured(float[] positions, float[] uvs, int[] indices, params SubMesh[] parts) => new()
+    {
+        Name = "textured",
+        VertexCount = positions.Length / 3,
+        Attributes = new Dictionary<VertexAttribute, float[]>
+        {
+            [VertexAttribute.Position] = positions,
+            [VertexAttribute.TexCoord0] = uvs,
+        },
+        Dimensions = new Dictionary<VertexAttribute, int>
+        {
+            [VertexAttribute.Position] = 3,
+            [VertexAttribute.TexCoord0] = 2,
+        },
+        Indices = indices,
+        SubMeshes = parts.Length > 0 ? parts : [new SubMesh(0, indices.Length, 0, 0)],
+        BindPoses = [],
+        BoneNameHashes = [],
+    };
+
+    private static UnityMesh TexturedQuad(params SubMesh[] parts) => Textured(
+        [-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0],
+        [0, 0, 1, 0, 1, 1, 0, 1],
+        [0, 1, 2, 0, 2, 3],
+        parts);
+
+    [Fact]
+    public void AMeshWithNoTextureIsStillDrawn()
+    {
+        // Nothing resolves a texture for a great many meshes, and those must not come out blank.
+        Assert.True(Covered(Draw(TexturedQuad(), new Camera(Yaw: 0, Pitch: 0))) > 0);
+    }
+
+    [Fact]
+    public void TheTextureIsWhatShowsRatherThanTheFlatShade()
+    {
+        var target = new RenderTarget();
+        target.Resize(Size, Size);
+        MeshRenderer.Render(TexturedQuad(), new Camera(Yaw: 0, Pitch: 0), target, [Swatch(200, 0, 0)]);
+
+        var at = ((Size / 2) * Size + Size / 2) * 4;
+        Assert.True(target.Bgra[at] > target.Bgra[at + 2],
+            $"expected the blue swatch, got B={target.Bgra[at]} G={target.Bgra[at + 1]} R={target.Bgra[at + 2]}");
+    }
+
+    [Fact]
+    public void EachSubmeshTakesTheTextureOfItsOwnMaterial()
+    {
+        // Unity pairs submesh i with material i. Getting this wrong shows part of a weapon in
+        // another part's colours, which is hard to trace back to the preview.
+        var twoHalves = Textured(
+            [-1, -1, 0, 0, -1, 0, 0, 1, 0, -1, 1, 0,      // left half
+             0, -1, 0, 1, -1, 0, 1, 1, 0, 0, 1, 0],       // right half
+            [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1],
+            [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7],
+            new SubMesh(0, 6, 0, 0), new SubMesh(6, 6, 0, 0));
+
+        var target = new RenderTarget();
+        target.Resize(Size, Size);
+        MeshRenderer.Render(twoHalves, new Camera(Yaw: 0, Pitch: 0), target,
+            [Swatch(200, 0, 0), Swatch(0, 0, 200)]);
+
+        // Well inside the drawing: the model is framed with a margin, so a quarter of the way in
+        // from the edge falls outside it.
+        var left = (Size / 2 * Size + Size / 2 - 8) * 4;
+        var right = (Size / 2 * Size + Size / 2 + 8) * 4;
+
+        Assert.True(target.Bgra[left] > target.Bgra[left + 2], "the left half did not take the first texture");
+        Assert.True(target.Bgra[right + 2] > target.Bgra[right], "the right half did not take the second texture");
+    }
+
+    [Fact]
+    public void FewerTexturesThanSubmeshesLeavesTheRestPlain()
+    {
+        // A material that resolves to nothing must not silently borrow the previous one.
+        var twoParts = TexturedQuad(new SubMesh(0, 3, 0, 0), new SubMesh(3, 3, 0, 0));
+
+        var target = new RenderTarget();
+        target.Resize(Size, Size);
+        MeshRenderer.Render(twoParts, new Camera(Yaw: 0, Pitch: 0), target, [Swatch(200, 0, 0), null]);
+
+        Assert.True(Covered(target.Bgra) > 0);
+    }
+
+    [Fact]
+    public void CoordinatesOutsideTheUnitSquareWrapRatherThanClamp()
+    {
+        // A mesh is free to tile its texture, and clamping would smear the edge texel across it.
+        var tiled = Textured(
+            [-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0],
+            [0, 0, 3, 0, 3, 3, 0, 3],
+            [0, 1, 2, 0, 2, 3]);
+
+        var target = new RenderTarget();
+        target.Resize(Size, Size);
+        MeshRenderer.Render(tiled, new Camera(Yaw: 0, Pitch: 0), target, [Swatch(200, 0, 0)]);
+
+        Assert.True(Covered(target.Bgra) > 0);
+    }
 }

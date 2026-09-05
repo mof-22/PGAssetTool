@@ -143,6 +143,10 @@
             <DockPanel Grid.Column="2" DataContext="{Binding Preview}" x:DataType="vm:PreviewViewModel">
 
               <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                <!-- Applies one texture to the whole model: the question it answers is what this mesh
+                     looks like wearing another skin, and a skin is not per-submesh. -->
+                <ComboBox ItemsSource="{Binding TextureChoices}" SelectedItem="{Binding ChosenTexture}"
+                          IsVisible="{Binding HasMesh}" HorizontalAlignment="Stretch" Margin="0,0,0,4" />
                 <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
                           IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
                 <TextBlock Text="{Binding Caption}" Classes="dim mono" TextWrapping="Wrap" />
@@ -173,7 +177,8 @@
                          Stretch="Uniform" Margin="12"
                          RenderOptions.BitmapInterpolationMode="None" />
 
-                  <ctl:MeshView Mesh="{Binding Mesh}" IsVisible="{Binding HasMesh}" />
+                  <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
+                                IsVisible="{Binding HasMesh}" />
                 </Panel>
               </Border>
             </DockPanel>
