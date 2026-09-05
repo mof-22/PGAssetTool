@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PGAssetTool.Core.Game;
@@ -21,8 +23,12 @@ public sealed record InstalledMod
     public required Dictionary<string, string> TouchedBundles { get; init; }
 }
 
-/// The tool's own directory beside the game: original bundles it has replaced, and what is
-/// installed. Kept out of the bundle cache so the game never sees it.
+/// The tool's own directory: original bundles it has replaced, and what is installed.
+///
+/// Deliberately outside the game folder. Uninstalling the game removes that folder, and the
+/// downloaded bundle cache in the player's profile survives it — so backups kept beside the game
+/// would be destroyed exactly when a modified bundle outlived them. Each installation gets its own
+/// subdirectory, named after its path, so several do not share a store.
 public sealed class ModStore
 {
     public const string DirectoryName = "PGAssetTool";
@@ -40,8 +46,22 @@ public sealed class ModStore
     public ModStore(GameInstallation game)
     {
         _game = game;
-        Root = Path.Combine(game.RootDirectory, DirectoryName);
+        Root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            DirectoryName, "installs", KeyFor(game.RootDirectory));
         BackupRoot = Path.Combine(Root, "backup");
+    }
+
+    /// Readable enough to recognise, with a digest of the full path so two installations sharing a
+    /// folder name do not share a store.
+    private static string KeyFor(string installPath)
+    {
+        var full = Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar);
+        var digest = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(full.ToLowerInvariant())))[..8];
+        var name = Path.GetFileName(full);
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return $"{name}-{digest}";
     }
 
     public string Root { get; }
