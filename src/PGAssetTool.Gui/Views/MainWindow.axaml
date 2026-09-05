@@ -1,10 +1,11 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:PGAssetTool.Gui.ViewModels"
+        xmlns:ctl="using:PGAssetTool.Gui.Controls"
         x:Class="PGAssetTool.Gui.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="{Binding Title}"
-        Width="1200" Height="780" MinWidth="820" MinHeight="520">
+        Width="1360" Height="820" MinWidth="900" MinHeight="560">
 
   <Window.Styles>
     <Style Selector="TextBlock.dim">
@@ -26,7 +27,7 @@
       </Grid>
     </Border>
 
-    <Grid ColumnDefinitions="320,4,*">
+    <Grid ColumnDefinitions="300,4,*">
 
       <!-- The weapon list. Search matches slug, tag, prefab and the translated name. -->
       <DockPanel Grid.Column="0" Margin="10">
@@ -50,32 +51,58 @@
 
       <GridSplitter Grid.Column="1" Background="#27272a" />
 
-      <ContentControl Grid.Column="2" Content="{Binding Detail}" Margin="10">
-        <ContentControl.ContentTemplate>
-          <DataTemplate x:DataType="vm:WeaponDetailViewModel">
-            <DockPanel>
-              <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding Subtitle}" Classes="dim mono" />
-              </StackPanel>
+      <Grid Grid.Column="2" ColumnDefinitions="*,4,420" Margin="10">
 
-              <TreeView ItemsSource="{Binding Roots}">
-                <TreeView.ItemTemplate>
-                  <TreeDataTemplate x:DataType="vm:TreeNode" ItemsSource="{Binding Children}">
-                    <Grid ColumnDefinitions="20,Auto,Auto" Margin="0,1">
-                      <TextBlock Grid.Column="0" Text="{Binding Icon}" />
-                      <TextBlock Grid.Column="1" Text="{Binding Label}" />
-                      <TextBlock Grid.Column="2" Text="{Binding Detail}" Classes="dim"
-                                 Margin="10,0,0,0" VerticalAlignment="Center" />
-                    </Grid>
-                  </TreeDataTemplate>
-                </TreeView.ItemTemplate>
-              </TreeView>
-            </DockPanel>
-          </DataTemplate>
-        </ContentControl.ContentTemplate>
-      </ContentControl>
+        <ContentControl Grid.Column="0" Content="{Binding Detail}">
+          <ContentControl.ContentTemplate>
+            <DataTemplate x:DataType="vm:WeaponDetailViewModel">
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                  <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Subtitle}" Classes="dim mono" />
+                </StackPanel>
 
+                <TreeView ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedNode}">
+                  <TreeView.ItemTemplate>
+                    <TreeDataTemplate x:DataType="vm:TreeNode" ItemsSource="{Binding Children}">
+                      <Grid ColumnDefinitions="20,Auto,Auto" Margin="0,1">
+                        <TextBlock Grid.Column="0" Text="{Binding Icon}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Label}" />
+                        <TextBlock Grid.Column="2" Text="{Binding Detail}" Classes="dim"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+                      </Grid>
+                    </TreeDataTemplate>
+                  </TreeView.ItemTemplate>
+                </TreeView>
+              </DockPanel>
+            </DataTemplate>
+          </ContentControl.ContentTemplate>
+        </ContentControl>
+
+        <GridSplitter Grid.Column="1" Background="#27272a" />
+
+        <!-- Preview. A texture is shown as it is; a mesh is drawn by the software rasterizer in
+             the core, turned by dragging and zoomed with the wheel. -->
+        <DockPanel Grid.Column="2" DataContext="{Binding Preview}" x:DataType="vm:PreviewViewModel">
+          <TextBlock DockPanel.Dock="Bottom" Text="{Binding Caption}" Classes="dim mono"
+                     Margin="0,8,0,0" TextWrapping="Wrap" />
+
+          <Border Background="#111113" CornerRadius="4">
+            <Panel>
+              <TextBlock Text="{Binding Nothing}" Classes="dim" IsVisible="{Binding Nothing, Converter={x:Static ObjectConverters.IsNotNull}}"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
+                         MaxWidth="300" TextAlignment="Center" />
+
+              <Image Source="{Binding Image}" IsVisible="{Binding HasImage}"
+                     Stretch="Uniform" Margin="12"
+                     RenderOptions.BitmapInterpolationMode="None" />
+
+              <ctl:MeshView Mesh="{Binding Mesh}" IsVisible="{Binding HasMesh}" />
+            </Panel>
+          </Border>
+        </DockPanel>
+
+      </Grid>
     </Grid>
   </DockPanel>
 </Window>

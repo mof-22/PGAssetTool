@@ -1,0 +1,96 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
+using PGAssetTool.Core.Export.Meshes;
+using PGAssetTool.Core.Preview;
+
+namespace PGAssetTool.Gui.Controls;
+
+/// Shows a mesh, turned by dragging and zoomed by the wheel.
+///
+/// The rasterizer lives in the core and writes straight into the bitmap's own memory, so a frame is
+/// one pass over the triangles and a blit; nothing is allocated per frame except when the control
+/// is resized.
+public sealed class MeshView : Control
+{
+    public static readonly StyledProperty<UnityMesh?> MeshProperty =
+        AvaloniaProperty.Register<MeshView, UnityMesh?>(nameof(Mesh));
+
+    public UnityMesh? Mesh
+    {
+        get => GetValue(MeshProperty);
+        set => SetValue(MeshProperty, value);
+    }
+
+    private WriteableBitmap? _bitmap;
+    private byte[] _pixels = [];
+    private PixelSize _size;
+    private Camera _camera = new();
+    private Point? _dragging;
+
+    static MeshView()
+    {
+        AffectsRender<MeshView>(MeshProperty);
+        MeshProperty.Changed.AddClassHandler<MeshView>((view, _) =>
+        {
+            // A new model gets a fresh viewpoint; keeping the old one leaves the next mesh at
+            // whatever angle happened to suit the last.
+            view._camera = new Camera();
+            view.InvalidateVisual();
+        });
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        _dragging = e.GetPosition(this);
+        e.Pointer.Capture(this);
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        if (_dragging is not { } from) return;
+        var to = e.GetPosition(this);
+        _dragging = to;
+
+        // A drag across the full width turns the model most of the way round.
+        _camera = _camera.Turned((float)((to.X - from.X) * 0.01), (float)((to.Y - from.Y) * -0.01));
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        _dragging = null;
+        e.Pointer.Capture(null);
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        _camera = _camera.Zoomed(e.Delta.Y > 0 ? 0.88f : 1.14f);
+        InvalidateVisual();
+    }
+
+    public override void Render(DrawingContext context)
+    {
+        var width = (int)Bounds.Width;
+        var height = (int)Bounds.Height;
+        if (Mesh is not { } mesh || width < 2 || height < 2) return;
+
+        if (_bitmap is null || _size.Width != width || _size.Height != height)
+        {
+            _size = new PixelSize(width, height);
+            _bitmap?.Dispose();
+            _bitmap = new WriteableBitmap(_size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+            _pixels = new byte[width * height * 4];
+        }
+
+        MeshRenderer.Render(mesh, _camera, _pixels, width, height);
+
+        using (var locked = _bitmap.Lock())
+            System.Runtime.InteropServices.Marshal.Copy(_pixels, 0, locked.Address, _pixels.Length);
+
+        context.DrawImage(_bitmap, new Rect(0, 0, width, height));
+    }
+}

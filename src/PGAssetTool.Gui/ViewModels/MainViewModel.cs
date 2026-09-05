@@ -1,8 +1,11 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
+using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Game;
+using PGAssetTool.Core.Preview;
 using PGAssetTool.Core.Weapons;
 
 namespace PGAssetTool.Gui.ViewModels;
@@ -21,6 +24,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private WeaponListItem? _selected;
     [ObservableProperty] private WeaponDetailViewModel? _detail;
+
+    public PreviewViewModel Preview { get; } = new();
 
     public ObservableCollection<WeaponListItem> Weapons { get; } = [];
 
@@ -83,7 +88,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             try
             {
                 var tree = await Task.Run(() => _resolver.Resolve(value.Record));
-                Detail = new WeaponDetailViewModel(tree);
+                Preview.Clear();
+                Detail = new WeaponDetailViewModel(tree) { NodeSelected = ShowPreview };
                 Status = $"{value.Name} — {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}";
             }
             finally
@@ -99,6 +105,58 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             Busy = false;
+        }
+    }
+
+    /// Loads whatever the clicked node stands for, if it is something that can be looked at.
+    ///
+    /// Reading goes through the same lock as resolving: one BundleSet, one reader, and clicking
+    /// quickly down a tree must not put two decodes into it at once.
+    private async void ShowPreview(TreeNode? node)
+    {
+        if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh) || node.PathId == 0)
+        {
+            Preview.Clear(node?.Class is null ? null : $"No preview for {node.Class}.");
+            return;
+        }
+
+        var bundle = node.Bundle;
+        if (bundle.Length == 0) { Preview.Clear("This object's bundle is not known."); return; }
+
+        try
+        {
+            await _reading.WaitAsync();
+            try
+            {
+                var loaded = await Task.Run(() =>
+                {
+                    var file = _bundles!.Open(bundle);
+                    var info = file.file.GetAssetInfo(node.PathId);
+                    if (info is null) return null;
+
+                    var field = _bundles.Context.Deserialize(file, info);
+                    if (field is null) return null;
+
+                    return node.Class == AssetClassID.Texture2D
+                        ? AssetPreview.Texture(_bundles, bundle, field)
+                        : (object?)AssetPreview.Mesh(field);
+                });
+
+                switch (loaded)
+                {
+                    case PreviewImage picture: Preview.Show(picture, $"{node.Label}   @ {bundle}"); break;
+                    case UnityMesh mesh: Preview.Show(mesh, $"{node.Label}   @ {bundle}"); break;
+                    default: Preview.Clear($"'{node.Label}' could not be decoded."); break;
+                }
+            }
+            finally
+            {
+                _reading.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            Preview.Clear(ex.Message);
         }
     }
 

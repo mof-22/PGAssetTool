@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.7" />
+    <PackageReference Include="Avalonia.Headless" Version="11.3.7" />
     <!-- Win32 and Skia directly rather than Avalonia.Desktop: that pulls the X11 and macOS
          backends too, and with them a D-Bus library carrying a high-severity advisory that a
          Windows-only tool has no reason to ship. -->
