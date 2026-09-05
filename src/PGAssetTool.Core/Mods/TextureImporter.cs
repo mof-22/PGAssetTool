@@ -9,7 +9,8 @@ public sealed record TextureChange(
     int OldWidth,
     int OldHeight,
     int NewWidth,
-    int NewHeight)
+    int NewHeight,
+    bool AlphaKept = false)
 {
     public bool Resized => OldWidth != NewWidth || OldHeight != NewHeight;
     public bool Recoded => OriginalFormat != WrittenFormat;
@@ -18,7 +19,7 @@ public sealed record TextureChange(
     {
         var format = Recoded ? $"{OriginalFormat} -> {WrittenFormat}" : OriginalFormat.ToString();
         var size = Resized ? $"{OldWidth}x{OldHeight} -> {NewWidth}x{NewHeight}" : $"{NewWidth}x{NewHeight}";
-        return $"{format} {size}";
+        return $"{format} {size}" + (AlphaKept ? ", original alpha kept" : "");
     }
 }
 
@@ -35,18 +36,33 @@ public static class TextureImporter
     /// author's artwork into a lossy block format would add compression artifacts that were never
     /// in it, and avoiding exactly that was the reason for keeping the original format in the first
     /// place. It costs size, and the original bytes stay in the stream file regardless.
-    public static TextureChange Replace(AssetTypeValueField field, string imagePath)
+    /// <param name="originalPixels">
+    /// The texture as it stands, decoded to BGRA. Used only when the replacement arrives without an
+    /// alpha channel: most of these textures keep something other than coverage there — emission,
+    /// usually — so an author who wants to repaint the colours should not have to reconstruct a
+    /// mask they never touched.
+    /// </param>
+    public static TextureChange Replace(
+        AssetTypeValueField field, string imagePath, byte[]? originalPixels = null)
     {
         var texture = TextureFile.ReadTextureFile(field);
         var original = (TextureFormat)texture.m_TextureFormat;
         int oldWidth = texture.m_Width, oldHeight = texture.m_Height;
 
+        var source = ReadImage(imagePath);
+        var keepAlpha = !source.HasAlpha
+            && originalPixels is not null
+            && source.Width == oldWidth
+            && source.Height == oldHeight
+            && originalPixels.Length >= oldWidth * oldHeight * 4;
+
+        if (keepAlpha) CopyAlpha(source, originalPixels!, oldHeight);
+
         var written = original;
-        if (!TryEncode(texture, imagePath))
+        if (!TryEncode(texture, source, original))
         {
-            texture.m_TextureFormat = (int)Fallback;
             written = Fallback;
-            if (!TryEncode(texture, imagePath))
+            if (!TryEncode(texture, source, Fallback))
                 throw new NotSupportedException(
                     $"'{texture.m_Name}' could not be written as {original} or as {Fallback}.");
         }
@@ -67,19 +83,71 @@ public static class TextureImporter
             streamData["size"].AsUInt = 0;
         }
 
-        return new TextureChange(original, written, oldWidth, oldHeight, texture.m_Width, texture.m_Height);
+        return new TextureChange(
+            original, written, oldWidth, oldHeight, texture.m_Width, texture.m_Height, keepAlpha);
     }
 
-    private static bool TryEncode(TextureFile texture, string imagePath)
+    /// Takes the alpha from the texture already in the game, row for row.
+    ///
+    /// The decoded original runs bottom up, as Unity stores it; the image just read runs top down.
+    private static void CopyAlpha(Image source, byte[] originalBgra, int height)
+    {
+        var stride = source.Width * 4;
+        for (var row = 0; row < height; row++)
+        {
+            var from = (height - 1 - row) * stride;
+            var to = row * stride;
+            for (var x = 0; x < source.Width; x++)
+                source.Bgra[to + x * 4 + 3] = originalBgra[from + x * 4 + 3];
+        }
+    }
+
+    private readonly record struct Image(byte[] Bgra, int Width, int Height, bool HasAlpha);
+
+    /// Read here rather than handed to the encoder as a path, because the alpha has to be settled
+    /// before anything is encoded.
+    private static Image ReadImage(string path)
+    {
+        using var stream = File.OpenRead(path);
+        var image = StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha)
+            ?? throw new InvalidDataException($"'{Path.GetFileName(path)}' is not an image this reads.");
+
+        var bgra = new byte[image.Width * image.Height * 4];
+        for (var i = 0; i < bgra.Length; i += 4)
+        {
+            bgra[i] = image.Data[i + 2];
+            bgra[i + 1] = image.Data[i + 1];
+            bgra[i + 2] = image.Data[i];
+            bgra[i + 3] = image.Data[i + 3];
+        }
+
+        // SourceComp is what the file held, whatever it was decoded into.
+        var hasAlpha = image.SourceComp is StbImageSharp.ColorComponents.RedGreenBlueAlpha
+                                        or StbImageSharp.ColorComponents.GreyAlpha;
+        return new Image(bgra, image.Width, image.Height, hasAlpha);
+    }
+
+    private static bool TryEncode(TextureFile texture, Image source, TextureFormat format)
     {
         try
         {
-            texture.EncodeTextureImage(imagePath, 100);
-            return texture.pictureData is { Length: > 0 };
+            // Bottom up on the way in, the same way Unity keeps it.
+            var flipped = new byte[source.Bgra.Length];
+            var stride = source.Width * 4;
+            for (var row = 0; row < source.Height; row++)
+                Array.Copy(source.Bgra, row * stride, flipped, (source.Height - 1 - row) * stride, stride);
+
+            var encoded = TextureFile.EncodeManagedData(flipped, format, source.Width, source.Height, useBgra: true);
+            if (encoded is not { Length: > 0 }) return false;
+
+            texture.m_TextureFormat = (int)format;
+            texture.SetPictureData(encoded, source.Width, source.Height);
+            return true;
         }
-        catch (NotSupportedException)
+        catch (Exception e) when (e is NotSupportedException or NotImplementedException)
         {
             return false;
         }
     }
+
 }

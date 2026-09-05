@@ -13,16 +13,18 @@ public class ToolSettingsTests : IDisposable
 
         Assert.Equal("l_en-gb", settings.Language);
         Assert.True(settings.ReplaceableOnly);
+        Assert.False(settings.OpaqueTextures);
     }
 
     [Fact]
     public void WhatIsSavedComesBack()
     {
-        new ToolSettings { Language = "l_ja", ReplaceableOnly = false }.Save(_home);
+        new ToolSettings { Language = "l_ja", ReplaceableOnly = false, OpaqueTextures = true }.Save(_home);
 
         var settings = ToolSettings.Load(_home);
         Assert.Equal("l_ja", settings.Language);
         Assert.False(settings.ReplaceableOnly);
+        Assert.True(settings.OpaqueTextures);
     }
 
     [Fact]
@@ -53,6 +55,7 @@ public class ToolSettingsTests : IDisposable
         var settings = ToolSettings.Load(_home);
         Assert.Equal("l_ko", settings.Language);
         Assert.True(settings.ReplaceableOnly);
+        Assert.False(settings.OpaqueTextures);
     }
 
     public void Dispose() => Directory.Delete(_home, recursive: true);

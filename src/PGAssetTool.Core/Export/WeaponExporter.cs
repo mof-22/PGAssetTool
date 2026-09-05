@@ -16,7 +16,12 @@ public sealed record WeaponExport(
 /// file per Transform.
 public sealed class WeaponExporter(BundleSet bundles)
 {
-    private readonly AssetExporter _exporter = new(bundles);
+    private AssetExporter? _writer;
+
+    /// Write textures with no alpha channel; see AssetExporter for why.
+    public bool Opaque { get; init; }
+
+    private AssetExporter _exporter => _writer ??= new AssetExporter(bundles) { Opaque = Opaque };
 
     /// Types worth a file of their own. Everything else is scene plumbing that reads better as part
     /// of the prefab document.

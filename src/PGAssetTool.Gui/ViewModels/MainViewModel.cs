@@ -63,6 +63,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// The game translation table names are read from, and the languages this installation offers.
     [ObservableProperty] private string _language = "l_en-gb";
 
+    /// Textures written with no alpha channel. The original is put back on the way in.
+    [ObservableProperty] private bool _opaqueTextures;
+
     public ObservableCollection<LanguageOption> Languages { get; } = [];
 
     /// Shown in the options window, because where a portable tool keeps its state is worth being
@@ -89,6 +92,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _loading = true;
         Language = _settings.Language;
         ReplaceableOnly = _settings.ReplaceableOnly;
+        OpaqueTextures = _settings.OpaqueTextures;
         _loading = false;
 
         try
@@ -213,7 +217,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 ? GameVersion.Read(_bundles.Context, _bundles.Game)
                 : null;
 
-            var export = await Task.Run(() => new WeaponExporter(_bundles)
+            var export = await Task.Run(() => new WeaponExporter(_bundles) { Opaque = _settings.OpaqueTextures }
                 .ExportAsWorkspace(tree, WorkspaceRoot, _settings.Author, version));
 
             LastExport = export.Directory;
@@ -241,7 +245,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 if (AssetPreview.Locate(_bundles!, node.Bundle, node.Class.Value, node.PathId, node.Label)
                     is not var (file, info)) return null;
 
-                return new AssetExporter(_bundles!).Export(node.Bundle, file, info, directory);
+                return new AssetExporter(_bundles!) { Opaque = _settings.OpaqueTextures }
+                    .Export(node.Bundle, file, info, directory);
             });
 
             if (written is null || written.Count == 0) { Status = $"'{node.Label}' could not be written."; return; }
@@ -356,6 +361,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public const int EditorTab = 1;
     public const int ManagerTab = 2;
 
+    partial void OnOpaqueTexturesChanged(bool value) => Remember();
+
     partial void OnReplaceableOnlyChanged(bool value)
     {
         Remember();
@@ -389,7 +396,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void Remember()
     {
         if (_loading) return;
-        _settings = _settings with { Language = Language, ReplaceableOnly = ReplaceableOnly };
+        _settings = _settings with
+        {
+            Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
+        };
         try { _settings.Save(); }
         catch (IOException) { }
     }

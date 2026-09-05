@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using AssetsTools.NET;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Import.Audio;
@@ -175,6 +176,32 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         return touched;
     }
 
+    /// The texture as the game holds it, decoded, so a replacement that arrives without an alpha
+    /// channel can be given the original one back.
+    ///
+    /// Nearly every texture keeps its pixels in a sibling stream rather than on the object, so this
+    /// has to go and fetch them. Failing is not worth stopping an apply over: all that is lost is
+    /// the chance to reuse an alpha channel.
+    private static byte[]? OriginalPixels(BundleEditor editor, AssetTypeValueField field)
+    {
+        try
+        {
+            var texture = AssetsTools.NET.Texture.TextureFile.ReadTextureFile(field);
+            var payload = texture.pictureData;
+
+            var stream = field["m_StreamData"];
+            if (!stream.IsDummy && stream["path"].AsString.Length > 0)
+                payload = editor.ReadStream(
+                    stream["path"].AsString, stream["offset"].AsLong, stream["size"].AsLong);
+
+            return payload is { Length: > 0 } ? texture.DecodeTextureRaw(payload, useBgra: true) : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     private bool EditBundle(
         InstalledMod mod, string live, string output, IEnumerable<PackOperation> operations,
         ZipArchive archive, string staging, List<AppliedOperation> applied, List<string> failed,
@@ -206,7 +233,8 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             {
                 object change = operation.Op switch
                 {
-                    PackOperations.ReplaceTexture => TextureImporter.Replace(field, source),
+                    PackOperations.ReplaceTexture =>
+                        TextureImporter.Replace(field, source, OriginalPixels(editor, field)),
                     PackOperations.ReplaceMesh => MeshImporter.Replace(field, GltfMeshReader.Read(source)),
                     PackOperations.ReplaceAudio => AudioImporter.Replace(field, source, (into, bank) => editor.AppendToStream(into, bank)),
                     _ => throw new NotSupportedException($"unknown operation '{operation.Op}'"),

@@ -20,6 +20,9 @@ public sealed class AssetExporter(BundleSet bundles)
 
     public ContainerIndex Index { get; } = new(bundles.Context);
 
+    /// Write textures with no alpha channel at all. See WriteWithoutAlpha for why anyone would.
+    public bool Opaque { get; init; }
+
     /// `fileNameOverride` keeps distinct assets that share a name from overwriting each other's
     /// output; the caller knows which names repeat and can qualify them. `sourceBytes` is the data
     /// the asset was actually read from, which differs from what the bundle holds when the caller
@@ -92,8 +95,47 @@ public sealed class AssetExporter(BundleSet bundles)
 
         var path = stem + ".png";
         texture.pictureData = pixels;
-        if (!texture.DecodeTextureImage(pixels, path, ImageExportType.Png, 100)) return null;
+
+        if (Opaque)
+        {
+            if (!WriteWithoutAlpha(texture, pixels, path)) return null;
+        }
+        else if (!texture.DecodeTextureImage(pixels, path, ImageExportType.Png, 100)) return null;
+
         return new ExportedAsset(path, AssetClassID.Texture2D, "", "png", new FileInfo(path).Length, Placeholder);
+    }
+
+    /// Writes the colour channels and drops the alpha entirely.
+    ///
+    /// Most of these textures keep something other than coverage in that channel — emission,
+    /// usually — so an image editor opens them as mostly-transparent and painting means fighting a
+    /// mask that has nothing to do with what is being painted. The alpha is not lost: an image
+    /// brought back without one is given the original's again.
+    private static bool WriteWithoutAlpha(TextureFile texture, byte[] pixels, string path)
+    {
+        var bgra = texture.DecodeTextureRaw(pixels, useBgra: true);
+        if (bgra is null || bgra.Length < texture.m_Width * texture.m_Height * 4) return false;
+
+        var rgb = new byte[texture.m_Width * texture.m_Height * 3];
+        var stride = texture.m_Width * 4;
+
+        for (var row = 0; row < texture.m_Height; row++)
+        {
+            // Unity stores the bottom row first; a PNG starts at the top.
+            var from = (texture.m_Height - 1 - row) * stride;
+            var to = row * texture.m_Width * 3;
+            for (var x = 0; x < texture.m_Width; x++)
+            {
+                rgb[to + x * 3] = bgra[from + x * 4 + 2];
+                rgb[to + x * 3 + 1] = bgra[from + x * 4 + 1];
+                rgb[to + x * 3 + 2] = bgra[from + x * 4];
+            }
+        }
+
+        using var file = File.Create(path);
+        new StbImageWriteSharp.ImageWriter().WritePng(
+            rgb, texture.m_Width, texture.m_Height, StbImageWriteSharp.ColorComponents.RedGreenBlue, file);
+        return true;
     }
 
     /// A mesh that cannot be unpacked falls through to the field dump rather than failing the export.

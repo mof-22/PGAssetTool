@@ -30,6 +30,21 @@ public sealed class BundleEditor : IDisposable
 
     public void Stage(AssetFileInfo info, AssetTypeValueField field) => info.SetNewData(field);
 
+    /// Reads a slice of one of the bundle's stream entries — where texture pixels and audio banks
+    /// actually live, since the object only points at them.
+    public byte[]? ReadStream(string sourcePath, long offset, long size)
+    {
+        var wanted = Path.GetFileName(sourcePath);
+        var entry = _bundle.file.BlockAndDirInfo.DirectoryInfos
+            .FirstOrDefault(e => string.Equals(e.Name, wanted, StringComparison.OrdinalIgnoreCase));
+        if (entry is null || size <= 0) return null;
+
+        var reader = _bundle.file.DataReader;
+        reader.Position = entry.Offset + offset;
+        return reader.ReadBytes((int)size);
+    }
+
+
     /// Appends bytes to one of the bundle's stream entries, returning the offset they landed at.
     ///
     /// An AudioClip does not carry its own payload; it points at a byte range in a sibling

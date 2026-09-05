@@ -17,6 +17,12 @@
     </StackPanel>
 
     <StackPanel Spacing="6">
+      <CheckBox Content="Write textures without an alpha channel" IsChecked="{Binding OpaqueTextures}" />
+      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                 Text="Most weapon textures keep emission rather than transparency in that channel, so an image editor opens them almost invisible. An image brought back without an alpha channel is given the original one, so nothing is lost by turning this on." />
+    </StackPanel>
+
+    <StackPanel Spacing="6">
       <CheckBox Content="Show only what can be replaced" IsChecked="{Binding ReplaceableOnly}" />
       <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
                  Text="Hides the transforms, scripts and animation an asset tree is mostly made of. What counts as replaceable follows what the tool can actually write back." />

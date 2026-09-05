@@ -27,6 +27,13 @@ public sealed record ToolSettings
     /// Recorded in the manifest of anything extracted as a workspace.
     public string Author { get; init; } = "";
 
+    /// Write textures with no alpha channel.
+    ///
+    /// Most of them keep something other than coverage there — emission, usually — so an editor
+    /// opens them as mostly transparent and painting means fighting a mask that has nothing to do
+    /// with the colours. An image brought back without an alpha channel is given the original one.
+    public bool OpaqueTextures { get; init; }
+
     /// Whether the asset tree starts filtered to what can be written back.
     public bool ReplaceableOnly { get; init; } = true;
 

@@ -1,6 +1,9 @@
 using AssetsTools.NET.Extra;
 using Avalonia;
 using Avalonia.Headless;
+using PGAssetTool.Core.Assets;
+using PGAssetTool.Core.Export;
+using PGAssetTool.Core.Mods;
 using PGAssetTool.Core.Preview;
 using PGAssetTool.Gui.ViewModels;
 
@@ -297,8 +300,10 @@ internal static class SelfTest
                 + $"{model.Editor.Files.Count} files in '{model.Editor.SelectedWorkspace?.Name}'");
 
             if (model.Editor.Files.Count == 0) return Fail("the editor saw no files in a fresh extract");
-            if (model.Editor.Workspaces.Any(w => w.Edited != 0))
-                return Fail("a freshly extracted workspace should have nothing edited");
+            // Only the one just written: the root also holds whatever was extracted before, and
+            // someone else's half-finished edits are not this test's business.
+            if (model.Editor.SelectedWorkspace is { Edited: not 0 } stale)
+                return Fail($"'{stale.Name}' was just extracted and already shows {stale.Edited} edited");
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
@@ -321,6 +326,12 @@ internal static class SelfTest
             Console.WriteLine($"editor   after an outside edit, marked as edited: {marked}");
             if (!marked) return Fail("an edit made outside the tool was not noticed");
 
+            // Alpha in these textures is usually emission rather than coverage, so an author can
+            // ask for the colours alone. What comes back without an alpha channel has to be given
+            // the original one, or turning that option on would flatten every mask in the game.
+            if (RoundTripWithoutAlpha(model) is { } alphaProblem) return Fail(alphaProblem);
+
+            // With something genuinely edited, the whole loop: build a pack and put it in the game.
             // With something genuinely edited, the whole loop: build a pack and put it in the game.
             // Only files that differ are packed, so this is also what says the edit was noticed.
             model.Editor.PackAndApplyCommand.Execute(null);
@@ -359,6 +370,65 @@ internal static class SelfTest
 
     /// Selecting resolves off the UI thread, and Detail holds the previous weapon while it does —
     /// so waiting for it to be non-null passes immediately on the wrong tree.
+    /// Writes one texture with no alpha channel, reads it back through the importer and checks the
+    /// original alpha survived. Answers null when it did.
+    private static string? RoundTripWithoutAlpha(MainViewModel model)
+    {
+        if (model.Game is null) return "the game is not open";
+        using var bundles = new BundleSet(model.Game);
+
+        var file = bundles.Open("d_w");
+        var info = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.Texture2D,
+            "eco_rifle_map", StringComparison.OrdinalIgnoreCase);
+        if (info is null) return "eco_rifle_map is not in d_w any more";
+
+        var field = bundles.Context.Deserialize(file, info)!;
+        var before = AssetPreview.Texture(bundles, "d_w", field);
+        if (before is null) return "the original could not be decoded";
+
+        long alphaBefore = 0;
+        for (var i = 3; i < before.Bgra.Length; i += 4) alphaBefore += before.Bgra[i];
+
+        var directory = Directory.CreateTempSubdirectory("pgassettool-alpha").FullName;
+        try
+        {
+            var written = new AssetExporter(bundles) { Opaque = true }
+                .Export("d_w", file, info, directory, fileNameOverride: "rgb");
+
+            using (var stream = File.OpenRead(written[0].Path))
+            {
+                var read = StbImageSharp.ImageResult.FromStream(
+                    stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+                if (read?.SourceComp != StbImageSharp.ColorComponents.RedGreenBlue)
+                    return $"the opaque export still carries {read?.SourceComp}";
+            }
+
+            var stream2 = field["m_StreamData"];
+            var payload = bundles.ReadResource("d_w", stream2["path"].AsString,
+                stream2["offset"].AsLong, stream2["size"].AsLong);
+            var pixels = AssetsTools.NET.Texture.TextureFile.ReadTextureFile(field)
+                .DecodeTextureRaw(payload, useBgra: true);
+
+            var again = bundles.Context.Deserialize(file, info)!;
+            var change = TextureImporter.Replace(again, written[0].Path, pixels);
+            if (!change.AlphaKept) return "the importer did not reuse the original alpha";
+
+            var after = AssetsTools.NET.Texture.TextureFile.ReadTextureFile(again);
+            var decoded = after.DecodeTextureRaw(after.pictureData, useBgra: true);
+            long alphaAfter = 0;
+            for (var i = 3; i < decoded.Length; i += 4) alphaAfter += decoded[i];
+
+            Console.WriteLine($"alpha    exported without it, reimported with the original back: "
+                + $"mean {alphaBefore / (before.Bgra.Length / 4.0):F1} -> {alphaAfter / (decoded.Length / 4.0):F1}");
+
+            return alphaBefore == alphaAfter ? null : "the alpha came back different";
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static bool Select(MainViewModel model, int number)
     {
         model.Selected = model.Weapons.First(w => w.Record.GameNumber == number);

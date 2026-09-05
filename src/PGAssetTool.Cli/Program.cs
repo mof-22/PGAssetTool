@@ -55,6 +55,10 @@ if (command is "-h" or "--help" or "help")
           --out <directory>    Where extract writes (default ./workspace).
           --author <name>      Recorded in the manifest by extract --workspace.
           --force              Let apply back up a bundle that is already modified.
+          --opaque             Write textures with no alpha channel. Most of them keep emission
+                               rather than transparency there, and an editor opens those as almost
+                               invisible. An image brought back without an alpha channel keeps the
+                               original one.
         """);
     return 0;
 }
@@ -369,7 +373,7 @@ var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 if (command == "extract")
 {
     var outputRoot = Option("out") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace");
-    var exporter = new WeaponExporter(bundles);
+    var exporter = new WeaponExporter(bundles) { Opaque = args.Contains("--opaque") };
     var asWorkspace = args.Contains("--workspace");
     var export = asWorkspace
         ? exporter.ExportAsWorkspace(tree, outputRoot,
