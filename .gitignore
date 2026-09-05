@@ -21,3 +21,6 @@ PGAssetTool-data/
 
 # Avalonia's XAML compiler writes generated sources here
 src/PGAssetTool.Gui/obj/
+
+# `dotnet publish -o dist` output: a 47MB single-file exe, rebuilt on demand
+dist/
