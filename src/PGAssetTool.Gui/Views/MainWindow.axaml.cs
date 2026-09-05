@@ -23,7 +23,12 @@ public partial class MainWindow : Window
         // control belongs to the view, so the model only reports that someone asked for it.
         DataContextChanged += (_, _) =>
         {
-            if (DataContext is MainViewModel model) model.SearchRequested += FocusSearch;
+            if (DataContext is not MainViewModel model) return;
+
+            model.SearchRequested += FocusSearch;
+
+            // A file watcher fires on its own thread; everything it leads to touches the UI.
+            model.Editor.Settled += () => Avalonia.Threading.Dispatcher.UIThread.Post(model.Editor.Refresh);
         };
     }
 
@@ -49,6 +54,11 @@ public partial class MainWindow : Window
 
     private void OnOptions(object? sender, RoutedEventArgs e)
         => new OptionsWindow { DataContext = DataContext }.ShowDialog(this);
+
+    private void OnRescan(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel model) model.Editor.Rescan(model.WorkspaceRoot);
+    }
 
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
 }

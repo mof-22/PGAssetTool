@@ -9,6 +9,7 @@ using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Mods;
 using PGAssetTool.Core.Settings;
+using PGAssetTool.Core.Mods;
 using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Preview;
 using PGAssetTool.Core.Weapons;
@@ -28,6 +29,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Preview = new PreviewViewModel();
         Preview.PropertyChanged += OnPreviewChanged;
+        Editor = new EditorViewModel(() => _bundles, _reading);
+        Editor.PackRequested += BuildPack;
     }
 
     [ObservableProperty] private string _status = "Looking for the game…";
@@ -37,6 +40,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private WeaponDetailViewModel? _detail;
 
     public PreviewViewModel Preview { get; }
+
+    /// The workspace side. Given the same reader and the same lock as everything else, because
+    /// there is one BundleSet and it is not safe to use from two places at once.
+    public EditorViewModel Editor { get; }
 
     /// The resolved weapon behind the current tree, kept so the tree can be rebuilt when the filter
     /// changes without reading the bundles again.
@@ -99,6 +106,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 Languages.Add(new LanguageOption(bundle, name));
 
             Show(_catalogs!.Items.Weapons);
+            Editor.Rescan(WorkspaceRoot);
             Status = $"{_catalogs.Items.Count} weapons";
         }
         catch (Exception ex)
@@ -116,6 +124,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         var wanted = Selected?.Record.GameNumber;
 
+        Editor.Dispose();
         _bundles?.Dispose();
         (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
         Detail = null;
@@ -208,6 +217,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 .ExportAsWorkspace(tree, WorkspaceRoot, _settings.Author, version));
 
             LastExport = export.Directory;
+            Editor.Rescan(WorkspaceRoot);
             Status = $"{export.Assets.Count} files written to {export.Directory}"
                 + (export.Skipped.Count > 0 ? $", {export.Skipped.Count} skipped" : "");
         });
@@ -238,12 +248,68 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             LastExport = directory;
             Status = $"{string.Join(", ", written.Select(w => Path.GetFileName(w.Path)))} -> {directory}";
+            Editor.Rescan(WorkspaceRoot);
+        });
+    }
+
+    /// Builds a pack from a workspace, and installs it when asked.
+    ///
+    /// Building and applying are one gesture because an author repeats them: edit, pack, apply,
+    /// look at it in the game. Building alone stays separate for packs meant to be handed out.
+    private async Task BuildPack(string workspace, bool install)
+    {
+        var output = Path.Combine(workspace,
+            Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace)) + PackBuilder.Extension);
+
+        await RunExclusively(async () =>
+        {
+            var built = await Task.Run(() => PackBuilder.Build(workspace, output));
+            Status = $"{built.Operations} operation(s), {built.Bytes:N0} bytes -> {built.Path}";
+            if (!install) return;
+
+            if (_bundles is null) { Status = "The game is not open."; return; }
+            var game = _bundles.Game;
+
+            // The reader has the bundles open, and applying rewrites the same files. A separate
+            // process never noticed this; a window that browses and installs has to put the reader
+            // down first and pick it up again afterwards.
+            _bundles.Dispose();
+            (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
+            Detail = null;
+            Preview.Clear();
+
+            ReconcileResult result;
+            try
+            {
+                var store = new ModStore(game);
+                var version = "unknown";
+                using (var reading = new BundleSet(game))
+                    if (reading.Context.HasClassDatabase) version = GameVersion.Read(reading.Context, game);
+
+                result = await Task.Run(() => new ModApplier(game, store).Install(built.Path, version));
+            }
+            finally
+            {
+                await LoadAsync();
+            }
+
+            // The warning is the reason applying from here is worth having: it is the moment an
+            // author can still decide that reaching another weapon was not what they meant.
+            var shared = result.Shared.Count > 0
+                ? "  " + string.Join("  ", result.Shared.Select(s => s.ToString()))
+                : "";
+
+            Status = $"{result.Applied.Count} applied, {result.Failed.Count} failed."
+                + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + shared;
         });
     }
 
     /// Where extraction writes. Beside the tool unless the settings say otherwise, because a
     /// window has no meaningful current directory to fall back on.
     public string WorkspaceRoot => _settings.WorkspaceIn(ModStore.DefaultHome());
+
+    /// The installation, once it is open. The self-test uses it to put the game back.
+    public GameInstallation? Game => _bundles?.Game;
 
     /// The last directory written to, so the view can offer to open it.
     [ObservableProperty] private string? _lastExport;
@@ -261,7 +327,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void FocusSearch()
     {
-        Workspace = Browse;
+        Workspace = BrowseTab;
         SearchRequested?.Invoke();
     }
 
@@ -278,17 +344,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void ToggleAlpha() => Preview.ShowAlpha = !Preview.ShowAlpha;
 
     [RelayCommand]
-    private void ShowBrowse() => Workspace = Browse;
+    private void ShowBrowse() => Workspace = BrowseTab;
 
     [RelayCommand]
-    private void ShowEditor() => Workspace = Editor;
+    private void ShowEditor() => Workspace = EditorTab;
 
     [RelayCommand]
-    private void ShowManager() => Workspace = Manager;
+    private void ShowManager() => Workspace = ManagerTab;
 
-    public const int Browse = 0;
-    public const int Editor = 1;
-    public const int Manager = 2;
+    public const int BrowseTab = 0;
+    public const int EditorTab = 1;
+    public const int ManagerTab = 2;
 
     partial void OnReplaceableOnlyChanged(bool value)
     {
@@ -465,6 +531,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        Editor.Dispose();
         _bundles?.Dispose();
         _reading.Dispose();
     }

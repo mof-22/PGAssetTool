@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:PGAssetTool.Gui.ViewModels"
         xmlns:ctl="using:PGAssetTool.Gui.Controls"
+        xmlns:pack="using:PGAssetTool.Core.Pack"
         x:Class="PGAssetTool.Gui.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="{Binding Title}"
@@ -29,6 +30,54 @@
     </Style>
   </Window.Styles>
 
+  <Window.DataTemplates>
+    <!-- Shared: the browse pane and both halves of the editor comparison show the same thing. -->
+    <DataTemplate DataType="vm:PreviewViewModel">
+      <DockPanel>
+      
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+          <!-- Applies one texture to the whole model: the question it answers is what this mesh
+               looks like wearing another skin, and a skin is not per-submesh. -->
+          <ComboBox ItemsSource="{Binding TextureChoices}" SelectedItem="{Binding ChosenTexture}"
+                    IsVisible="{Binding HasMesh}" HorizontalAlignment="Stretch" Margin="0,0,0,4" />
+          <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
+                    IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
+          <TextBlock Text="{Binding Caption}" Classes="dim mono" TextWrapping="Wrap" />
+        </StackPanel>
+      
+        <Border Background="#111113" CornerRadius="4">
+          <Panel>
+            <TextBlock Text="{Binding Nothing}" Classes="dim"
+                       IsVisible="{Binding Nothing, Converter={x:Static ObjectConverters.IsNotNull}}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
+                       MaxWidth="300" TextAlignment="Center" />
+      
+            <Panel IsVisible="{Binding ShowAlpha}">
+              <Panel.Background>
+                <DrawingBrush TileMode="Tile" SourceRect="0,0,16,16" DestinationRect="0,0,16,16"
+                              Stretch="None">
+                  <DrawingBrush.Drawing>
+                    <DrawingGroup>
+                      <GeometryDrawing Brush="#2a2a2e" Geometry="M0,0 L16,0 16,16 0,16 Z" />
+                      <GeometryDrawing Brush="#1a1a1d" Geometry="M0,0 L8,0 8,8 0,8 Z M8,8 L16,8 16,16 8,16 Z" />
+                    </DrawingGroup>
+                  </DrawingBrush.Drawing>
+                </DrawingBrush>
+              </Panel.Background>
+            </Panel>
+      
+            <Image Source="{Binding Image}" IsVisible="{Binding HasImage}"
+                   Stretch="Uniform" Margin="12"
+                   RenderOptions.BitmapInterpolationMode="None" />
+      
+            <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
+                          IsVisible="{Binding HasMesh}" />
+          </Panel>
+        </Border>
+      </DockPanel>
+    </DataTemplate>
+  </Window.DataTemplates>
+
   <DockPanel>
 
     <!-- HotKey, not InputGesture: the latter only prints the shortcut beside the item, while HotKey
@@ -55,6 +104,7 @@
                   InputGesture="Ctrl+F" />
         <MenuItem Header="_Reload from disk" Command="{Binding ReloadCommand}" HotKey="Ctrl+R"
                   InputGesture="Ctrl+R" />
+        <MenuItem Header="Rescan _workspaces" Click="OnRescan" HotKey="F5" InputGesture="F5" />
       </MenuItem>
       <MenuItem Header="_View">
         <MenuItem Header="_Replaceable only" ToggleType="CheckBox"
@@ -140,55 +190,76 @@
 
             <GridSplitter Grid.Column="1" Background="#27272a" />
 
-            <DockPanel Grid.Column="2" DataContext="{Binding Preview}" x:DataType="vm:PreviewViewModel">
-
-              <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-                <!-- Applies one texture to the whole model: the question it answers is what this mesh
-                     looks like wearing another skin, and a skin is not per-submesh. -->
-                <ComboBox ItemsSource="{Binding TextureChoices}" SelectedItem="{Binding ChosenTexture}"
-                          IsVisible="{Binding HasMesh}" HorizontalAlignment="Stretch" Margin="0,0,0,4" />
-                <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
-                          IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
-                <TextBlock Text="{Binding Caption}" Classes="dim mono" TextWrapping="Wrap" />
-              </StackPanel>
-
-              <Border Background="#111113" CornerRadius="4">
-                <Panel>
-                  <TextBlock Text="{Binding Nothing}" Classes="dim"
-                             IsVisible="{Binding Nothing, Converter={x:Static ObjectConverters.IsNotNull}}"
-                             HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
-                             MaxWidth="300" TextAlignment="Center" />
-
-                  <Panel IsVisible="{Binding ShowAlpha}">
-                    <Panel.Background>
-                      <DrawingBrush TileMode="Tile" SourceRect="0,0,16,16" DestinationRect="0,0,16,16"
-                                    Stretch="None">
-                        <DrawingBrush.Drawing>
-                          <DrawingGroup>
-                            <GeometryDrawing Brush="#2a2a2e" Geometry="M0,0 L16,0 16,16 0,16 Z" />
-                            <GeometryDrawing Brush="#1a1a1d" Geometry="M0,0 L8,0 8,8 0,8 Z M8,8 L16,8 16,16 8,16 Z" />
-                          </DrawingGroup>
-                        </DrawingBrush.Drawing>
-                      </DrawingBrush>
-                    </Panel.Background>
-                  </Panel>
-
-                  <Image Source="{Binding Image}" IsVisible="{Binding HasImage}"
-                         Stretch="Uniform" Margin="12"
-                         RenderOptions.BitmapInterpolationMode="None" />
-
-                  <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
-                                IsVisible="{Binding HasMesh}" />
-                </Panel>
-              </Border>
-            </DockPanel>
+            <ContentControl Grid.Column="2" Content="{Binding Preview}" />
           </Grid>
         </Grid>
       </TabItem>
 
       <TabItem Header="Editor">
-        <TextBlock Classes="pending"
-                   Text="Not built yet. This is where an extracted weapon will be listed file by file with what has been edited, shown against the originals, and built into a pack." />
+        <Grid ColumnDefinitions="260,4,320,4,*" Margin="10"
+              DataContext="{Binding Editor}" x:DataType="vm:EditorViewModel">
+
+          <DockPanel Grid.Column="0">
+            <TextBlock DockPanel.Dock="Top" Text="Extracted" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="dim"
+                       TextWrapping="Wrap" Margin="0,6,0,0" />
+            <ListBox ItemsSource="{Binding Workspaces}" SelectedItem="{Binding SelectedWorkspace}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:WorkspaceItem">
+                  <StackPanel Margin="0,2">
+                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Summary}" Classes="dim" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+
+          <GridSplitter Grid.Column="1" Background="#27272a" />
+
+          <DockPanel Grid.Column="2">
+            <TextBlock DockPanel.Dock="Top" Text="Files" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <ListBox ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="pack:WorkspaceFile">
+                  <Grid ColumnDefinitions="16,*" Margin="0,2">
+                    <!-- A pencil marks what would go into a pack: packing keeps only the files
+                         whose contents differ from what was written out. -->
+                    <TextBlock Grid.Column="0" Text="✎" IsVisible="{Binding Edited}" />
+                    <StackPanel Grid.Column="1">
+                      <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Folder}" Classes="dim mono" />
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+
+          <GridSplitter Grid.Column="3" Background="#27272a" />
+
+          <DockPanel Grid.Column="4">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+              <Button Content="Build pack" Command="{Binding PackCommand}"
+                      IsEnabled="{Binding CanPack}" />
+              <Button Content="Build and apply" Command="{Binding PackAndApplyCommand}"
+                      IsEnabled="{Binding CanPack}" />
+              <CheckBox Content="Side by side" IsChecked="{Binding SideBySide}"
+                        VerticalAlignment="Center" />
+              <Button Content="Flip" Command="{Binding FlipCommand}"
+                      IsVisible="{Binding !SideBySide}" />
+            </StackPanel>
+
+            <!-- Stacked, not side by side: textures here are square far more often than not, and
+                 the pane is taller than it is wide, so two squares across each get half the room. -->
+            <Grid RowDefinitions="*,8,*" IsVisible="{Binding SideBySide}">
+              <ContentControl Grid.Row="0" Content="{Binding Original}" />
+              <ContentControl Grid.Row="2" Content="{Binding Edited}" />
+            </Grid>
+
+            <ContentControl Content="{Binding Shown}" IsVisible="{Binding !SideBySide}" />
+          </DockPanel>
+        </Grid>
       </TabItem>
 
       <TabItem Header="Manager">

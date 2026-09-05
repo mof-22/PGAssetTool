@@ -197,7 +197,7 @@ internal static class SelfTest
             if (!model.ReplaceableOnly) return Fail("the filter command did not turn it back on");
 
             model.ShowManagerCommand.Execute(null);
-            if (model.Workspace != MainViewModel.Manager) return Fail("the workspace command did nothing");
+            if (model.Workspace != MainViewModel.ManagerTab) return Fail("the workspace command did nothing");
             model.ShowBrowseCommand.Execute(null);
 
             Console.WriteLine($"options  {model.Languages.Count} languages, settings at {model.SettingsPath}");
@@ -289,6 +289,61 @@ internal static class SelfTest
                 + $"{operations.Select(o => o.Target.Container).Distinct().Count()} bundles");
             if (operations.Count == 0) return Fail("the manifest named nothing replaceable");
 
+
+            // The editor reads the workspace that was just written, and has to notice an edit made
+            // to it from outside — which is the whole point of the round trip.
+            model.Editor.Rescan(model.WorkspaceRoot);
+            Console.WriteLine($"editor   {model.Editor.Workspaces.Count} workspaces, "
+                + $"{model.Editor.Files.Count} files in '{model.Editor.SelectedWorkspace?.Name}'");
+
+            if (model.Editor.Files.Count == 0) return Fail("the editor saw no files in a fresh extract");
+            if (model.Editor.Workspaces.Any(w => w.Edited != 0))
+                return Fail("a freshly extracted workspace should have nothing edited");
+
+            var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
+            if (texture is null) return Fail("no texture in the extracted workspace");
+
+            model.Editor.SelectedFile = texture;
+            for (var waited = 0; model.Editor.Edited.Nothing is not null && waited < 60_000; waited += 50)
+                Thread.Sleep(50);
+            Console.WriteLine($"editor   original: {model.Editor.Original.Caption}");
+            Console.WriteLine($"editor   edited:   {model.Editor.Edited.Caption}");
+
+            if (model.Editor.Original.Nothing is { } gameSide) return Fail($"the game side did not load: {gameSide}");
+            if (model.Editor.Edited.Nothing is { } fileSide) return Fail($"the file side did not load: {fileSide}");
+
+            // Paint over it the way an image editor would, and ask again.
+            var bytes = File.ReadAllBytes(texture.FullPath);
+            File.WriteAllBytes(texture.FullPath, [.. bytes, .. new byte[16]]);
+            model.Editor.Refresh();
+
+            var marked = model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath).Edited;
+            Console.WriteLine($"editor   after an outside edit, marked as edited: {marked}");
+            if (!marked) return Fail("an edit made outside the tool was not noticed");
+
+            // With something genuinely edited, the whole loop: build a pack and put it in the game.
+            // Only files that differ are packed, so this is also what says the edit was noticed.
+            model.Editor.PackAndApplyCommand.Execute(null);
+            for (var waited = 0; model.Busy && waited < 300_000; waited += 50) Thread.Sleep(50);
+            Console.WriteLine($"pack     {model.Status}");
+
+            if (model.Status.Contains("failed") && !model.Status.Contains("0 failed"))
+                return Fail($"applying reported failures: {model.Status}");
+            if (!model.Status.Contains("applied")) return Fail($"the pack was not applied: {model.Status}");
+
+            var installed = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
+            Console.WriteLine($"pack     installed: {string.Join(", ", installed.Select(m => m.Id))}");
+            if (installed.Count == 0) return Fail("nothing ended up in the ledger");
+
+            // Put the game back: this is a test, not a change anyone asked for.
+            new PGAssetTool.Core.Mods.ModApplier(model.Game!, new PGAssetTool.Core.Mods.ModStore(model.Game!))
+                .Remove(installed[0].Id);
+            Console.WriteLine("pack     removed again");
+
+            File.WriteAllBytes(texture.FullPath, bytes);
+            model.Editor.Refresh();
+            if (model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath).Edited)
+                return Fail("putting the file back should clear the mark");
 
             return 0;
         }

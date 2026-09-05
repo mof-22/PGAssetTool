@@ -102,6 +102,48 @@ public static class AssetPreview
         }
     }
 
+    /// An edited file read back for comparison against what the game holds.
+    ///
+    /// The same decoders the importers use, so what is shown is what would be written: a PNG that
+    /// the texture importer would reject shows nothing here rather than a preview of something the
+    /// pack could not contain.
+    public static object? FromFile(string path)
+    {
+        var extension = Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
+        try
+        {
+            return extension switch
+            {
+                "png" or "jpg" or "jpeg" or "bmp" or "tga" => Picture(path),
+                "glb" or "gltf" => Import.Meshes.GltfMeshReader.Read(path),
+                _ => null,
+            };
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static PreviewImage? Picture(string path)
+    {
+        using var stream = File.OpenRead(path);
+        var image = StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+        if (image is null || image.Width == 0) return null;
+
+        // Stb hands back RGBA rows top down; a bitmap wants BGRA the same way up.
+        var bgra = new byte[image.Width * image.Height * 4];
+        for (var i = 0; i < bgra.Length; i += 4)
+        {
+            bgra[i] = image.Data[i + 2];
+            bgra[i + 1] = image.Data[i + 1];
+            bgra[i + 2] = image.Data[i];
+            bgra[i + 3] = image.Data[i + 3];
+        }
+
+        return new PreviewImage(image.Width, image.Height, bgra);
+    }
+
     private static byte[] FlipRows(byte[] bgra, int width, int height)
     {
         var stride = width * 4;
