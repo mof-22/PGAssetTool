@@ -278,7 +278,7 @@ var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 if (command == "extract")
 {
     var outputRoot = Option("out") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace");
-    var exporter = new WeaponExporter(bundles, catalogs);
+    var exporter = new WeaponExporter(bundles);
     var asWorkspace = args.Contains("--workspace");
     var export = asWorkspace
         ? exporter.ExportAsWorkspace(tree, outputRoot,

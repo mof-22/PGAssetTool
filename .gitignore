@@ -14,3 +14,7 @@ obj/
 # Command output dumped while exploring. These contain game-derived data.
 *.txt
 !requirements*.txt
+
+# Backups and installed-mod state. Kept beside the tool so uninstalling the game cannot
+# reach them, but they are local state and game-derived, never committed.
+PGAssetTool-data/

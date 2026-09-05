@@ -31,7 +31,7 @@ public sealed record InstalledMod
 /// subdirectory, named after its path, so several do not share a store.
 public sealed class ModStore
 {
-    public const string DirectoryName = "PGAssetTool";
+    public const string DataDirectoryName = "PGAssetTool-data";
     private const string StateFileName = "installed.json";
 
     private static readonly JsonSerializerOptions Json = new()
@@ -43,13 +43,27 @@ public sealed class ModStore
 
     private readonly GameInstallation _game;
 
-    public ModStore(GameInstallation game)
+    public ModStore(GameInstallation game, string? home = null)
     {
         _game = game;
-        Root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            DirectoryName, "installs", KeyFor(game.RootDirectory));
+        Root = Path.Combine(home ?? DefaultHome(), "installs", KeyFor(game.RootDirectory));
         BackupRoot = Path.Combine(Root, "backup");
+    }
+
+    /// Beside the tool, not beside the game and not off in the user profile.
+    ///
+    /// From a published build that is the executable's own directory. From a development build the
+    /// executable sits several levels down in bin/, which a rebuild can wipe, so the search walks up
+    /// to the checkout it belongs to and settles there instead.
+    public static string DefaultHome()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var candidate = directory; candidate is not null; candidate = candidate.Parent)
+        {
+            if (candidate.EnumerateDirectories(".git").Any() || candidate.EnumerateFiles("*.slnx").Any())
+                return Path.Combine(candidate.FullName, DataDirectoryName);
+        }
+        return Path.Combine(directory.FullName, DataDirectoryName);
     }
 
     /// Readable enough to recognise, with a digest of the full path so two installations sharing a

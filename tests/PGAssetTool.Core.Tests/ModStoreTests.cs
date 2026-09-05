@@ -8,12 +8,46 @@ public class ModStoreTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("pgassettool-store").FullName;
     private readonly ModStore _store;
 
+    private readonly string _home;
+
     public ModStoreTests()
     {
         var bundles = Path.Combine(_root, "Game_Data", "StreamingAssets", "Cache", "bundles");
         Directory.CreateDirectory(bundles);
         File.WriteAllText(Path.Combine(bundles, "embedded_asset_bundles.json"), "[]");
-        _store = new ModStore(GameInstallation.Open(_root));
+        _home = Path.Combine(_root, "home");
+        _store = new ModStore(GameInstallation.Open(_root), _home);
+    }
+
+    [Fact]
+    public void TheStoreLivesUnderItsHome()
+    {
+        // Not under the game: uninstalling it would take the backups with it, at the moment the
+        // downloaded bundle cache outlives them.
+        Assert.StartsWith(_home, _store.Root, StringComparison.Ordinal);
+        Assert.DoesNotContain(Path.GetFullPath(_root) + Path.DirectorySeparatorChar + "Game_Data", _store.Root);
+    }
+
+    [Fact]
+    public void TwoInstallationsDoNotShareAStore()
+    {
+        var other = Directory.CreateTempSubdirectory("pgassettool-other").FullName;
+        try
+        {
+            var bundles = Path.Combine(other, "Game_Data", "StreamingAssets", "Cache", "bundles");
+            Directory.CreateDirectory(bundles);
+            File.WriteAllText(Path.Combine(bundles, "embedded_asset_bundles.json"), "[]");
+            Assert.NotEqual(_store.Root, new ModStore(GameInstallation.Open(other), _home).Root);
+        }
+        finally { Directory.Delete(other, recursive: true); }
+    }
+
+    [Fact]
+    public void TheDefaultHomeSitsBesideTheToolRatherThanInsideItsBuildOutput()
+    {
+        var home = ModStore.DefaultHome();
+        Assert.EndsWith(ModStore.DataDirectoryName, home, StringComparison.Ordinal);
+        Assert.DoesNotContain($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", home);
     }
 
     public void Dispose() => Directory.Delete(_root, recursive: true);

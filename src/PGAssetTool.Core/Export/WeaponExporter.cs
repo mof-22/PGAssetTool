@@ -14,7 +14,7 @@ public sealed record WeaponExport(
 /// Writes out everything belonging to one weapon, arranged so the result is browsable: images in
 /// one place, audio in another, and the object graph as a single readable document rather than a
 /// file per Transform.
-public sealed class WeaponExporter(BundleSet bundles, GameCatalogs catalogs)
+public sealed class WeaponExporter(BundleSet bundles)
 {
     private readonly AssetExporter _exporter = new(bundles);
 
