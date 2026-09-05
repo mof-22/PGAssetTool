@@ -40,6 +40,8 @@
          opened overwrite the value the model started with. -->
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="_File">
+        <MenuItem Header="_Options…" Click="OnOptions" HotKey="Ctrl+OemComma" InputGesture="Ctrl+OemComma" />
+        <Separator />
         <MenuItem Header="E_xit" Click="OnExit" InputGesture="Alt+F4" />
       </MenuItem>
       <MenuItem Header="_Edit">

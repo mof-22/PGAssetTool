@@ -37,5 +37,8 @@ public partial class MainWindow : Window
 
     private void FocusSearch() => this.FindControl<TextBox>("Search")?.Focus();
 
+    private void OnOptions(object? sender, RoutedEventArgs e)
+        => new OptionsWindow { DataContext = DataContext }.ShowDialog(this);
+
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
 }

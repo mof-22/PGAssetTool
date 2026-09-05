@@ -185,6 +185,21 @@ internal static class SelfTest
             if (model.Workspace != MainViewModel.Manager) return Fail("the workspace command did nothing");
             model.ShowBrowseCommand.Execute(null);
 
+            Console.WriteLine($"options  {model.Languages.Count} languages, settings at {model.SettingsPath}");
+            if (model.Languages.Count < 2) return Fail("the game offers more than one language");
+
+            // Switching reads the game again, so this is also the reload path.
+            var before = model.Weapons.FirstOrDefault(w => w.Record.GameNumber == 16)?.Name;
+            model.Language = "l_ja";
+            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+
+            var after = model.Weapons.FirstOrDefault(w => w.Record.GameNumber == 16)?.Name;
+            Console.WriteLine($"options  #16 reads '{before}' in English, '{after}' in Japanese");
+            if (before == after) return Fail("switching language changed no names");
+
+            model.Language = "l_en-gb";
+            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+
             window.Close();
             return 0;
         }

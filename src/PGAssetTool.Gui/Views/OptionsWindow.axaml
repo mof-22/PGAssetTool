@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:PGAssetTool.Gui.ViewModels"
+        x:Class="PGAssetTool.Gui.Views.OptionsWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Options" Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False">
+
+  <StackPanel Margin="20" Spacing="16">
+
+    <StackPanel Spacing="6">
+      <TextBlock Text="Weapon names" FontWeight="SemiBold" />
+      <ComboBox ItemsSource="{Binding Languages}" SelectedValue="{Binding Language}"
+                SelectedValueBinding="{Binding Bundle}" HorizontalAlignment="Stretch" />
+      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                 Text="Which of the translation tables shipped with the game names are read from. Changing it reads the game again." />
+    </StackPanel>
+
+    <StackPanel Spacing="6">
+      <CheckBox Content="Show only what can be replaced" IsChecked="{Binding ReplaceableOnly}" />
+      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                 Text="Hides the transforms, scripts and animation an asset tree is mostly made of. What counts as replaceable follows what the tool can actually write back." />
+    </StackPanel>
+
+    <StackPanel Spacing="4">
+      <TextBlock Opacity="0.55" FontSize="11" Text="Settings are kept beside the executable:" />
+      <TextBlock Opacity="0.55" FontSize="11" FontFamily="Consolas, Menlo, monospace"
+                 Text="{Binding SettingsPath}" TextWrapping="Wrap" />
+    </StackPanel>
+
+    <Button Content="Close" Click="OnClose" HorizontalAlignment="Right" />
+  </StackPanel>
+</Window>

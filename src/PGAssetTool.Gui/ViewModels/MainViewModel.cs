@@ -6,6 +6,8 @@ using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Game;
+using PGAssetTool.Core.Mods;
+using PGAssetTool.Core.Settings;
 using PGAssetTool.Core.Preview;
 using PGAssetTool.Core.Weapons;
 
@@ -32,8 +34,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// changes without reading the bundles again.
     private WeaponTree? _tree;
 
+    /// Set while preferences are being applied, so reading them back does not write them out again
+    /// or reload the game once per setting.
+    private bool _loading;
+
     /// Hides everything that cannot be written back. What counts comes from the import registry.
     [ObservableProperty] private bool _replaceableOnly = true;
+
+    /// The game translation table names are read from, and the languages this installation offers.
+    [ObservableProperty] private string _language = "l_en-gb";
+
+    public ObservableCollection<LanguageOption> Languages { get; } = [];
+
+    /// Shown in the options window, because where a portable tool keeps its state is worth being
+    /// able to see rather than having to guess.
+    public string SettingsPath => ToolSettings.PathIn(ModStore.DefaultHome());
 
     /// Which workspace tab is showing: browse, editor, manager.
     [ObservableProperty] private int _workspace;
@@ -46,15 +61,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task LoadAsync()
     {
+        // Preferences are read before the game, so the first catalog load is already in the right
+        // language rather than being read once in English and then again.
+        // Preferences are read before the game, so the first catalog load is already in the right
+        // language rather than being read once in English and then again. Nothing is resolved yet,
+        // so the change handlers below find nothing to rebuild.
+        var settings = ToolSettings.Load();
+        _loading = true;
+        Language = settings.Language;
+        ReplaceableOnly = settings.ReplaceableOnly;
+        _loading = false;
+
         try
         {
             await Task.Run(() =>
             {
                 var game = GameInstallation.OpenDetected();
                 _bundles = new BundleSet(game);
-                _catalogs = GameCatalogs.Load(_bundles);
+                _catalogs = GameCatalogs.Load(_bundles, Language);
                 _resolver = new WeaponResolver(_bundles, _catalogs);
             });
+
+            Languages.Clear();
+            foreach (var (bundle, name) in GameCatalogs.Languages(_bundles!))
+                Languages.Add(new LanguageOption(bundle, name));
 
             Show(_catalogs!.Items.Weapons);
             Status = $"{_catalogs.Items.Count} weapons";
@@ -181,10 +211,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnReplaceableOnlyChanged(bool value)
     {
+        Remember();
         if (_tree is null) return;
 
         Preview.Clear();
         Detail = new WeaponDetailViewModel(_tree, value) { NodeSelected = ShowPreview };
+    }
+
+    /// Changing the language means every name in the catalogs, so the game is read again.
+    async partial void OnLanguageChanged(string value)
+    {
+        Remember();
+        if (!_loading && _bundles is not null) await ReloadAsync();
+    }
+
+    private void Remember()
+    {
+        if (_loading) return;
+        try { new ToolSettings { Language = Language, ReplaceableOnly = ReplaceableOnly }.Save(); }
+        catch (IOException) { }
     }
 
     private async void ShowPreview(TreeNode? node)
@@ -260,4 +305,10 @@ public sealed record WeaponListItem(WeaponRecord Record, string? Translated)
     /// Shown next to the name because the two numbering systems disagree for all but six weapons,
     /// and the prefab number is the one that appears in asset paths.
     public string Prefab => Record.PrefabName;
+}
+
+/// One of the game's own translation tables, named in its own script.
+public sealed record LanguageOption(string Bundle, string Name)
+{
+    public override string ToString() => Name;
 }

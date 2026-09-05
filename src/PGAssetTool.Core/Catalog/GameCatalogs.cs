@@ -17,6 +17,33 @@ public sealed class GameCatalogs
     public Localization Localization { get; }
     public SkinCatalog Skins { get; }
 
+    /// The game's own translation tables, as bundle name and the language in its own script.
+    ///
+    /// Read from the bundle list rather than hardcoded, so a language added by an update appears
+    /// without a change here; one whose name is not known shows its bundle name instead of being
+    /// hidden.
+    public static IReadOnlyList<(string Bundle, string Name)> Languages(BundleSet bundles)
+        => bundles.BundleNames
+            .Where(b => b.StartsWith("l_", StringComparison.Ordinal))
+            .OrderBy(b => b, StringComparer.Ordinal)
+            .Select(b => (b, Names.GetValueOrDefault(b, b)))
+            .ToList();
+
+    private static readonly Dictionary<string, string> Names = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["l_de"] = "Deutsch",
+        ["l_en-gb"] = "English",
+        ["l_es"] = "Español",
+        ["l_fr"] = "Français",
+        ["l_ja"] = "日本語",
+        ["l_ko"] = "한국어",
+        ["l_pt-br"] = "Português (Brasil)",
+        ["l_ru-mo"] = "Русский",
+        ["l_tr"] = "Türkçe",
+        ["l_zh"] = "简体中文",
+        ["l_zh-cht"] = "繁體中文",
+    };
+
     public static GameCatalogs Load(BundleSet bundles, string language = DefaultLanguage) => new(
         ItemCatalog.Load(bundles),
         AssetLookup.Load(bundles),
