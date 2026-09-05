@@ -24,13 +24,13 @@ public static class AudioImporter
     /// Puts the new bank into the bundle's shared resource stream and answers with its offset. The
     /// payload lives outside the object, so there is nothing to write in place.
     /// </param>
-    public static AudioChange Replace(AssetTypeValueField field, string wavPath, Func<string, byte[], long> append)
+    public static AudioChange Replace(AssetTypeValueField field, string sourcePath, Func<string, byte[], long> append)
     {
         var resource = field["m_Resource"];
         if (resource.IsDummy)
             throw new InvalidDataException($"'{field["m_Name"].AsString}' has no m_Resource to repoint.");
 
-        var wave = WaveFile.Read(wavPath);
+        var wave = SoundFile.Read(sourcePath);
         var was = Describe(field);
         var name = field["m_Name"].AsString;
 

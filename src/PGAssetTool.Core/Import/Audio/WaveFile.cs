@@ -4,21 +4,17 @@ namespace PGAssetTool.Core.Import.Audio;
 
 /// A RIFF/WAVE file decoded to 16-bit samples.
 ///
-/// Sixteen bits is where everything is heading anyway: the bank written from this is PCM16, and the
-/// game's own clips are all 16-bit. Wider and floating-point inputs are accepted and narrowed here
-/// rather than being refused, since an editor will happily hand back 24-bit or float.
-public sealed record WaveFile(short[] Samples, int Channels, int Frequency)
+/// Wider and floating-point input is accepted and narrowed here rather than refused, since an editor
+/// will happily hand back 24-bit or float.
+public static class WaveFile
 {
-    public int Frames => Samples.Length / Channels;
-    public float Seconds => (float)Frames / Frequency;
-
     private const int Pcm = 1;
     private const int Float = 3;
     private const int Extensible = 0xFFFE;
 
-    public static WaveFile Read(string path) => Parse(File.ReadAllBytes(path), path);
+    public static PcmSound Read(string path) => Parse(File.ReadAllBytes(path), path);
 
-    public static WaveFile Parse(byte[] raw, string what)
+    public static PcmSound Parse(byte[] raw, string what)
     {
         if (raw.Length < 12
             || System.Text.Encoding.ASCII.GetString(raw, 0, 4) != "RIFF"
@@ -62,7 +58,7 @@ public sealed record WaveFile(short[] Samples, int Channels, int Frequency)
             throw new NotSupportedException(
                 $"'{what}' is compressed (WAV format tag {format}). Save it as uncompressed PCM.");
 
-        return new WaveFile(Narrow(raw.AsSpan(dataAt, dataLength), format, bits, what), channels, frequency);
+        return new PcmSound(Narrow(raw.AsSpan(dataAt, dataLength), format, bits, what), channels, frequency);
     }
 
     private static short[] Narrow(ReadOnlySpan<byte> data, int format, int bits, string what)

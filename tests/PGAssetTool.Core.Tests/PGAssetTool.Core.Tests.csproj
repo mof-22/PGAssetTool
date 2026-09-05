@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- A 0.2s 440Hz tone in each format the importer accepts, so the decoders stay covered. -->
+    <None Include="fixtures/**" CopyToOutputDirectory="PreserveNewest" LinkBase="fixtures" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\PGAssetTool.Core\PGAssetTool.Core.csproj" />
     <ProjectReference Include="..\..\src\PGAssetTool.Cli\PGAssetTool.Cli.csproj" />
   </ItemGroup>
