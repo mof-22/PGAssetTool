@@ -24,6 +24,10 @@ public sealed record WeaponTree(
 public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 {
     private readonly IconResolver _icons = new(bundles, catalogs.Lookup);
+    private readonly BundleGraph _graph = new(bundles);
+
+    /// Reached by weapons, but not part of one: shared engine assets that cannot be replaced here.
+    private static readonly HashSet<AssetClassID> Opaque = [AssetClassID.Shader];
 
     public WeaponTree Resolve(WeaponRecord record)
     {
@@ -48,7 +52,8 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             if (root is null)
                 unresolved.Add($"'{record.PrefabName}' was not found inside bundle '{prefabBundle}'");
             else
-                assets = ReferenceWalker.Closure(bundles.Context, file, root.PathId);
+                assets = ReferenceWalker.Closure(
+                    bundles.Context, file, root.PathId, _graph.Resolve, skip: Opaque);
         }
 
         var skins = catalogs.Skins.ForWeapon(record.Index)

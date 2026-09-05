@@ -26,7 +26,6 @@ public sealed class WeaponExporter(BundleSet bundles)
         [AssetClassID.AudioClip] = "audio",
         [AssetClassID.Mesh] = "meshes",
         [AssetClassID.Material] = "materials",
-        [AssetClassID.Shader] = "shaders",
         [AssetClassID.AnimationClip] = "animations",
     };
 
@@ -41,19 +40,35 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         if (tree.PrefabBundle is not null)
         {
-            var file = bundles.Open(tree.PrefabBundle);
             var closure = new List<AssetTypeValueField>();
 
-            foreach (var node in tree.PrefabAssets)
+            // A weapon spans bundles: the prefab in one, its materials and textures in another. Each
+            // object is read and addressed in the bundle it actually lives in, or a pack built from
+            // this workspace would name the wrong container and fail to apply.
+            foreach (var group in tree.PrefabAssets.GroupBy(a => a.Bundle.Length > 0 ? a.Bundle : tree.PrefabBundle))
             {
-                var info = file.file.GetAssetInfo(node.PathId);
-                if (info is null) continue;
+                AssetsFileInstance file;
+                try
+                {
+                    file = bundles.Open(group.Key);
+                }
+                catch (Exception ex) when (ex is IOException or FileNotFoundException)
+                {
+                    skipped.Add($"{group.Key}: {ex.Message}");
+                    continue;
+                }
 
-                if (Folders.TryGetValue(node.Class, out var folder))
-                    assets.AddRange(_exporter.Export(
-                        tree.PrefabBundle, file, info, Path.Combine(directory, folder)));
-                else if (bundles.Context.Deserialize(file, info) is { } field)
-                    closure.Add(field);
+                foreach (var node in group)
+                {
+                    var info = file.file.GetAssetInfo(node.PathId);
+                    if (info is null) continue;
+
+                    if (Folders.TryGetValue(node.Class, out var folder))
+                        assets.AddRange(_exporter.Export(
+                            group.Key, file, info, Path.Combine(directory, folder)));
+                    else if (bundles.Context.Deserialize(file, info) is { } field)
+                        closure.Add(field);
+                }
             }
 
             if (closure.Count > 0)
