@@ -97,11 +97,7 @@ using var bundles = new BundleSet(game);
 if (command == "info")
 {
     Console.WriteLine($"Install    {game.RootDirectory}");
-    Console.WriteLine($"Manifest   {bundles.BundleNames.Count} bundles");
-    foreach (var cache in game.InLoadOrder)
-        Console.WriteLine($"{cache.Kind,-10} {cache.Enumerate().Count(),5} present  {cache.Directory}");
-    if (game.DownloadedCache is null)
-        Console.WriteLine("           no downloaded cache yet; run the game once so it fills");
+    Console.WriteLine($"Bundles    {bundles.BundleNames.Count}");
     Console.WriteLine($"Data files {game.EnumerateSerializedFiles().Count()}");
     Console.WriteLine($"Version    {(bundles.Context.HasClassDatabase
         ? GameVersion.Read(bundles.Context, game)
@@ -164,32 +160,23 @@ if (command == "verify")
 {
     var store = new ModStore(game);
     var expected = store.Read().SelectMany(m => m.TouchedBundles.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var modified = new List<(string Bundle, CacheKind Cache, bool Known)>();
-    var counts = game.Caches.ToDictionary(c => c.Kind, _ => 0);
-    var absent = 0;
+    var modified = new List<(string Bundle, bool Known)>();
+    var missing = 0;
 
     foreach (var entry in game.ReadManifest())
     {
-        var copies = game.LocateAll(entry.Name, entry.Hash).ToList();
-        if (copies.Count == 0) { absent++; continue; }
-        foreach (var (cache, path) in copies)
-        {
-            counts[cache.Kind]++;
-            if (!BundleIntegrity.IsPristine(path, entry.Hash))
-                modified.Add((entry.Name, cache.Kind, expected.Contains(entry.Name)));
-        }
+        var path = entry.PathUnder(game.BundlesDirectory);
+        if (!File.Exists(path)) { missing++; continue; }
+        if (!BundleIntegrity.IsPristine(path, entry.Hash))
+            modified.Add((entry.Name, expected.Contains(entry.Name)));
     }
 
-    foreach (var cache in game.InLoadOrder)
-        Console.WriteLine($"{cache.Kind,-12} {counts[cache.Kind],5} bundle(s)  {cache.Directory}");
-    if (absent > 0) Console.WriteLine($"{"absent",-12} {absent,5} bundle(s) in the manifest are in neither cache");
-
-    Console.WriteLine($"\n{modified.Count} copy(ies) differ from the hash the game recorded for them.");
-    foreach (var (bundle, cache, known) in modified.OrderBy(m => m.Bundle))
-        Console.WriteLine($"  {TextColumn.Pad(bundle, 34)} {cache,-12} "
-            + $"{(known ? "modified by an installed mod" : "modified by something else")}");
+    Console.WriteLine($"{modified.Count} bundle(s) differ from the hash the game recorded for them"
+        + (missing > 0 ? $", {missing} not downloaded" : "") + ".");
+    foreach (var (bundle, known) in modified.OrderBy(m => m.Bundle))
+        Console.WriteLine($"  {TextColumn.Pad(bundle, 40)} {(known ? "modified by an installed mod" : "modified by something else")}");
     if (modified.Any(m => !m.Known))
-        Console.WriteLine("\nCopies in the second group have no backup here. Verify the game's files "
+        Console.WriteLine("\nBundles in the second group have no backup here. Verify the game's files "
             + "through Steam before installing mods over them.");
     return 0;
 }
