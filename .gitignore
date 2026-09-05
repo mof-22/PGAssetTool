@@ -18,3 +18,6 @@ obj/
 # Backups and installed-mod state. Kept beside the tool so uninstalling the game cannot
 # reach them, but they are local state and game-derived, never committed.
 PGAssetTool-data/
+
+# Avalonia's XAML compiler writes generated sources here
+src/PGAssetTool.Gui/obj/
