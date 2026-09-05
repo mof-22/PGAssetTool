@@ -31,20 +31,36 @@ public class MeshImporterTests
         BoneNameHashes = bones,
     };
 
+    /// A mesh exported with no armature: positions and nothing that mentions a bone.
+    private static UnityMesh Unskinned(int vertices) => new()
+    {
+        Name = "ico_sphere",
+        VertexCount = vertices,
+        Attributes = new Dictionary<VertexAttribute, float[]> { [VertexAttribute.Position] = new float[vertices * 3] },
+        Dimensions = new Dictionary<VertexAttribute, int> { [VertexAttribute.Position] = 3 },
+        Indices = [0, 1, 2],
+        SubMeshes = [new SubMesh(0, 3, 0, 0)],
+        BindPoses = [],
+        BoneNameHashes = [],
+    };
+
     private static float[] Identity() => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
-    private static SkinStrategy Reconcile(UnityMesh before, UnityMesh replacement)
+    private static (SkinStrategy Strategy, UnityMesh Mesh) Reconcile(UnityMesh before, UnityMesh replacement)
     {
         var method = typeof(MeshImporter).GetMethod("ReconcileSkin",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        return (SkinStrategy)method.Invoke(null, [before, replacement])!;
+        var result = method.Invoke(null, [before, replacement])!;
+        var type = result.GetType();
+        return ((SkinStrategy)type.GetField("Item1")!.GetValue(result)!,
+                (UnityMesh)type.GetField("Item2")!.GetValue(result)!);
     }
 
     [Fact]
     public void TheSameBonesInTheSameOrderAreKept()
     {
         var before = Mesh(3, [10u, 20u, 30u]);
-        Assert.Equal(SkinStrategy.Kept, Reconcile(before, Mesh(4, [10u, 20u, 30u])));
+        Assert.Equal(SkinStrategy.Kept, Reconcile(before, Mesh(4, [10u, 20u, 30u])).Strategy);
     }
 
     [Fact]
@@ -54,10 +70,11 @@ public class MeshImporterTests
         var before = Mesh(3, [10u, 20u, 30u]);
         var replacement = Mesh(2, [30u, 10u, 20u], blendIndices: [2, 0, 0, 0, 1, 0, 0, 0]);
 
-        Assert.Equal(SkinStrategy.Remapped, Reconcile(before, replacement));
+        var (strategy, result) = Reconcile(before, replacement);
+        Assert.Equal(SkinStrategy.Remapped, strategy);
 
         // Joint 2 of the replacement is bone 20u, at index 1 in the original list; joint 1 is 10u, at 0.
-        var indices = replacement.Get(VertexAttribute.BlendIndices)!;
+        var indices = result.Get(VertexAttribute.BlendIndices)!;
         Assert.Equal(1f, indices[0]);
         Assert.Equal(0f, indices[4]);
     }
@@ -70,28 +87,41 @@ public class MeshImporterTests
         var before = Mesh(3, [10u, 20u, 30u]);
         var replacement = Mesh(5, [777u, 888u], blendIndices: Enumerable.Repeat(1f, 20).ToArray());
 
-        Assert.Equal(SkinStrategy.BoundRigidly, Reconcile(before, replacement));
-        Assert.All(replacement.Get(VertexAttribute.BlendIndices)!, i => Assert.Equal(0f, i));
-
-        var weights = replacement.Get(VertexAttribute.BlendWeight)!;
-        for (int v = 0; v < replacement.VertexCount; v++)
-        {
-            Assert.Equal(1f, weights[v * 4]);
-            Assert.Equal(0f, weights[v * 4 + 1]);
-        }
+        var (strategy, result) = Reconcile(before, replacement);
+        Assert.Equal(SkinStrategy.BoundRigidly, strategy);
+        AssertRigid(result);
     }
 
     [Fact]
-    public void AModelWithNoSkeletonAtAllIsAlsoBoundRigidly()
+    public void AModelWithNoSkinChannelsAtAllGetsThemBuilt()
     {
+        // The worst case, and the common one: a plain mesh exported with no armature. It still has
+        // to arrive with weights, or the renderer skins it with nothing.
         var before = Mesh(3, [10u, 20u]);
-        var replacement = Mesh(4, []);
-        Assert.Equal(SkinStrategy.BoundRigidly, Reconcile(before, replacement));
+        var replacement = Unskinned(4);
+        Assert.Null(replacement.Get(VertexAttribute.BlendWeight));
+
+        var (strategy, result) = Reconcile(before, replacement);
+        Assert.Equal(SkinStrategy.BoundRigidly, strategy);
+        AssertRigid(result);
     }
 
     [Fact]
     public void AnUnskinnedOriginalHasNothingToReconcile()
     {
-        Assert.Equal(SkinStrategy.None, Reconcile(Mesh(3, []), Mesh(9, [1u, 2u, 3u])));
+        Assert.Equal(SkinStrategy.None, Reconcile(Mesh(3, []), Mesh(9, [1u, 2u, 3u])).Strategy);
+    }
+
+    private static void AssertRigid(UnityMesh mesh)
+    {
+        var indices = mesh.Get(VertexAttribute.BlendIndices)!;
+        var weights = mesh.Get(VertexAttribute.BlendWeight)!;
+        Assert.Equal(mesh.VertexCount * 4, indices.Length);
+        Assert.All(indices, i => Assert.Equal(0f, i));
+        for (int v = 0; v < mesh.VertexCount; v++)
+        {
+            Assert.Equal(1f, weights[v * 4]);
+            Assert.Equal(0f, weights[v * 4 + 1]);
+        }
     }
 }
