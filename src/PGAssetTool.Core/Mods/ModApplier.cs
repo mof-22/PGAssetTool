@@ -78,12 +78,15 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         var applied = new List<AppliedOperation>();
         var failed = new List<string>();
 
-        foreach (var bundle in mods.SelectMany(m => m.TouchedBundles.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
+        // Restore from every backup there is, not from what the installed mods happen to name.
+        // Uninstalling drops the mod before its bundles are put back, so by the time the reconcile
+        // runs the list no longer mentions them and the modified bundle would be left in place.
+        foreach (var (cache, bundle, hash) in store.BackedUp())
         {
-            if (!hashes.TryGetValue(bundle, out var hash)) continue;
-            if (game.Resolve(bundle, hash) is not { } resolved) continue;
-            if (store.RestoreIfBackedUp(resolved.Cache, bundle, hash, resolved.Path))
-                restored.Add($"{bundle} ({resolved.Cache})");
+            var live = LivePathIn(cache, bundle, hash);
+            if (live is null || !File.Exists(live)) continue;
+            if (store.RestoreIfBackedUp(cache, bundle, hash, live))
+                restored.Add($"{bundle} ({cache.ToString().ToLowerInvariant()})");
         }
 
         var touchedByMod = new Dictionary<string, Dictionary<string, string>>();
@@ -106,6 +109,15 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         var pruned = store.PruneStaleBackups(hashes);
         return new ReconcileResult(restored, applied, failed, pruned);
     }
+
+    /// Where a backup taken from a given cache belongs, which is not necessarily the copy the game
+    /// now loads: once the downloaded cache claims a bundle it wins, and the shipped copy beneath it
+    /// still has to be put back.
+    private string? LivePathIn(CacheKind cache, string bundle, string hash) => cache switch
+    {
+        CacheKind.Downloaded => game.Downloaded?.ClaimedPath(bundle),
+        _ => Path.Combine(game.BundlesDirectory, bundle, hash, bundle),
+    };
 
     private Dictionary<string, string> ApplyOne(
         InstalledMod mod, IReadOnlyDictionary<string, string> hashes,

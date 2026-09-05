@@ -171,4 +171,36 @@ public class ModStoreTests : IDisposable
         Assert.False(mod.Enabled);
         Assert.Equal("aaa", mod.TouchedBundles["woi_0"]);
     }
+
+    [Fact]
+    public void EveryBackupIsFoundEvenWhenNoModClaimsItAnyMore()
+    {
+        // What has been written to is recorded by the backups, not by the installed list: uninstall
+        // drops the mod before the reconcile that would put its bundles back.
+        _store.Backup(CacheKind.Shipped, "bhlw", "b356", Bundle("original"));
+        _store.Backup(CacheKind.Downloaded, "woi_0", "1773", Bundle("original"));
+
+        var found = _store.BackedUp().OrderBy(b => b.Bundle).ToList();
+
+        Assert.Equal([(CacheKind.Shipped, "bhlw", "b356"), (CacheKind.Downloaded, "woi_0", "1773")],
+            found.OrderBy(b => b.Bundle == "bhlw" ? 0 : 1));
+    }
+
+    [Fact]
+    public void TheLayoutThatPredatedCacheKindsIsIgnoredRatherThanMisread()
+    {
+        // Backups once sat directly under the bundle name, with no cache segment above it.
+        var legacy = Path.Combine(_store.BackupRoot, "woi_0", "1773");
+        Directory.CreateDirectory(legacy);
+        File.WriteAllText(Path.Combine(legacy, "woi_0"), "original");
+
+        Assert.Empty(_store.BackedUp());
+    }
+
+    private string Bundle(string contents)
+    {
+        var path = Path.Combine(_root, Guid.NewGuid().ToString("n"));
+        File.WriteAllText(path, contents);
+        return path;
+    }
 }

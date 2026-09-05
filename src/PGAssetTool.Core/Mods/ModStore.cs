@@ -89,9 +89,9 @@ public sealed class ModStore
 
     /// Keeps the previous contents beside the file before overwriting.
     ///
-    /// Losing this file does not lose the backups, but it does lose the record of which mod put what
-    /// where — and with it the ability to uninstall through the tool rather than by hand. It has gone
-    /// empty once for reasons that were never pinned down, so the previous state is worth the copy.
+    /// Losing this file does not lose the backups — those are enumerable on their own — but it does
+    /// lose the record of which mod put what where, and with it the ability to uninstall through the
+    /// tool rather than by hand.
     public void Write(IEnumerable<InstalledMod> mods)
     {
         Directory.CreateDirectory(Root);
@@ -103,6 +103,30 @@ public sealed class ModStore
     /// distinguishable from the version that replaced it.
     public string BackupPathFor(CacheKind cache, string bundle, string hash)
         => Path.Combine(BackupRoot, cache.ToString().ToLowerInvariant(), bundle, hash, bundle);
+
+    /// Every bundle this store holds a backup of — the record of what has actually been written to.
+    ///
+    /// The installed list cannot answer that. Uninstalling drops the mod before its bundles are put
+    /// back, so a bundle whose only mod is gone is still modified and no longer named anywhere else.
+    public IEnumerable<(CacheKind Cache, string Bundle, string Hash)> BackedUp()
+    {
+        if (!Directory.Exists(BackupRoot)) yield break;
+
+        foreach (var cacheDirectory in Directory.GetDirectories(BackupRoot))
+        {
+            // An older layout filed backups directly under the bundle name, with no cache segment.
+            if (!Enum.TryParse<CacheKind>(Path.GetFileName(cacheDirectory), ignoreCase: true, out var cache))
+                continue;
+
+            foreach (var bundleDirectory in Directory.GetDirectories(cacheDirectory))
+            {
+                var bundle = Path.GetFileName(bundleDirectory);
+                foreach (var hashDirectory in Directory.GetDirectories(bundleDirectory))
+                    if (File.Exists(Path.Combine(hashDirectory, bundle)))
+                        yield return (cache, bundle, Path.GetFileName(hashDirectory));
+            }
+        }
+    }
 
     public bool HasBackup(CacheKind cache, string bundle, string hash) => File.Exists(BackupPathFor(cache, bundle, hash));
 
