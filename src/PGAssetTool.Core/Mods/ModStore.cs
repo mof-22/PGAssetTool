@@ -43,10 +43,14 @@ public sealed class ModStore
 
     private readonly GameInstallation _game;
 
+    /// Where everything this tool keeps lives: beside the executable, not in the user profile.
+    public string Home { get; }
+
     public ModStore(GameInstallation game, string? home = null)
     {
         _game = game;
-        Root = Path.Combine(home ?? DefaultHome(), "installs", KeyFor(game.RootDirectory));
+        Home = home ?? DefaultHome();
+        Root = Path.Combine(Home, "installs", KeyFor(game.RootDirectory));
         BackupRoot = Path.Combine(Root, "backup");
     }
 
@@ -79,6 +83,10 @@ public sealed class ModStore
     }
 
     public string Root { get; }
+
+    /// Installed packs, copied here so the ledger never points at wherever an author happened to
+    /// build one. Deleting a workspace used to leave an installed mod with no file to reapply from.
+    public string ModsDirectory => Path.Combine(Home, "mods");
     public string BackupRoot { get; }
     private string StatePath => Path.Combine(Root, StateFileName);
 
@@ -126,6 +134,31 @@ public sealed class ModStore
                         yield return (cache, bundle, Path.GetFileName(hashDirectory));
             }
         }
+    }
+
+    /// Takes a copy of a pack so installing it does not depend on the file staying where it was.
+    ///
+    /// A pack built into a workspace is one deletion away from leaving an installed mod that cannot
+    /// be reapplied or removed cleanly — which happened, and cost an uninstall to recover from.
+    /// The name is kept, with a digest of the original path in front of it so two packs called the
+    /// same thing from different places do not collide.
+    public string Keep(string packPath)
+    {
+        Directory.CreateDirectory(ModsDirectory);
+
+        // Already here: reinstalling from the copy must not spiral into copies of copies.
+        var full = Path.GetFullPath(packPath);
+        if (full.StartsWith(Path.GetFullPath(ModsDirectory) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase))
+            return full;
+
+        var digest = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(full.ToLowerInvariant())))[..8];
+        var kept = Path.Combine(ModsDirectory, $"{digest}-{Path.GetFileName(packPath)}");
+
+
+        File.Copy(packPath, kept, overwrite: true);
+        return kept;
     }
 
     public bool HasBackup(CacheKind cache, string bundle, string hash) => File.Exists(BackupPathFor(cache, bundle, hash));

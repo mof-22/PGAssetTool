@@ -31,6 +31,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Preview.PropertyChanged += OnPreviewChanged;
         Editor = new EditorViewModel(() => _bundles, _reading);
         Editor.PackRequested += BuildPack;
+
+        Manager = new ManagerViewModel(() => _bundles?.Game);
+        Manager.Changed += ReopenAfterWrite;
     }
 
     [ObservableProperty] private string _status = "Looking for the game…";
@@ -44,6 +47,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// The workspace side. Given the same reader and the same lock as everything else, because
     /// there is one BundleSet and it is not safe to use from two places at once.
     public EditorViewModel Editor { get; }
+
+    /// The game side: what is installed and what state the bundles are in.
+    public ManagerViewModel Manager { get; }
 
     /// The resolved weapon behind the current tree, kept so the tree can be rebuilt when the filter
     /// changes without reading the bundles again.
@@ -111,6 +117,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             Show(_catalogs!.Items.Weapons);
             Editor.Rescan(WorkspaceRoot);
+            Manager.Refresh();
             Status = $"{_catalogs.Items.Count} weapons";
         }
         catch (Exception ex)
@@ -222,6 +229,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             LastExport = export.Directory;
             Editor.Rescan(WorkspaceRoot);
+            Manager.Refresh();
             Status = $"{export.Assets.Count} files written to {export.Directory}"
                 + (export.Skipped.Count > 0 ? $", {export.Skipped.Count} skipped" : "");
         });
@@ -254,7 +262,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             LastExport = directory;
             Status = $"{string.Join(", ", written.Select(w => Path.GetFileName(w.Path)))} -> {directory}";
             Editor.Rescan(WorkspaceRoot);
+            Manager.Refresh();
         });
+    }
+
+    /// Puts the reader down and picks it up again around anything that rewrites the game.
+    ///
+    /// The bundles are held open for browsing and applying rewrites those same files. A separate
+    /// process never had to care; a window that browses and installs does.
+    private async Task ReopenAfterWrite()
+    {
+        if (_bundles is null) return;
+
+        _bundles.Dispose();
+        (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
+        Detail = null;
+        Preview.Clear();
+        await LoadAsync();
     }
 
     /// Builds a pack from a workspace, and installs it when asked.

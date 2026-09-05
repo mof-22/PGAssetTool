@@ -299,11 +299,14 @@ internal static class SelfTest
             Console.WriteLine($"editor   {model.Editor.Workspaces.Count} workspaces, "
                 + $"{model.Editor.Files.Count} files in '{model.Editor.SelectedWorkspace?.Name}'");
 
+            // The one just written, found by name: rescanning keeps whatever was selected before,
+            // and the root also holds earlier extracts whose edits are not this test's business.
+            var fresh = model.Editor.Workspaces.FirstOrDefault(w => w.Directory == model.LastExport);
+            if (fresh is null) return Fail("the freshly extracted workspace is not listed");
+            if (fresh.Edited != 0) return Fail($"'{fresh.Name}' was just extracted and shows {fresh.Edited} edited");
+
+            model.Editor.SelectedWorkspace = fresh;
             if (model.Editor.Files.Count == 0) return Fail("the editor saw no files in a fresh extract");
-            // Only the one just written: the root also holds whatever was extracted before, and
-            // someone else's half-finished edits are not this test's business.
-            if (model.Editor.SelectedWorkspace is { Edited: not 0 } stale)
-                return Fail($"'{stale.Name}' was just extracted and already shows {stale.Edited} edited");
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
@@ -342,13 +345,54 @@ internal static class SelfTest
                 return Fail($"applying reported failures: {model.Status}");
             if (!model.Status.Contains("applied")) return Fail($"the pack was not applied: {model.Status}");
 
+            // Only what this run installed: someone else's mods are not this test's to touch.
+            var mine = PackId(model);
             var installed = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
+            if (installed.All(m => m.Id != mine)) return Fail($"'{mine}' is not in the ledger");
             Console.WriteLine($"pack     installed: {string.Join(", ", installed.Select(m => m.Id))}");
             if (installed.Count == 0) return Fail("nothing ended up in the ledger");
 
+            // The manager reads the game rather than the ledger alone, so a bundle changed outside
+            // this tool is visible before anyone installs over it.
+            model.Manager.Refresh();
+            Console.WriteLine($"manager  {model.Manager.Status}");
+            Console.WriteLine($"manager  bundles differing: "
+                + string.Join(", ", model.Manager.Bundles.Select(b => $"{b.Bundle} ({b.Explanation})")));
+
+            if (model.Manager.Mods.Count == 0) return Fail("the manager saw nothing installed");
+            if (model.Manager.Bundles.All(b => b.State != PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
+                return Fail("the bundle just written was not attributed to the mod that wrote it");
+            if (model.Manager.GameIsRunning) return Fail("the game should not be running during a self-test");
+
+            // Turning one off restores its bundles; the confirmation is what stands between a click
+            // and the game being rewritten.
+            model.Manager.Selected = model.Manager.Mods.FirstOrDefault(m => m.Mod.Id == mine);
+            if (model.Manager.Selected is null) return Fail($"the manager does not list '{mine}'");
+            model.Manager.DisableCommand.Execute(null);
+            if (model.Manager.Asking is null) return Fail("turning a mod off asked for no confirmation");
+            Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
+
+            model.Manager.ProceedCommand.Execute(null);
+            // The manager reports its own busy state; the shell is not involved in this one.
+            for (var waited = 0; (model.Manager.Busy || model.Manager.Asking is not null) && waited < 180_000;
+                 waited += 50)
+                Thread.Sleep(50);
+            Console.WriteLine($"manager  {model.Manager.Status}");
+
+            var mineNow = model.Manager.Mods.First(m => m.Mod.Id == mine);
+            if (mineNow.Enabled) return Fail("the mod is still on after being turned off");
+            if (model.Manager.Bundles.Any(b => b.State == PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
+                return Fail("turning it off left a bundle changed");
+
+            // The pack is kept beside the tool, so deleting the workspace cannot strand it.
+            var kept = mineNow.Mod.PackPath;
+            Console.WriteLine($"manager  pack kept at {kept}");
+            if (!kept.Contains("PGAssetTool-data")) return Fail("the pack was not copied into the store");
+
+            // Put the game back: this is a test, not a change anyone asked for.
             // Put the game back: this is a test, not a change anyone asked for.
             new PGAssetTool.Core.Mods.ModApplier(model.Game!, new PGAssetTool.Core.Mods.ModStore(model.Game!))
-                .Remove(installed[0].Id);
+                .Remove(mine);
             Console.WriteLine("pack     removed again");
 
             File.WriteAllBytes(texture.FullPath, bytes);
@@ -427,6 +471,13 @@ internal static class SelfTest
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    /// The id of the pack this run built, taken from the manifest rather than guessed.
+    private static string PackId(MainViewModel model)
+    {
+        var pack = Directory.GetFiles(model.Editor.SelectedWorkspace!.Directory, "*.pgmod").Single();
+        return PGAssetTool.Core.Pack.PackBuilder.ReadManifest(pack).Id;
     }
 
     private static bool Select(MainViewModel model, int number)

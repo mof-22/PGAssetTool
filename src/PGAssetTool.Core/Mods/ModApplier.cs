@@ -39,7 +39,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             Name = manifest.Name,
             Author = manifest.Author,
             Version = manifest.Version,
-            PackPath = Path.GetFullPath(packPath),
+            PackPath = store.Keep(packPath),
             InstalledAt = DateTimeOffset.Now,
             GameVersion = gameVersion,
             Enabled = true,

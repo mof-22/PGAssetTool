@@ -203,4 +203,54 @@ public class ModStoreTests : IDisposable
         File.WriteAllText(path, contents);
         return path;
     }
+
+    [Fact]
+    public void AnInstalledPackIsCopiedOutOfWhereverItWasBuilt()
+    {
+        // A pack built into a workspace is one deletion away from leaving an installed mod with no
+        // file to reapply or remove from. That happened, and cost an uninstall to recover.
+        var built = Path.Combine(_root, "somewhere", "weapon.pgmod");
+        Directory.CreateDirectory(Path.GetDirectoryName(built)!);
+        File.WriteAllText(built, "a pack");
+
+        var kept = _store.Keep(built);
+
+        Assert.StartsWith(_store.ModsDirectory, kept, StringComparison.Ordinal);
+        Assert.Equal("a pack", File.ReadAllText(kept));
+
+        Directory.Delete(Path.GetDirectoryName(built)!, recursive: true);
+        Assert.True(File.Exists(kept), "the copy did not outlive the directory it came from");
+    }
+
+    [Fact]
+    public void TwoPacksOfTheSameNameFromDifferentPlacesDoNotCollide()
+    {
+        var first = Path.Combine(_root, "a", "weapon.pgmod");
+        var second = Path.Combine(_root, "b", "weapon.pgmod");
+        foreach (var path in new[] { first, second })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, path);
+        }
+
+        Assert.NotEqual(_store.Keep(first), _store.Keep(second));
+        Assert.Equal(first, File.ReadAllText(_store.Keep(first)));
+        Assert.Equal(second, File.ReadAllText(_store.Keep(second)));
+    }
+
+    [Fact]
+    public void KeepingAPackAlreadyInTheStoreLeavesItAlone()
+    {
+        // Reinstalling from the copy must not spiral into copies of copies.
+        var built = Path.Combine(_root, "weapon.pgmod");
+        File.WriteAllText(built, "a pack");
+
+        var kept = _store.Keep(built);
+        Assert.Equal(kept, _store.Keep(kept));
+        Assert.Single(Directory.GetFiles(_store.ModsDirectory));
+    }
+
+    [Fact]
+    public void ThePackStoreSitsBesideEverythingElseTheToolKeeps()
+        => Assert.Equal(Path.Combine(_home, "mods"), _store.ModsDirectory);
 }
