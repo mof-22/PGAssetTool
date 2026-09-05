@@ -18,12 +18,16 @@ internal static class SelfTest
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern bool AttachConsole(int processId);
 
+
     public static int Run()
     {
         // A WinExe starts with no console, so a published build writing to one would print into
         // nowhere. Borrowing the terminal that launched it is what makes --self-test usable on the
         // thing that actually ships, rather than only under `dotnet run`.
-        AttachConsole(AttachParentProcess);
+        // Only when nothing is already capturing the output. A pipe or a redirect means someone is,
+        // and attaching replaces the handles underneath them — which swallows every line rather
+        // than printing it.
+        if (!Console.IsOutputRedirected) AttachConsole(AttachParentProcess);
 
         // The tree labels carry emoji; the Windows console defaults to a code page that mangles them.
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch (IOException) { }
@@ -132,6 +136,19 @@ internal static class SelfTest
                 if (!model.Preview.ShowAlpha) return Fail("an icon was shown with its alpha ignored");
             }
 
+            // The filter is what the tree shows by default, and it has to come from the import
+            // registry rather than a list kept here, so a type gained later needs no edit.
+            var everything = CountRows(detail.Roots);
+            model.ReplaceableOnly = false;
+            if (model.Detail is not { } unfiltered) return Fail("turning the filter off lost the tree");
+            var all = CountRows(unfiltered.Roots);
+            Console.WriteLine($"filter   {everything} rows replaceable-only, {all} rows unfiltered");
+            if (all <= everything) return Fail("the filter hid nothing");
+
+            model.ReplaceableOnly = true;
+            if (model.Detail is not { } refiltered || CountRows(refiltered.Roots) != everything)
+                return Fail("turning the filter back on did not restore the tree");
+
             return 0;
         }
         catch (Exception ex)
@@ -143,6 +160,9 @@ internal static class SelfTest
             model.Dispose();
         }
     }
+
+    private static int CountRows(IEnumerable<TreeNode> nodes)
+        => nodes.Sum(n => 1 + CountRows(n.Children));
 
     private static int Fail(string why)
     {

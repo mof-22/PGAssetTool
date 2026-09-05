@@ -11,17 +11,6 @@ namespace PGAssetTool.Core.Pack;
 /// those two, without having to prune anything by hand.
 public static class Workspace
 {
-    /// Only types with a working import path get an operation. Listing types that cannot yet be
-    /// applied would produce packs that fail at apply time.
-    private static readonly Dictionary<string, string> OperationForFormat = new()
-    {
-        ["png"] = PackOperations.ReplaceTexture,
-        ["glb"] = PackOperations.ReplaceMesh,
-        ["wav"] = PackOperations.ReplaceAudio,
-        ["mp3"] = PackOperations.ReplaceAudio,
-        ["ogg"] = PackOperations.ReplaceAudio,
-    };
-
     /// `alreadyModified` marks a workspace whose files are the modification rather than a starting
     /// point — the output of converting someone's existing mod, say. Those carry no baseline, so
     /// packing takes them as they are instead of waiting for an edit that already happened.
@@ -32,7 +21,7 @@ public static class Workspace
         var operations = new List<PackOperation>();
         foreach (var asset in assets)
         {
-            if (!OperationForFormat.TryGetValue(asset.Format, out var op)) continue;
+            if (Replaceable.OperationForFormat(asset.Format) is not { } op) continue;
             if (asset.Address.Container.Length == 0) continue;
 
             operations.Add(new PackOperation

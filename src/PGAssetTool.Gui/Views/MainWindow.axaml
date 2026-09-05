@@ -15,9 +15,42 @@
     <Style Selector="TextBlock.mono">
       <Setter Property="FontFamily" Value="Consolas, Menlo, monospace" />
     </Style>
+    <Style Selector="TextBlock.pending">
+      <Setter Property="Opacity" Value="0.5" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="MaxWidth" Value="460" />
+      <Setter Property="TextAlignment" Value="Center" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- The row and its expander are the same click: this tool asks for a great many of them. -->
+    <Style Selector="TreeViewItem" x:DataType="vm:TreeNode">
+      <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+    </Style>
   </Window.Styles>
 
   <DockPanel>
+
+    <Menu DockPanel.Dock="Top">
+      <MenuItem Header="_File">
+        <MenuItem Header="E_xit" Click="OnExit" InputGesture="Alt+F4" />
+      </MenuItem>
+      <MenuItem Header="_Edit">
+        <MenuItem Header="_Find weapon" Click="OnFocusSearch" InputGesture="Ctrl+F" />
+        <MenuItem Header="_Reload from disk" Click="OnReload" InputGesture="Ctrl+R" />
+      </MenuItem>
+      <MenuItem Header="_View">
+        <MenuItem Header="_Replaceable only" ToggleType="CheckBox"
+                  IsChecked="{Binding ReplaceableOnly, Mode=TwoWay}" InputGesture="Ctrl+Shift+R" />
+        <MenuItem Header="Show _alpha" ToggleType="CheckBox"
+                  IsChecked="{Binding Preview.ShowAlpha, Mode=TwoWay}"
+                  IsEnabled="{Binding Preview.CanToggleAlpha}" InputGesture="Ctrl+Shift+A" />
+        <Separator />
+        <MenuItem Header="_Browse" Click="OnShowBrowse" InputGesture="Ctrl+1" />
+        <MenuItem Header="_Editor" Click="OnShowEditor" InputGesture="Ctrl+2" />
+        <MenuItem Header="_Manager" Click="OnShowManager" InputGesture="Ctrl+3" />
+      </MenuItem>
+    </Menu>
 
     <Border DockPanel.Dock="Bottom" Height="26" Background="#18181b" Padding="10,0">
       <Grid ColumnDefinitions="Auto,*">
@@ -27,104 +60,113 @@
       </Grid>
     </Border>
 
-    <Grid ColumnDefinitions="300,4,*">
+    <TabControl SelectedIndex="{Binding Workspace}" Padding="0">
 
-      <!-- The weapon list. Search matches slug, tag, prefab and the translated name. -->
-      <DockPanel Grid.Column="0" Margin="10">
-        <TextBox DockPanel.Dock="Top" Text="{Binding Search}" Watermark="Search weapons"
-                 Margin="0,0,0,8" />
-        <ListBox ItemsSource="{Binding Weapons}" SelectedItem="{Binding Selected}">
-          <ListBox.ItemTemplate>
-            <DataTemplate x:DataType="vm:WeaponListItem">
-              <Grid ColumnDefinitions="52,*" Margin="0,2">
-                <TextBlock Grid.Column="0" Text="{Binding Number}" Classes="dim mono"
-                           VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1">
-                  <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding Prefab}" Classes="dim mono" />
-                </StackPanel>
-              </Grid>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
-      </DockPanel>
+      <TabItem Header="Browse">
+        <Grid ColumnDefinitions="300,4,*">
 
-      <GridSplitter Grid.Column="1" Background="#27272a" />
+          <DockPanel Grid.Column="0" Margin="10">
+            <TextBox Name="Search" DockPanel.Dock="Top" Text="{Binding Search}"
+                     Watermark="Search weapons" Margin="0,0,0,8" />
+            <ListBox ItemsSource="{Binding Weapons}" SelectedItem="{Binding Selected}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:WeaponListItem">
+                  <Grid ColumnDefinitions="52,*" Margin="0,2">
+                    <TextBlock Grid.Column="0" Text="{Binding Number}" Classes="dim mono"
+                               VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1">
+                      <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Prefab}" Classes="dim mono" />
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
 
-      <Grid Grid.Column="2" ColumnDefinitions="*,4,420" Margin="10">
+          <GridSplitter Grid.Column="1" Background="#27272a" />
 
-        <ContentControl Grid.Column="0" Content="{Binding Detail}">
-          <ContentControl.ContentTemplate>
-            <DataTemplate x:DataType="vm:WeaponDetailViewModel">
-              <DockPanel>
-                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                  <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="SemiBold" />
-                  <TextBlock Text="{Binding Subtitle}" Classes="dim mono" />
-                </StackPanel>
+          <Grid Grid.Column="2" ColumnDefinitions="*,4,420" Margin="10">
 
-                <TreeView ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedNode}">
-                  <TreeView.ItemTemplate>
-                    <TreeDataTemplate x:DataType="vm:TreeNode" ItemsSource="{Binding Children}">
-                      <Grid ColumnDefinitions="20,Auto,Auto" Margin="0,1">
-                        <TextBlock Grid.Column="0" Text="{Binding Icon}" />
-                        <TextBlock Grid.Column="1" Text="{Binding Label}" />
-                        <TextBlock Grid.Column="2" Text="{Binding Detail}" Classes="dim"
-                                   Margin="10,0,0,0" VerticalAlignment="Center" />
-                      </Grid>
-                    </TreeDataTemplate>
-                  </TreeView.ItemTemplate>
-                </TreeView>
-              </DockPanel>
-            </DataTemplate>
-          </ContentControl.ContentTemplate>
-        </ContentControl>
+            <ContentControl Grid.Column="0" Content="{Binding Detail}">
+              <ContentControl.ContentTemplate>
+                <DataTemplate x:DataType="vm:WeaponDetailViewModel">
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                      <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding Subtitle}" Classes="dim mono" />
+                    </StackPanel>
 
-        <GridSplitter Grid.Column="1" Background="#27272a" />
+                    <TreeView ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedNode}">
+                      <TreeView.ItemTemplate>
+                        <TreeDataTemplate x:DataType="vm:TreeNode" ItemsSource="{Binding Children}">
+                          <Grid ColumnDefinitions="20,Auto,Auto" Margin="0,1">
+                            <TextBlock Grid.Column="0" Text="{Binding Icon}" />
+                            <TextBlock Grid.Column="1" Text="{Binding Label}" />
+                            <TextBlock Grid.Column="2" Text="{Binding Detail}" Classes="dim"
+                                       Margin="10,0,0,0" VerticalAlignment="Center" />
+                          </Grid>
+                        </TreeDataTemplate>
+                      </TreeView.ItemTemplate>
+                    </TreeView>
+                  </DockPanel>
+                </DataTemplate>
+              </ContentControl.ContentTemplate>
+            </ContentControl>
 
-        <!-- Preview. A texture is shown as it is; a mesh is drawn by the software rasterizer in
-             the core, turned by dragging and zoomed with the wheel. -->
-        <DockPanel Grid.Column="2" DataContext="{Binding Preview}" x:DataType="vm:PreviewViewModel">
+            <GridSplitter Grid.Column="1" Background="#27272a" />
 
-          <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-            <!-- Only textures have a channel to argue about. -->
-            <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
-                      IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
-            <TextBlock Text="{Binding Caption}" Classes="dim mono" TextWrapping="Wrap" />
-          </StackPanel>
+            <DockPanel Grid.Column="2" DataContext="{Binding Preview}" x:DataType="vm:PreviewViewModel">
 
-          <Border Background="#111113" CornerRadius="4">
-            <Panel>
-              <TextBlock Text="{Binding Nothing}" Classes="dim"
-                         IsVisible="{Binding Nothing, Converter={x:Static ObjectConverters.IsNotNull}}"
-                         HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
-                         MaxWidth="300" TextAlignment="Center" />
+              <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
+                          IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
+                <TextBlock Text="{Binding Caption}" Classes="dim mono" TextWrapping="Wrap" />
+              </StackPanel>
 
-              <!-- The board sits behind the image and only where alpha is being honoured, so a
-                   texture shown opaque is not read against a pattern that means nothing. -->
-              <Panel IsVisible="{Binding ShowAlpha}">
-                <Panel.Background>
-                  <DrawingBrush TileMode="Tile" SourceRect="0,0,16,16" DestinationRect="0,0,16,16"
-                               Stretch="None">
-                    <DrawingBrush.Drawing>
-                      <DrawingGroup>
-                        <GeometryDrawing Brush="#2a2a2e" Geometry="M0,0 L16,0 16,16 0,16 Z" />
-                        <GeometryDrawing Brush="#1a1a1d" Geometry="M0,0 L8,0 8,8 0,8 Z M8,8 L16,8 16,16 8,16 Z" />
-                      </DrawingGroup>
-                    </DrawingBrush.Drawing>
-                  </DrawingBrush>
-                </Panel.Background>
-              </Panel>
+              <Border Background="#111113" CornerRadius="4">
+                <Panel>
+                  <TextBlock Text="{Binding Nothing}" Classes="dim"
+                             IsVisible="{Binding Nothing, Converter={x:Static ObjectConverters.IsNotNull}}"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
+                             MaxWidth="300" TextAlignment="Center" />
 
-              <Image Source="{Binding Image}" IsVisible="{Binding HasImage}"
-                     Stretch="Uniform" Margin="12"
-                     RenderOptions.BitmapInterpolationMode="None" />
+                  <Panel IsVisible="{Binding ShowAlpha}">
+                    <Panel.Background>
+                      <DrawingBrush TileMode="Tile" SourceRect="0,0,16,16" DestinationRect="0,0,16,16"
+                                    Stretch="None">
+                        <DrawingBrush.Drawing>
+                          <DrawingGroup>
+                            <GeometryDrawing Brush="#2a2a2e" Geometry="M0,0 L16,0 16,16 0,16 Z" />
+                            <GeometryDrawing Brush="#1a1a1d" Geometry="M0,0 L8,0 8,8 0,8 Z M8,8 L16,8 16,16 8,16 Z" />
+                          </DrawingGroup>
+                        </DrawingBrush.Drawing>
+                      </DrawingBrush>
+                    </Panel.Background>
+                  </Panel>
 
-              <ctl:MeshView Mesh="{Binding Mesh}" IsVisible="{Binding HasMesh}" />
-            </Panel>
-          </Border>
-        </DockPanel>
+                  <Image Source="{Binding Image}" IsVisible="{Binding HasImage}"
+                         Stretch="Uniform" Margin="12"
+                         RenderOptions.BitmapInterpolationMode="None" />
 
-      </Grid>
-    </Grid>
+                  <ctl:MeshView Mesh="{Binding Mesh}" IsVisible="{Binding HasMesh}" />
+                </Panel>
+              </Border>
+            </DockPanel>
+          </Grid>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Editor">
+        <TextBlock Classes="pending"
+                   Text="Not built yet. This is where an extracted weapon will be listed file by file with what has been edited, shown against the originals, and built into a pack." />
+      </TabItem>
+
+      <TabItem Header="Manager">
+        <TextBlock Classes="pending"
+                   Text="Not built yet. This is where installed mods will be turned on and off, and each bundle shown as vanilla, changed by this tool, or changed by something else." />
+      </TabItem>
+
+    </TabControl>
   </DockPanel>
 </Window>

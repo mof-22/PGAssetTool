@@ -27,6 +27,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public PreviewViewModel Preview { get; } = new();
 
+    /// The resolved weapon behind the current tree, kept so the tree can be rebuilt when the filter
+    /// changes without reading the bundles again.
+    private WeaponTree? _tree;
+
+    /// Hides everything that cannot be written back. What counts comes from the import registry.
+    [ObservableProperty] private bool _replaceableOnly = true;
+
+    /// Which workspace tab is showing: browse, editor, manager.
+    [ObservableProperty] private int _workspace;
+
     public ObservableCollection<WeaponListItem> Weapons { get; } = [];
 
     public string Title => _catalogs is null
@@ -56,6 +66,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             Busy = false;
         }
+    }
+
+    /// Re-reads the game from scratch, for after a game update or an external edit.
+    public async Task ReloadAsync()
+    {
+        var wanted = Selected?.Record.GameNumber;
+
+        _bundles?.Dispose();
+        (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
+        Detail = null;
+        Preview.Clear();
+        Busy = true;
+        Status = "Reloading…";
+
+        await LoadAsync();
+
+        // Put the reader back where it was, so a reload is not also a loss of place.
+        if (wanted is { } number)
+            Selected = Weapons.FirstOrDefault(w => w.Record.GameNumber == number);
     }
 
     partial void OnSearchChanged(string value)
@@ -89,7 +118,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 var tree = await Task.Run(() => _resolver.Resolve(value.Record));
                 Preview.Clear();
-                Detail = new WeaponDetailViewModel(tree) { NodeSelected = ShowPreview };
+                _tree = tree;
+                Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview };
                 Status = $"{value.Name} — {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}";
             }
             finally
@@ -112,6 +142,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// Reading goes through the same lock as resolving: one BundleSet, one reader, and clicking
     /// quickly down a tree must not put two decodes into it at once.
+    partial void OnReplaceableOnlyChanged(bool value)
+    {
+        if (_tree is null) return;
+
+        Preview.Clear();
+        Detail = new WeaponDetailViewModel(_tree, value) { NodeSelected = ShowPreview };
+    }
+
     private async void ShowPreview(TreeNode? node)
     {
         if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh))

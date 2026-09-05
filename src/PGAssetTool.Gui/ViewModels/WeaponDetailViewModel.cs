@@ -2,14 +2,15 @@ using System.Collections.ObjectModel;
 using AssetsTools.NET.Extra;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PGAssetTool.Core.Assets;
+using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Weapons;
 
 namespace PGAssetTool.Gui.ViewModels;
 
-/// One row in the tree. Only the leaves stand for something replaceable.
-public sealed class TreeNode(
+/// One row in the tree. Only the leaves stand for something that can be looked at or replaced.
+public sealed partial class TreeNode(
     string label, string? detail = null, AssetClassID? cls = null, long pathId = 0, string bundle = "",
-    bool alphaIsCoverage = false)
+    bool alphaIsCoverage = false) : ObservableObject
 {
     public string Label { get; } = label;
     public string? Detail { get; } = detail;
@@ -23,9 +24,14 @@ public sealed class TreeNode(
     /// Whether this object's alpha channel means transparency. Icons sit on an empty background
     /// and need it; a model texture usually keeps something else there and is holed by it.
     public bool AlphaIsCoverage { get; } = alphaIsCoverage;
+
     public ObservableCollection<TreeNode> Children { get; } = [];
 
-    public bool IsExpanded { get; set; }
+    /// Two-way bound to the row, so clicking one and expanding it are the same gesture.
+    [ObservableProperty] private bool _isExpanded;
+
+    public bool HasChildren => Children.Count > 0;
+
     public string Icon => Class switch
     {
         AssetClassID.Texture2D => "🖼",
@@ -45,13 +51,14 @@ public sealed class TreeNode(
 
 public sealed partial class WeaponDetailViewModel : ObservableObject
 {
-    public WeaponDetailViewModel(WeaponTree tree)
+    public WeaponDetailViewModel(WeaponTree tree, bool replaceableOnly)
     {
         Tree = tree;
-        Roots = Build(tree);
+        Roots = Build(tree, replaceableOnly);
     }
 
     public WeaponTree Tree { get; }
+    public ObservableCollection<TreeNode> Roots { get; }
 
     /// Set by the shell so a click in the tree can be turned into a preview.
     public Action<TreeNode?>? NodeSelected { get; set; }
@@ -59,20 +66,22 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
     [ObservableProperty] private TreeNode? _selectedNode;
 
     partial void OnSelectedNodeChanged(TreeNode? value) => NodeSelected?.Invoke(value);
-    public ObservableCollection<TreeNode> Roots { get; }
 
     public string Name => Tree.DisplayName;
     public string Subtitle =>
         $"#{Tree.Record.GameNumber}   {Tree.Record.PrefabName}   {Tree.Record.Slug}"
         + (Tree.PrefabBundle is null ? "" : $"   @ {Tree.PrefabBundle}");
 
-    private static ObservableCollection<TreeNode> Build(WeaponTree tree)
+    private static ObservableCollection<TreeNode> Build(WeaponTree tree, bool replaceableOnly)
     {
         var roots = new ObservableCollection<TreeNode>();
 
-        // Grouped by class rather than listed flat: a weapon prefab reaches a few hundred objects
-        // and most of them are transforms nobody wants to scroll past.
+        // Grouped by class rather than listed flat: a weapon prefab reaches a hundred-odd objects
+        // and most of them are transforms nobody wants to scroll past. Which classes are worth
+        // keeping when filtered comes from the import registry, so a type gained later shows up
+        // here without this file being touched.
         var byClass = tree.PrefabAssets
+            .Where(a => !replaceableOnly || Replaceable.Supports(a.Class))
             .GroupBy(a => a.Class)
             .OrderBy(g => Rank(g.Key))
             .ThenBy(g => g.Key.ToString(), StringComparer.Ordinal);
@@ -82,11 +91,9 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
 
         foreach (var group in byClass)
         {
-            // The sound fields drive behaviour as well as playback, so the clips are listed but the
-            // MonoBehaviour holding them is not something to open and edit here.
             var node = new TreeNode(group.Key.ToString(), $"{group.Count()}")
             {
-                IsExpanded = Replaceable.Contains(group.Key),
+                IsExpanded = Replaceable.Supports(group.Key),
             };
             foreach (var asset in group.OrderBy(a => a.Name, StringComparer.Ordinal))
                 node.With(new TreeNode(
@@ -110,7 +117,9 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
             roots.Add(skins);
         }
 
-        if (tree.Related.Count > 0)
+        // Related assets are paths, not objects: nothing here can be replaced through them, so the
+        // filter takes them out along with everything else that is only context.
+        if (tree.Related.Count > 0 && !replaceableOnly)
         {
             var related = new TreeNode("Related", $"{tree.Related.Count}");
             foreach (var group in tree.Related.GroupBy(r => r.Namespace).OrderBy(g => g.Key, StringComparer.Ordinal))
@@ -129,9 +138,6 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
     /// An object reached across a bundle boundary belongs to whichever bundle it was found in.
     private static string Where(AssetNode asset, WeaponTree tree)
         => asset.Bundle.Length > 0 ? asset.Bundle : tree.PrefabBundle ?? "";
-
-    private static readonly HashSet<AssetClassID> Replaceable =
-        [AssetClassID.Texture2D, AssetClassID.Mesh, AssetClassID.AudioClip];
 
     /// What a modder came to find goes at the top; the scaffolding sinks.
     private static int Rank(AssetClassID cls) => cls switch
