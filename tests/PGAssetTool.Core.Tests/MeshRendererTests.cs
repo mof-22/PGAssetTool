@@ -172,4 +172,77 @@ public class MeshRendererTests
         var broken = Mesh([0, 0, 0, 1, 0, 0, 1, 1, 0], [0, 1, 99]);
         Assert.Equal(0, Covered(Draw(broken, new Camera())));
     }
+
+    /// A long thin bar along one axis, as a stand-in for a barrel.
+    private static UnityMesh Bar(int axis, float length = 2f, float thickness = 0.2f)
+    {
+        float[] size = [thickness, thickness, thickness];
+        size[axis] = length;
+
+        var positions = new List<float>();
+        foreach (var corner in new[] { -1f, 1f })
+        foreach (var side in new[] { -1f, 1f })
+        {
+            // Two triangles per end, enough to give the bar an extent on every axis.
+            var other = (axis + 1) % 3;
+            var third = (axis + 2) % 3;
+            float[] v = new float[3];
+            v[axis] = corner * size[axis] / 2;
+            v[other] = side * size[other] / 2;
+            v[third] = 0;
+            positions.AddRange(v);
+        }
+        return Mesh([.. positions], [0, 1, 2, 1, 2, 3]);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ALongModelLiesAcrossTheScreenWhicheverAxisItWasBuiltOn(int axis)
+    {
+        // A Mesh carries no orientation of its own: in the game the renderer's transform places it,
+        // and a preview has nothing to place it with. Weapons are authored with the barrel along Y,
+        // so without this they hang straight down.
+        var pixels = Draw(Bar(axis), new Camera(Yaw: 0, Pitch: 0));
+
+        var (minX, maxX, minY, maxY) = Extent(pixels);
+        Assert.True(maxX - minX > maxY - minY,
+            $"a bar along axis {axis} drew {maxX - minX} wide by {maxY - minY} tall");
+    }
+
+    [Fact]
+    public void TheCorrectionDoesNotMirrorTheModel()
+    {
+        // Reordering axes can flip handedness. A bar with its mass to one side has to stay on that
+        // side, or every preview of an asymmetric model would be a mirror image of the real thing.
+        float[] positions = [0, 0, 0, 2, 0, 0, 2, 0.4f, 0, 0, 0.1f, 0];
+        var lopsided = Mesh(positions, [0, 1, 2, 0, 2, 3]);
+
+        var pixels = Draw(lopsided, new Camera(Yaw: 0, Pitch: 0));
+
+        // The tall end is at +X in the model, so more of the drawing sits right of centre than left.
+        var (left, right) = (0, 0);
+        for (var y = 0; y < Size; y++)
+        for (var x = 0; x < Size; x++)
+            if (At(pixels, x, y) is not null)
+            {
+                if (x < Size / 2) left++; else right++;
+            }
+
+        Assert.True(right > left, $"the heavy end drew {right} pixels right and {left} left");
+    }
+
+    private static (int MinX, int MaxX, int MinY, int MaxY) Extent(byte[] pixels)
+    {
+        int minX = Size, maxX = -1, minY = Size, maxY = -1;
+        for (var y = 0; y < Size; y++)
+        for (var x = 0; x < Size; x++)
+            if (At(pixels, x, y) is not null)
+            {
+                minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+            }
+        return (minX, maxX, minY, maxY);
+    }
 }

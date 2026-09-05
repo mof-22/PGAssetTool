@@ -4,7 +4,7 @@ namespace PGAssetTool.Core.Preview;
 
 /// How the model is being looked at. Angles are radians; distance is a multiple of the model's own
 /// radius, so a pistol and a rocket launcher both start out filling the frame.
-public sealed record Camera(float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 2.6f)
+public sealed record Camera(float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1.5f)
 {
     public Camera Turned(float dYaw, float dPitch) => this with
     {
@@ -35,11 +35,13 @@ public static class MeshRenderer
         if (positions is null || mesh.VertexCount == 0) return;
 
         var normals = mesh.Get(VertexAttribute.Normal);
-        var (centre, radius) = Bounds(mesh, positions);
+        var (centre, size, radius) = Bounds(mesh, positions);
+        var upright = Upright.For(size);
         if (radius <= 0) radius = 1;
 
-        var view = View(camera, centre, radius);
-        var scale = Math.Min(width, height) * 0.5f / (radius * camera.Distance) * 1.6f;
+        var view = View(camera);
+        // Distance is literally how many model radii the half-frame covers, so 1.5 leaves a margin.
+        var scale = Math.Min(width, height) * 0.5f / (radius * camera.Distance);
 
         var depth = new float[width * height];
         Array.Fill(depth, float.NegativeInfinity);
@@ -57,16 +59,17 @@ public static class MeshRenderer
                 var vertex = mesh.Indices[i + corner];
                 if (vertex < 0 || vertex >= mesh.VertexCount) { ok = false; break; }
 
-                var (x, y, z) = view.Apply(
+                var (mx, my, mz) = upright.Apply(
                     positions[vertex * 3] - centre.X,
                     positions[vertex * 3 + 1] - centre.Y,
                     positions[vertex * 3 + 2] - centre.Z);
+                var (x, y, z) = view.Apply(mx, my, mz);
 
                 sx[corner] = width * 0.5f + x * scale;
                 sy[corner] = height * 0.5f - y * scale;
                 sz[corner] = z;
 
-                shade[corner] = normals is null ? 1f : Lambert(view, normals, vertex);
+                shade[corner] = normals is null ? 1f : Lambert(view, upright, normals, vertex);
             }
             if (!ok) continue;
 
@@ -76,9 +79,10 @@ public static class MeshRenderer
 
     /// A single light over the viewer's shoulder, with enough ambient that faces turned away stay
     /// readable instead of going black.
-    private static float Lambert(Basis view, float[] normals, int vertex)
+    private static float Lambert(Basis view, Upright upright, float[] normals, int vertex)
     {
-        var (nx, ny, nz) = view.Apply(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]);
+        var (ux, uy, uz) = upright.Apply(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]);
+        var (nx, ny, nz) = view.Apply(ux, uy, uz);
         var length = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
         if (length <= 0) return 1f;
 
@@ -127,6 +131,43 @@ public static class MeshRenderer
         }
     }
 
+    /// Stands the model up before the camera looks at it: longest side across the screen, next
+    /// longest up it.
+    ///
+    /// A Mesh asset carries no orientation. In the game it is placed by the transform of whichever
+    /// renderer draws it, and a preview showing one on its own has nothing to place it with — so
+    /// weapons, whose barrels are authored along Y, arrive pointing straight down. Sorting the
+    /// bounding box turns that into a level, side-on view without needing to know what the model is.
+    ///
+    /// Which end the muzzle is on is not recoverable this way. The obvious guess, that the thinner
+    /// end is the barrel, holds for only 46 of the 73 clearly-long meshes in one bundle, with the
+    /// margins inside the noise — so it is not guessed at, and a gun may face either way.
+    private readonly record struct Upright(int Right, int Up, int Depth, float Flip)
+    {
+        public (float X, float Y, float Z) Apply(float x, float y, float z)
+        {
+            Span<float> v = [x, y, z];
+            return (v[Right], v[Up], v[Depth] * Flip);
+        }
+
+        public static Upright For((float X, float Y, float Z) size)
+        {
+            Span<float> extents = [size.X, size.Y, size.Z];
+            Span<int> order = [0, 1, 2];
+
+            // Three elements, so a pair of passes settles it and a sort is not worth reaching for.
+            for (var pass = 0; pass < 2; pass++)
+                for (var i = 0; i < 2; i++)
+                    if (extents[order[i]] < extents[order[i + 1]])
+                        (order[i], order[i + 1]) = (order[i + 1], order[i]);
+
+            // Reordering axes can mirror the model. An odd permutation is put back by flipping
+            // depth, which leaves the silhouette alone and only decides which side is towards you.
+            var odd = (order[0], order[1]) is (0, 2) or (1, 0) or (2, 1);
+            return new Upright(order[0], order[1], order[2], odd ? -1f : 1f);
+        }
+    }
+
     /// The camera's axes, as three rows that turn a model-space vector into view space.
     private readonly record struct Basis(
         float Rx, float Ry, float Rz, float Ux, float Uy, float Uz, float Fx, float Fy, float Fz)
@@ -135,7 +176,7 @@ public static class MeshRenderer
             => (Rx * x + Ry * y + Rz * z, Ux * x + Uy * y + Uz * z, Fx * x + Fy * y + Fz * z);
     }
 
-    private static Basis View(Camera camera, (float X, float Y, float Z) _, float __)
+    private static Basis View(Camera camera)
     {
         var (cy, sy) = (MathF.Cos(camera.Yaw), MathF.Sin(camera.Yaw));
         var (cp, sp) = (MathF.Cos(camera.Pitch), MathF.Sin(camera.Pitch));
@@ -149,7 +190,8 @@ public static class MeshRenderer
         return new Basis(rx, ry, rz, ux, uy, uz, fx, fy, fz);
     }
 
-    private static ((float X, float Y, float Z) Centre, float Radius) Bounds(UnityMesh mesh, float[] positions)
+    private static ((float X, float Y, float Z) Centre, (float X, float Y, float Z) Size, float Radius)
+        Bounds(UnityMesh mesh, float[] positions)
     {
         float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
         float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
@@ -162,8 +204,9 @@ public static class MeshRenderer
         }
 
         var centre = ((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+        var size = (maxX - minX, maxY - minY, maxZ - minZ);
         var radius = MathF.Sqrt(
-            MathF.Pow(maxX - centre.Item1, 2) + MathF.Pow(maxY - centre.Item2, 2) + MathF.Pow(maxZ - centre.Item3, 2));
-        return (centre, radius);
+            MathF.Pow(size.Item1 / 2, 2) + MathF.Pow(size.Item2 / 2, 2) + MathF.Pow(size.Item3 / 2, 2));
+        return (centre, size, radius);
     }
 }
