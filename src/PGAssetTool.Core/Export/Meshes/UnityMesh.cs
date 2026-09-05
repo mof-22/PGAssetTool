@@ -22,7 +22,7 @@ public sealed record SubMesh(int IndexStart, int IndexCount, int Topology, int B
 /// Everything is widened to float (and joints to int) rather than kept in its source layout. The
 /// packing is an engine detail — interleaved streams, per-attribute formats, alignment padding — and
 /// carrying it further would only make every consumer re-implement the same unpacking.
-public sealed class UnityMesh
+public sealed record UnityMesh
 {
     public required string Name { get; init; }
     public required int VertexCount { get; init; }
@@ -73,8 +73,9 @@ public sealed class UnityMesh
             Dimensions = dimensions,
             Indices = ReadIndices(field),
             SubMeshes = ReadSubMeshes(field),
+            // A Matrix4x4 is sixteen flat fields named e00 through e33, not four nested rows.
             BindPoses = field["m_BindPose"]["Array"].Children
-                .Select(m => m.Children.SelectMany(r => r.Children.Select(v => v.AsFloat)).ToArray()).ToList(),
+                .Select(m => m.Children.Select(v => v.AsFloat).ToArray()).ToList(),
             BoneNameHashes = field["m_BoneNameHashes"]["Array"].Children.Select(c => c.AsUInt).ToList(),
         };
     }

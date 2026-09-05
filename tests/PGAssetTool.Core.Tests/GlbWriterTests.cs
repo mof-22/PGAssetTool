@@ -66,10 +66,56 @@ public class GlbWriterTests : IDisposable
     [Fact]
     public void TheContainerIsWellFormed()
     {
-        var (json, binary) = WriteAndRead(Triangle());
+        var (json, _) = WriteAndRead(Triangle());
         Assert.Equal("2.0", json.GetProperty("asset").GetProperty("version").GetString());
-        Assert.Equal(binary.Length, json.GetProperty("buffers")[0].GetProperty("byteLength").GetInt32()
-            + (4 - json.GetProperty("buffers")[0].GetProperty("byteLength").GetInt32() % 4) % 4);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NoBufferViewReachesPastTheDeclaredBufferLength(bool skinned)
+    {
+        // The skin appends to the buffer after the mesh data. Declaring the length before that ran
+        // left the inverse bind matrices outside it, and a reader is entitled to refuse them.
+        var (json, _) = WriteAndRead(Triangle(skinned));
+        var declared = json.GetProperty("buffers")[0].GetProperty("byteLength").GetInt32();
+
+        foreach (var view in json.GetProperty("bufferViews").EnumerateArray())
+        {
+            var offset = view.TryGetProperty("byteOffset", out var o) ? o.GetInt32() : 0;
+            Assert.True(offset + view.GetProperty("byteLength").GetInt32() <= declared);
+        }
+    }
+
+    [Fact]
+    public void BindMatricesComeOutColumnMajorAndUnmirrored()
+    {
+        // Unity names these eRC and stores them row by row; glTF reads them column by column, so
+        // passing them through unchanged transposes every one. A basis change that mirrored instead
+        // of rotating would show up as a negative determinant.
+        var mesh = Triangle(skinned: true) with { };
+        var (json, binary) = WriteAndRead(mesh);
+        var accessor = json.GetProperty("skins")[0].GetProperty("inverseBindMatrices").GetInt32();
+        var m = Floats(json, binary, accessor, 16);
+
+        Assert.Equal(1f, m[15]);
+        var determinant =
+            m[0] * (m[5] * m[10] - m[6] * m[9])
+            - m[4] * (m[1] * m[10] - m[2] * m[9])
+            + m[8] * (m[1] * m[6] - m[2] * m[5]);
+        Assert.Equal(1f, determinant, 4);
+    }
+
+    [Fact]
+    public void ATranslationInTheBindPoseKeepsItsPlaceAndFlipsZ()
+    {
+        var mesh = Triangle(skinned: true);
+        // Row-major e00..e33 with the translation in the last column: x=1, y=2, z=3.
+        var pose = new float[] { 1, 0, 0, 1, 0, 1, 0, 2, 0, 0, 1, 3, 0, 0, 0, 1 };
+        var (json, binary) = WriteAndRead(mesh with { BindPoses = [pose, pose] });
+
+        var m = Floats(json, binary, json.GetProperty("skins")[0].GetProperty("inverseBindMatrices").GetInt32(), 16);
+        Assert.Equal([1f, 2f, -3f], [m[12], m[13], m[14]]);
     }
 
     [Fact]

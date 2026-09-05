@@ -70,12 +70,16 @@ public static class GlbWriter
             },
             ["accessors"] = accessors,
             ["bufferViews"] = views,
-            ["buffers"] = new JsonArray { new JsonObject { ["byteLength"] = buffer.Length } },
         };
 
         if (mesh.IsSkinned) AddSkin(mesh, gltf, buffer, views, accessors);
 
-        WriteContainer(path, gltf, buffer.ToArray());
+        // Written last: the skin appends to the buffer, and a byteLength captured before that leaves
+        // a bufferView pointing past the declared end, which readers are entitled to reject.
+        var binary = buffer.ToArray();
+        gltf["buffers"] = new JsonArray { new JsonObject { ["byteLength"] = binary.Length } };
+
+        WriteContainer(path, gltf, binary);
     }
 
     private static IEnumerable<(VertexAttribute, string, int)> Mapping(UnityMesh mesh)
@@ -180,13 +184,24 @@ public static class GlbWriter
             });
         }
 
-        // Unity stores bind poses as bind-to-local; glTF wants the same, with Z negated to match.
+        // Unity names these eRC — row R, column C — and reads out row by row. glTF wants them column
+        // major, so the indices are transposed on the way out; leaving them as read produces
+        // transposed matrices, which deform every vertex to somewhere it should not be.
+        //
+        // Negating Z means changing basis, not negating a fixed set of cells: with S = diag(1,1,-1,1)
+        // the converted matrix is S·M·S, which flips exactly the elements where one of the row and
+        // column is the Z index and not both.
         var matrices = new float[mesh.BindPoses.Count * 16];
         for (int b = 0; b < mesh.BindPoses.Count; b++)
         {
             var m = mesh.BindPoses[b];
-            for (int i = 0; i < 16 && i < m.Length; i++) matrices[b * 16 + i] = m[i];
-            foreach (var i in new[] { 2, 6, 8, 9, 11, 14 }) matrices[b * 16 + i] = -matrices[b * 16 + i];
+            for (int row = 0; row < 4; row++)
+                for (int column = 0; column < 4; column++)
+                {
+                    var value = row * 4 + column < m.Length ? m[row * 4 + column] : 0f;
+                    if (row == 2 ^ column == 2) value = -value;
+                    matrices[b * 16 + column * 4 + row] = value;
+                }
         }
 
         var accessor = AddAccessor(buffer, views, accessors, matrices, 16, Float, "MAT4");
