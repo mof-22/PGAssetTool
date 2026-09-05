@@ -107,6 +107,40 @@ public class GlbWriterTests : IDisposable
     }
 
     [Fact]
+    public void AtRestTheJointCancelsItsInverseBindMatrix()
+    {
+        // The whole point of the pair: at the bind pose the deform must come out as identity, or the
+        // mesh is right until the armature is switched on and wrong after. A joint left without a
+        // transform sits at the origin and leaves the inverse bind matrix applied to every vertex.
+        var pose = new float[]
+        {
+            0, -1, 0, 0.5f,
+            1, 0, 0, -0.25f,
+            0, 0, 1, 2,
+            0, 0, 0, 1,
+        };
+        var (json, binary) = WriteAndRead(Triangle(skinned: true) with { BindPoses = [pose, pose] });
+
+        var skin = json.GetProperty("skins")[0];
+        var inverseBind = Floats(json, binary, skin.GetProperty("inverseBindMatrices").GetInt32(), 16);
+
+        foreach (var (jointIndex, slot) in skin.GetProperty("joints").EnumerateArray().Select((j, i) => (j.GetInt32(), i)))
+        {
+            var placement = json.GetProperty("nodes")[jointIndex].GetProperty("matrix")
+                .EnumerateArray().Select(v => v.GetSingle()).ToArray();
+
+            for (int column = 0; column < 4; column++)
+                for (int row = 0; row < 4; row++)
+                {
+                    float sum = 0;
+                    for (int k = 0; k < 4; k++)
+                        sum += placement[k * 4 + row] * inverseBind[slot * 16 + column * 4 + k];
+                    Assert.Equal(row == column ? 1f : 0f, sum, 4);
+                }
+        }
+    }
+
+    [Fact]
     public void ATranslationInTheBindPoseKeepsItsPlaceAndFlipsZ()
     {
         var mesh = Triangle(skinned: true);

@@ -173,17 +173,6 @@ public static class GlbWriter
 
     private static void AddSkin(UnityMesh mesh, JsonObject gltf, MemoryStream buffer, JsonArray views, JsonArray accessors)
     {
-        var nodes = (JsonArray)gltf["nodes"]!;
-        var joints = new JsonArray();
-        for (int i = 0; i < mesh.BindPoses.Count; i++)
-        {
-            joints.Add(nodes.Count);
-            nodes.Add(new JsonObject
-            {
-                ["name"] = i < mesh.BoneNameHashes.Count ? $"bone_{mesh.BoneNameHashes[i]}" : $"bone_{i}",
-            });
-        }
-
         // Unity names these eRC — row R, column C — and reads out row by row. glTF wants them column
         // major, so the indices are transposed on the way out; leaving them as read produces
         // transposed matrices, which deform every vertex to somewhere it should not be.
@@ -204,13 +193,67 @@ public static class GlbWriter
                 }
         }
 
+        var nodes = (JsonArray)gltf["nodes"]!;
+        var sceneNodes = (JsonArray)gltf["scenes"]![0]!["nodes"]!;
+        var joints = new JsonArray();
+
+        for (int i = 0; i < mesh.BindPoses.Count; i++)
+        {
+            // A joint left without a transform sits at the origin, and the deform at rest becomes the
+            // inverse bind matrix applied to every vertex instead of cancelling against it — the mesh
+            // is right in edit mode and wrong once the armature is on. Placing each joint at the
+            // inverse of its inverse bind matrix is what makes the pair cancel.
+            var placement = InvertAffine(matrices.AsSpan(i * 16, 16));
+
+            joints.Add(nodes.Count);
+            sceneNodes.Add(nodes.Count);
+            nodes.Add(new JsonObject
+            {
+                ["name"] = i < mesh.BoneNameHashes.Count ? $"bone_{mesh.BoneNameHashes[i]}" : $"bone_{i}",
+                ["matrix"] = new JsonArray(placement.Select(v => (JsonNode)v!).ToArray()),
+            });
+        }
+
         var accessor = AddAccessor(buffer, views, accessors, matrices, 16, Float, "MAT4");
         gltf["skins"] = new JsonArray
         {
             new JsonObject { ["joints"] = joints, ["inverseBindMatrices"] = accessor },
         };
         ((JsonObject)nodes[0]!)["skin"] = 0;
-        ((JsonArray)gltf["scenes"]![0]!["nodes"]!).Add(joints.Count > 0 ? (int)joints[0]! : 0);
+    }
+
+    /// Inverts a column-major affine matrix: the linear part by cofactors, the translation by
+    /// pushing it back through that inverse. Bind poses are rotations and translations, so a general
+    /// 4x4 inverse would only add ways to be wrong.
+    private static float[] InvertAffine(ReadOnlySpan<float> m)
+    {
+        // Column major, so m[column * 4 + row].
+        float a = m[0], b = m[4], c = m[8];
+        float d = m[1], e = m[5], f = m[9];
+        float g = m[2], h = m[6], i = m[10];
+
+        var determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+        if (Math.Abs(determinant) < 1e-12f) return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        var s = 1f / determinant;
+
+        var linear = new[]
+        {
+            (e * i - f * h) * s, (f * g - d * i) * s, (d * h - e * g) * s,
+            (c * h - b * i) * s, (a * i - c * g) * s, (b * g - a * h) * s,
+            (b * f - c * e) * s, (c * d - a * f) * s, (a * e - b * d) * s,
+        };
+
+        float tx = m[12], ty = m[13], tz = m[14];
+        var result = new float[16];
+        for (int column = 0; column < 3; column++)
+            for (int row = 0; row < 3; row++)
+                result[column * 4 + row] = linear[column * 3 + row];
+
+        result[12] = -(linear[0] * tx + linear[3] * ty + linear[6] * tz);
+        result[13] = -(linear[1] * tx + linear[4] * ty + linear[7] * tz);
+        result[14] = -(linear[2] * tx + linear[5] * ty + linear[8] * tz);
+        result[15] = 1f;
+        return result;
     }
 
     private static JsonNode AddAccessor(
