@@ -80,8 +80,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         foreach (var bundle in mods.SelectMany(m => m.TouchedBundles.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!hashes.TryGetValue(bundle, out var hash)) continue;
-            var live = Path.Combine(game.BundlesDirectory, bundle, hash, bundle);
-            if (store.RestoreIfBackedUp(bundle, hash, live)) restored.Add(bundle);
+            foreach (var (cache, live) in game.LocateAll(bundle, hash))
+                if (store.RestoreIfBackedUp(cache.Kind, bundle, hash, live))
+                    restored.Add($"{bundle} ({cache.Kind})");
         }
 
         var touchedByMod = new Dictionary<string, Dictionary<string, string>>();
@@ -124,24 +125,37 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                     continue;
                 }
 
-                var live = Path.Combine(game.BundlesDirectory, group.Key, hash, group.Key);
-
-                // Backing up a bundle something else already edited would record that edit as the
-                // original, leaving no way back to the shipped file.
-                if (!store.HasBackup(group.Key, hash) && !BundleIntegrity.IsPristine(live, hash) && !Force)
+                // Every copy gets the change. The game prefers the downloaded one, but which copies
+                // exist changes over time, and a mod that quietly stops working when the cache does
+                // is worse than doing the work twice.
+                var copies = game.LocateAll(group.Key, hash).ToList();
+                if (copies.Count == 0)
                 {
-                    failed.Add($"{mod.Id}: '{group.Key}' has already been modified by something else "
-                        + "and there is no backup of it. Restore it, or pass --force to accept its "
-                        + "current contents as the original.");
+                    failed.Add($"{mod.Id}: no copy of '{group.Key}' is present in any cache");
                     continue;
                 }
-                store.Backup(group.Key, hash, live);
 
-                var rewritten = Path.Combine(staging.FullName, group.Key);
-                if (!EditBundle(mod, live, rewritten, group, archive, staging.FullName, applied, failed)) continue;
+                foreach (var (cache, live) in copies)
+                {
+                    // Backing up a bundle something else already edited would record that edit as
+                    // the original, leaving no way back to the shipped file.
+                    if (!store.HasBackup(cache.Kind, group.Key, hash)
+                        && !BundleIntegrity.IsPristine(live, hash) && !Force)
+                    {
+                        failed.Add($"{mod.Id}: '{group.Key}' in the {cache.Kind.ToString().ToLowerInvariant()} "
+                            + "cache has already been modified by something else and there is no backup "
+                            + "of it. Restore it, or pass --force to accept its contents as the original.");
+                        continue;
+                    }
+                    store.Backup(cache.Kind, group.Key, hash, live);
 
-                File.Copy(rewritten, live, overwrite: true);
-                touched[group.Key] = hash;
+                    var rewritten = Path.Combine(staging.FullName, $"{cache.Kind}_{group.Key}");
+                    if (!EditBundle(mod, live, rewritten, group, archive, staging.FullName, applied, failed))
+                        continue;
+
+                    File.Copy(rewritten, live, overwrite: true);
+                    touched[group.Key] = hash;
+                }
             }
         }
         finally

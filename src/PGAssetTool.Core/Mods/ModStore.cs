@@ -59,24 +59,26 @@ public sealed class ModStore
         File.WriteAllText(StatePath, JsonSerializer.Serialize(mods.ToList(), Json));
     }
 
-    /// Backups are filed under the bundle's hash, so a backup taken before an update stays
+    /// Backups are filed under the cache they came from and the bundle's hash. The cache matters
+    /// because the same bundle exists in two of them; the hash keeps a backup taken before an update
     /// distinguishable from the version that replaced it.
-    public string BackupPathFor(string bundle, string hash)
-        => Path.Combine(BackupRoot, bundle, hash, bundle);
+    public string BackupPathFor(CacheKind cache, string bundle, string hash)
+        => Path.Combine(BackupRoot, cache.ToString().ToLowerInvariant(), bundle, hash, bundle);
 
-    public bool HasBackup(string bundle, string hash) => File.Exists(BackupPathFor(bundle, hash));
+    public bool HasBackup(CacheKind cache, string bundle, string hash)
+        => File.Exists(BackupPathFor(cache, bundle, hash));
 
-    public void Backup(string bundle, string hash, string livePath)
+    public void Backup(CacheKind cache, string bundle, string hash, string livePath)
     {
-        var destination = BackupPathFor(bundle, hash);
+        var destination = BackupPathFor(cache, bundle, hash);
         if (File.Exists(destination)) return;
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         File.Copy(livePath, destination);
     }
 
-    public bool RestoreIfBackedUp(string bundle, string hash, string livePath)
+    public bool RestoreIfBackedUp(CacheKind cache, string bundle, string hash, string livePath)
     {
-        var source = BackupPathFor(bundle, hash);
+        var source = BackupPathFor(cache, bundle, hash);
         if (!File.Exists(source)) return false;
         File.Copy(source, livePath, overwrite: true);
         return true;
@@ -89,18 +91,23 @@ public sealed class ModStore
         if (!Directory.Exists(BackupRoot)) return [];
 
         var removed = new List<string>();
-        foreach (var bundleDirectory in Directory.GetDirectories(BackupRoot))
+        foreach (var cacheDirectory in Directory.GetDirectories(BackupRoot))
         {
-            var bundle = Path.GetFileName(bundleDirectory);
-            currentHashes.TryGetValue(bundle, out var currentHash);
-            foreach (var hashDirectory in Directory.GetDirectories(bundleDirectory))
+            foreach (var bundleDirectory in Directory.GetDirectories(cacheDirectory))
             {
-                if (Path.GetFileName(hashDirectory) == currentHash) continue;
-                Directory.Delete(hashDirectory, recursive: true);
-                removed.Add($"{bundle}/{Path.GetFileName(hashDirectory)}");
+                var bundle = Path.GetFileName(bundleDirectory);
+                currentHashes.TryGetValue(bundle, out var currentHash);
+                foreach (var hashDirectory in Directory.GetDirectories(bundleDirectory))
+                {
+                    if (Path.GetFileName(hashDirectory) == currentHash) continue;
+                    Directory.Delete(hashDirectory, recursive: true);
+                    removed.Add($"{Path.GetFileName(cacheDirectory)}/{bundle}/{Path.GetFileName(hashDirectory)}");
+                }
+                if (Directory.GetFileSystemEntries(bundleDirectory).Length == 0)
+                    Directory.Delete(bundleDirectory);
             }
-            if (Directory.GetFileSystemEntries(bundleDirectory).Length == 0)
-                Directory.Delete(bundleDirectory);
+            if (Directory.GetFileSystemEntries(cacheDirectory).Length == 0)
+                Directory.Delete(cacheDirectory);
         }
         return removed;
     }

@@ -23,9 +23,14 @@ public sealed class BundleSet : IDisposable
     public AssetsContext Context => _context;
     public IReadOnlyCollection<string> BundleNames => _hashes.Keys;
 
-    public string PathOf(string bundle) => _hashes.TryGetValue(bundle, out var hash)
-        ? Path.Combine(Game.BundlesDirectory, bundle, hash, bundle)
+    public string HashOf(string bundle) => _hashes.TryGetValue(bundle, out var hash)
+        ? hash
         : throw new KeyNotFoundException($"'{bundle}' is not in the bundle manifest.");
+
+    /// The copy the game would load, which is not always the one shipped with it.
+    public string PathOf(string bundle)
+        => Game.Locate(bundle, HashOf(bundle))?.Path
+           ?? throw new FileNotFoundException($"No copy of '{bundle}' is present in any cache.");
 
     /// The first serialized file in a bundle. Every content bundle here holds exactly one.
     public AssetsFileInstance Open(string bundle)
