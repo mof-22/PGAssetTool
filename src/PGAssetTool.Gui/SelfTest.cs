@@ -1,6 +1,7 @@
 using AssetsTools.NET.Extra;
 using Avalonia;
 using Avalonia.Headless;
+using Avalonia.VisualTree;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Mods;
@@ -370,6 +371,25 @@ internal static class SelfTest
             if (model.Manager.Selected is null) return Fail($"the manager does not list '{mine}'");
             model.Manager.DisableCommand.Execute(null);
             if (model.Manager.Asking is null) return Fail("turning a mod off asked for no confirmation");
+
+            // The buttons in that dialog have to reach the commands. Bound through the wrong
+            // ancestor they resolve to nothing, Avalonia disables them, and it looks like the tool
+            // refusing rather than a binding being wrong — which is exactly what happened.
+            var dialog = new Views.MainWindow { DataContext = model };
+            dialog.Show();
+            model.Workspace = MainViewModel.ManagerTab;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            var buttons = dialog.GetVisualDescendants().OfType<Avalonia.Controls.Button>()
+                .Where(b => b.Content is "Cancel" or "Go ahead")
+                .ToList();
+
+            Console.WriteLine($"manager  dialog buttons: {buttons.Count}, "
+                + $"enabled {buttons.Count(b => b.IsEffectivelyEnabled)}");
+
+            var usable = buttons.Count == 2 && buttons.All(b => b.IsEffectivelyEnabled);
+            dialog.Close();
+            if (!usable) return Fail("the confirmation buttons are not usable");
             Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
 
             model.Manager.ProceedCommand.Execute(null);
@@ -389,11 +409,21 @@ internal static class SelfTest
             Console.WriteLine($"manager  pack kept at {kept}");
             if (!kept.Contains("PGAssetTool-data")) return Fail("the pack was not copied into the store");
 
-            // Put the game back: this is a test, not a change anyone asked for.
-            // Put the game back: this is a test, not a change anyone asked for.
-            new PGAssetTool.Core.Mods.ModApplier(model.Game!, new PGAssetTool.Core.Mods.ModStore(model.Game!))
-                .Remove(mine);
-            Console.WriteLine("pack     removed again");
+            // Removed through the manager rather than around it, so the path a person actually
+            // takes is the one under test. This also puts the game back: it is a test, not a
+            // change anyone asked for.
+            model.Manager.RemoveCommand.Execute(null);
+            if (model.Manager.Asking is null) return Fail("removing asked for no confirmation");
+
+            model.Manager.ProceedCommand.Execute(null);
+            for (var waited = 0; (model.Manager.Busy || model.Manager.Asking is not null) && waited < 180_000;
+                 waited += 50)
+                Thread.Sleep(50);
+
+            Console.WriteLine($"manager  after removing: {model.Manager.Status}");
+            if (model.Manager.Mods.Any(m => m.Mod.Id == mine)) return Fail("the mod is still installed");
+            if (model.Status.Contains("Value cannot be null"))
+                return Fail($"the shell reported an error during removal: {model.Status}");
 
             File.WriteAllBytes(texture.FullPath, bytes);
             model.Editor.Refresh();

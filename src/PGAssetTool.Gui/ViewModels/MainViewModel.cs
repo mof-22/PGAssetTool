@@ -32,8 +32,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Editor = new EditorViewModel(() => _bundles, _reading);
         Editor.PackRequested += BuildPack;
 
-        Manager = new ManagerViewModel(() => _bundles?.Game);
-        Manager.Changed += ReopenAfterWrite;
+        Manager = new ManagerViewModel(() => _installation);
+        Manager.Around = WithReaderClosed;
     }
 
     [ObservableProperty] private string _status = "Looking for the game…";
@@ -54,6 +54,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// The resolved weapon behind the current tree, kept so the tree can be rebuilt when the filter
     /// changes without reading the bundles again.
     private WeaponTree? _tree;
+
+    /// The installation itself, which holds no files open — so it survives the reader being put
+    /// down to write, which is exactly when the manager needs it.
+    private GameInstallation? _installation;
 
     /// Set while preferences are being applied, so reading them back does not write them out again
     /// or reload the game once per setting.
@@ -105,7 +109,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             await Task.Run(() =>
             {
-                var game = GameInstallation.OpenDetected();
+                _installation = GameInstallation.OpenDetected();
+                var game = _installation;
                 _bundles = new BundleSet(game);
                 _catalogs = GameCatalogs.Load(_bundles, Language);
                 _resolver = new WeaponResolver(_bundles, _catalogs);
@@ -122,7 +127,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = ex.Message;
+            Status = Describe(ex, "opening the game");
         }
         finally
         {
@@ -192,7 +197,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = ex.Message;
+            Status = Describe(ex, "reloading");
             Detail = null;
         }
         finally
@@ -270,15 +275,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// The bundles are held open for browsing and applying rewrites those same files. A separate
     /// process never had to care; a window that browses and installs does.
-    private async Task ReopenAfterWrite()
+    /// Runs something that rewrites the game with the reader put down, then opens it again.
+    ///
+    /// The bundles are held open for browsing and applying rewrites those same files. A separate
+    /// process never had to care; a window that browses and installs does.
+    private async Task WithReaderClosed(Func<Task> work)
     {
-        if (_bundles is null) return;
+        CloseReader();
+        try { await work(); }
+        finally { await LoadAsync(); }
+    }
 
-        _bundles.Dispose();
+    private void CloseReader()
+    {
+        _bundles?.Dispose();
         (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
         Detail = null;
         Preview.Clear();
-        await LoadAsync();
     }
 
     /// Builds a pack from a workspace, and installs it when asked.
@@ -299,13 +312,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (_bundles is null) { Status = "The game is not open."; return; }
             var game = _bundles.Game;
 
-            // The reader has the bundles open, and applying rewrites the same files. A separate
-            // process never noticed this; a window that browses and installs has to put the reader
-            // down first and pick it up again afterwards.
-            _bundles.Dispose();
-            (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
-            Detail = null;
-            Preview.Clear();
+            CloseReader();
 
             ReconcileResult result;
             try
@@ -338,10 +345,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public string WorkspaceRoot => _settings.WorkspaceIn(ModStore.DefaultHome());
 
     /// The installation, once it is open. The self-test uses it to put the game back.
-    public GameInstallation? Game => _bundles?.Game;
+    public GameInstallation? Game => _installation;
 
     /// The last directory written to, so the view can offer to open it.
     [ObservableProperty] private string? _lastExport;
+
+    /// Names what was being done, because a bare exception message says nothing about which of the
+    /// several things that can fail here did — "Value cannot be null" on its own is unactionable.
+    private static string Describe(Exception ex, string what)
+        => $"{ex.Message}  (while {what})";
 
     /// Long jobs share the one reader and say so while they run.
     private async Task RunExclusively(Func<Task> work)
@@ -349,7 +361,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Busy = true;
         await _reading.WaitAsync();
         try { await work(); }
-        catch (Exception ex) { Status = ex.Message; }
+        catch (Exception ex) { Status = Describe(ex, "changing the language"); }
         finally { _reading.Release(); Busy = false; }
     }
 
@@ -413,7 +425,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = ex.Message;
+            Status = Describe(ex, "loading a texture for the preview");
         }
     }
 
@@ -482,7 +494,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
             finally { _reading.Release(); }
         }
-        catch (Exception ex) { Status = ex.Message; }
+        catch (Exception ex) { Status = Describe(ex, "showing an asset"); }
     }
 
     /// Every texture the weapon reaches, offered so a skin can be tried on a mesh by hand.

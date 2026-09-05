@@ -146,7 +146,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Edited.Clear(ex.Message);
+            Edited.Clear($"{ex.Message}  (while comparing against the game)");
         }
     }
 

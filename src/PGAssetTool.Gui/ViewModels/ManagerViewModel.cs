@@ -50,8 +50,13 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// Skips the confirmation for routine changes. Never skips the warning about the game running.
     [ObservableProperty] private bool _confirmChanges = true;
 
-    /// Raised when the game's files have been rewritten, so the browser can reopen them.
-    public event Func<Task>? Changed;
+    /// Runs the work with the reader put down and picks it up again afterwards.
+    ///
+    /// The shell holds the bundles open for browsing, and everything here rewrites those same
+    /// files — a write attempted around a live reader fails with the file in use, which is exactly
+    /// what happened as soon as the confirmation started working.
+    public Func<Func<Task>, Task>? Around { get; set; }
+
 
     /// Reads only the bundles a mod claims. Finding one changed by something else means hashing all
     /// 2300 of them, which is a deliberate act rather than the cost of opening a tab.
@@ -127,23 +132,30 @@ public sealed partial class ManagerViewModel : ObservableObject
     {
         Asking = null;
         Busy = true;
+
+        var subject = mod ?? new InstalledMod
+        {
+            Id = "", Name = "", PackPath = "", InstalledAt = DateTimeOffset.Now,
+            GameVersion = "", TouchedBundles = new Dictionary<string, string>(),
+        };
+
+        async Task Apply()
+        {
+            var result = await Task.Run(() => work(subject));
+            Status = $"{what}: {result.Applied.Count} applied, {result.Restored.Count} restored"
+                + (result.Failed.Count > 0
+                    ? $", {result.Failed.Count} failed — {string.Join("; ", result.Failed)}"
+                    : "");
+        }
+
         try
         {
-            var result = await Task.Run(() => work(mod ?? new InstalledMod
-            {
-                Id = "", Name = "", PackPath = "", InstalledAt = DateTimeOffset.Now,
-                GameVersion = "", TouchedBundles = new Dictionary<string, string>(),
-            }));
-
-            Status = $"{what}: {result.Applied.Count} applied, {result.Restored.Count} restored"
-                + (result.Failed.Count > 0 ? $", {result.Failed.Count} failed — {string.Join("; ", result.Failed)}" : "");
-
-            if (Changed is not null) await Changed();
+            if (Around is not null) await Around(Apply); else await Apply();
             Refresh();
         }
         catch (Exception ex)
         {
-            Status = ex.Message;
+            Status = $"{ex.Message}  (while changing the game)";
         }
         finally
         {
