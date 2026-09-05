@@ -13,7 +13,8 @@ public sealed record ReconcileResult(
     IReadOnlyList<string> Restored,
     IReadOnlyList<AppliedOperation> Applied,
     IReadOnlyList<string> Failed,
-    IReadOnlyList<string> PrunedBackups);
+    IReadOnlyList<string> PrunedBackups,
+    IReadOnlyList<SharedAsset> Shared);
 
 /// Writes the enabled mods into the game's bundles.
 ///
@@ -78,6 +79,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         var restored = new List<string>();
         var applied = new List<AppliedOperation>();
         var failed = new List<string>();
+        var shared = new List<SharedAsset>();
 
         // Restore from every backup there is, not from what the installed mods happen to name.
         // Uninstalling drops the mod before its bundles are put back, so by the time the reconcile
@@ -99,7 +101,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 failed.Add($"{mod.Id}: pack file is gone ({mod.PackPath})");
                 continue;
             }
-            touchedByMod[mod.Id] = ApplyOne(mod, hashes, applied, failed);
+            touchedByMod[mod.Id] = ApplyOne(mod, hashes, applied, failed, shared);
         }
 
         // Record which bundle version each mod actually wrote to, so a later update is detectable.
@@ -108,7 +110,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             : m));
 
         var pruned = store.PruneStaleBackups(hashes);
-        return new ReconcileResult(restored, applied, failed, pruned);
+        return new ReconcileResult(restored, applied, failed, pruned, shared);
     }
 
     /// Where a backup taken from a given cache belongs, which is not necessarily the copy the game
@@ -122,7 +124,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
     private Dictionary<string, string> ApplyOne(
         InstalledMod mod, IReadOnlyDictionary<string, string> hashes,
-        List<AppliedOperation> applied, List<string> failed)
+        List<AppliedOperation> applied, List<string> failed, List<SharedAsset> shared)
     {
         var manifest = PackBuilder.ReadManifest(mod.PackPath);
         using var archive = ZipFile.OpenRead(mod.PackPath);
@@ -160,7 +162,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 store.Backup(cache, group.Key, hash, live);
 
                 var rewritten = Path.Combine(staging.FullName, group.Key);
-                if (!EditBundle(mod, live, rewritten, group, archive, staging.FullName, applied, failed)) continue;
+                if (!EditBundle(mod, live, rewritten, group, archive, staging.FullName, applied, failed, shared)) continue;
 
                 File.Copy(rewritten, live, overwrite: true);
                 touched[group.Key] = hash;
@@ -175,11 +177,16 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
     private bool EditBundle(
         InstalledMod mod, string live, string output, IEnumerable<PackOperation> operations,
-        ZipArchive archive, string staging, List<AppliedOperation> applied, List<string> failed)
+        ZipArchive archive, string staging, List<AppliedOperation> applied, List<string> failed,
+        List<SharedAsset> shared)
     {
         using var editor = new BundleEditor(live);
         var index = new ContainerIndex(editor.Context);
         var changed = false;
+
+        // Built once for the bundle, and only if something is actually replaced in it. Under half a
+        // second on the largest bundle in the game, which an install can afford.
+        var usage = new Lazy<BundleUsage>(() => BundleUsage.Build(editor.Context, editor.File));
 
         foreach (var operation in operations)
         {
@@ -206,6 +213,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 };
                 editor.Stage(info, field);
                 changed = true;
+                if (SharedAssets.Check(usage.Value, operation.Target, info.PathId) is { } also)
+                    shared.Add(also);
+
                 applied.Add(new AppliedOperation(mod.Id, operation.Op, operation.Target,
                     change.ToString()!, byPathId));
             }

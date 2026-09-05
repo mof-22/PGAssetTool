@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using AssetsTools.NET.Extra;
 using PGAssetTool.Cli;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
@@ -58,7 +59,6 @@ if (command is "-h" or "--help" or "help")
     return 0;
 }
 
-// Packing reads a workspace directory and nothing else, so it needs no game installation.
 if (command == "pack")
 {
     var workspace = positional.FirstOrDefault() ?? Directory.GetCurrentDirectory();
@@ -73,6 +73,26 @@ if (command == "pack")
             Console.WriteLine($"    {operation.Op}  {operation.Target}  <- {operation.Source}");
         if (result.Unchanged.Count > 0)
             Console.WriteLine($"  {result.Unchanged.Count} unedited files left out.");
+
+        // Said here as well as on apply, because the author is the one who can decide whether
+        // reaching the other weapons is what they meant. Building the pack itself reads only the
+        // workspace, so an installation the tool cannot find costs this warning and nothing else.
+        try
+        {
+            var installation = Option("game") is { } dir
+                ? GameInstallation.Open(dir)
+                : GameInstallation.OpenDetected();
+            using var opened = new BundleSet(installation);
+            var named = GameCatalogs.Load(opened, Option("language") ?? GameCatalogs.DefaultLanguage);
+
+            foreach (var also in SharedInPack(opened, PackBuilder.ReadManifest(result.Path)))
+                Console.WriteLine($"  shared: {Describe(also, named)}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"  (could not check what else uses these: {ex.Message})");
+        }
+
         return 0;
     }
     catch (Exception ex)
@@ -95,6 +115,11 @@ catch (Exception ex)
 }
 
 using var bundles = new BundleSet(game);
+
+// Loaded on demand: only the commands that name weapons pay for it.
+var weaponNames = new Lazy<GameCatalogs>(
+    () => GameCatalogs.Load(bundles, Option("language") ?? GameCatalogs.DefaultLanguage));
+
 
 if (command == "info")
 {
@@ -286,6 +311,8 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
                 + $"[{operation.Detail}{(operation.ResolvedByPathId ? "" : ", matched by name")}]");
         if (result.Restored.Count > 0)
             Console.WriteLine($"  restored from backup: {string.Join(", ", result.Restored)}");
+        foreach (var also in result.Shared)
+            Console.WriteLine($"  shared: {Describe(also, weaponNames.Value)}");
         if (result.PrunedBackups.Count > 0)
             Console.WriteLine($"  removed stale backups: {string.Join(", ", result.PrunedBackups)}");
         foreach (var failure in result.Failed) Console.Error.WriteLine($"  FAILED {failure}");
@@ -307,7 +334,7 @@ if (command is not ("weapons" or "show" or "extract"))
 }
 
 var timer = Stopwatch.StartNew();
-var catalogs = GameCatalogs.Load(bundles, Option("language") ?? GameCatalogs.DefaultLanguage);
+var catalogs = weaponNames.Value;
 var catalogTime = timer.ElapsedMilliseconds;
 
 if (command == "weapons")
@@ -424,3 +451,52 @@ if (tree.UnresolvedReasons.Count > 0)
 
 Console.Error.WriteLine($"\ncatalogs {catalogTime}ms, total {timer.ElapsedMilliseconds}ms");
 return 0;
+
+/// The replaceable objects in a pack that more than one weapon reaches.
+///
+/// Each bundle is indexed once, so a pack touching several costs one pass over each.
+static IEnumerable<SharedAsset> SharedInPack(BundleSet bundles, PackManifest manifest)
+{
+    foreach (var group in manifest.Operations.GroupBy(o => o.Target.Container, StringComparer.OrdinalIgnoreCase))
+    {
+        AssetsFileInstance file;
+        BundleUsage usage;
+        try
+        {
+            file = bundles.Open(group.Key);
+            usage = BundleUsage.Build(bundles.Context, file);
+        }
+        catch (Exception)
+        {
+            // A pack can name a bundle this installation does not have; apply reports that properly.
+            continue;
+        }
+
+        var index = new ContainerIndex(bundles.Context);
+        foreach (var operation in group)
+        {
+            if (index.Resolve(operation.Target, file, out _) is not { } info) continue;
+            if (SharedAssets.Check(usage, operation.Target, info.PathId) is { } also) yield return also;
+        }
+    }
+}
+
+/// Names the weapons a shared object reaches.
+///
+/// The numbers in a prefab name are not the numbers players see — the two sequences agree for six
+/// weapons out of 1517 — so reporting them raw would point at the wrong weapon almost every time.
+static string Describe(SharedAsset also, GameCatalogs catalogs)
+{
+    var weapons = also.Weapons
+        .Select(number => catalogs.Items.Weapons.FirstOrDefault(w => w.PrefabNumber == number))
+        .Where(w => w is not null)
+        .Select(w => $"#{w!.GameNumber} {catalogs.Localization.Translate(w.LocalizationKey) ?? w.Slug}")
+        .ToList();
+
+    // Anything the catalog does not know — a shared UI material, a prop — is named as it stands.
+    var rest = also.Prefabs.Where(p => !p.StartsWith("Weapon", StringComparison.Ordinal)
+                                    && !p.StartsWith("Ray", StringComparison.Ordinal));
+
+    return $"{also.Target} is used by {string.Join(", ", weapons.Concat(rest))}. "
+        + "Replacing it changes all of them.";
+}
