@@ -3,12 +3,30 @@ using PGAssetTool.Core.Export.Meshes;
 
 namespace PGAssetTool.Core.Import.Meshes;
 
+public enum SkinStrategy
+{
+    /// The mesh was never skinned, so there is nothing to line up.
+    None,
+
+    /// The replacement carries the same bones, in the same order.
+    Kept,
+
+    /// The replacement carries the same bones in a different order, so its indices were remapped.
+    Remapped,
+
+    /// The replacement brought no usable skeleton, so every vertex is bound rigidly to one bone and
+    /// the original bind poses stay. A whole model swapped in from elsewhere lands here.
+    BoundRigidly,
+}
+
 public sealed record MeshChange(
-    int OldVertexCount, int NewVertexCount, int OldTriangles, int NewTriangles, IReadOnlyList<string> Channels)
+    int OldVertexCount, int NewVertexCount, int OldTriangles, int NewTriangles,
+    IReadOnlyList<string> Channels, SkinStrategy Skin)
 {
     public override string ToString()
         => $"{OldVertexCount}->{NewVertexCount} vertices, {OldTriangles}->{NewTriangles} triangles"
-           + $" [{string.Join(" ", Channels)}]";
+           + $" [{string.Join(" ", Channels)}]"
+           + (Skin == SkinStrategy.None ? "" : $" skin {Skin.ToString().ToLowerInvariant()}");
 }
 
 /// Writes a mesh back into a Unity Mesh asset.
@@ -45,10 +63,11 @@ public static class MeshImporter
         if (present.All(p => p.Attribute != VertexAttribute.Position))
             throw new InvalidDataException("The replacement mesh has no positions.");
 
+        var skin = ReconcileSkin(before, mesh);
         WriteVertexData(field, mesh, present);
         WriteIndices(field, mesh);
         WriteSubMeshes(field, mesh);
-        WriteSkin(field, mesh);
+        if (skin is SkinStrategy.Kept or SkinStrategy.Remapped) WriteSkin(field, mesh);
         WriteBounds(field, mesh);
 
         // The payload is inline now, so a pointer to the shared stream file would send the game back
@@ -66,7 +85,62 @@ public static class MeshImporter
         return new MeshChange(
             before.VertexCount, mesh.VertexCount,
             before.Indices.Length / 3, mesh.Indices.Length / 3,
-            present.Select(p => p.Attribute.ToString()).ToList());
+            present.Select(p => p.Attribute.ToString()).ToList(), skin);
+    }
+
+    /// Decides what to do with the replacement's skeleton, and rewrites its bone indices in place.
+    ///
+    /// The mesh cannot choose its own bone list. Whatever SkinnedMeshRenderer draws it holds an array
+    /// of Transforms in the prefab, its length always equal to the mesh's bind pose count, and the
+    /// mesh's blend indices point into that array by position. Writing a different number of bones
+    /// leaves indices pointing at Transforms that are not there.
+    ///
+    /// So the original bone list is the one that counts. A replacement carrying the same bones is
+    /// used as is, or remapped when the exporter reordered them. Anything else — most obviously a
+    /// model brought in from somewhere with a skeleton of its own — is bound rigidly to the first
+    /// bone instead, which is what a weapon swap wants anyway: these meshes are almost all one bone
+    /// per vertex to begin with.
+    private static SkinStrategy ReconcileSkin(UnityMesh before, UnityMesh replacement)
+    {
+        if (before.BindPoses.Count == 0) return SkinStrategy.None;
+
+        var wanted = before.BoneNameHashes;
+        var offered = replacement.BoneNameHashes;
+
+        if (offered.Count == wanted.Count && offered.SequenceEqual(wanted))
+            return SkinStrategy.Kept;
+
+        var mapping = new int[offered.Count];
+        var mappable = offered.Count > 0;
+        for (int i = 0; i < offered.Count; i++)
+        {
+            var at = wanted.ToList().IndexOf(offered[i]);
+            if (at < 0) { mappable = false; break; }
+            mapping[i] = at;
+        }
+
+        var indices = replacement.Get(VertexAttribute.BlendIndices);
+        if (mappable && indices is not null)
+        {
+            for (int i = 0; i < indices.Length; i++)
+            {
+                var joint = (int)indices[i];
+                indices[i] = joint >= 0 && joint < mapping.Length ? mapping[joint] : 0;
+            }
+            return SkinStrategy.Remapped;
+        }
+
+        // Everything onto bone zero, with full weight, keeping the bind poses already there.
+        if (indices is not null) Array.Clear(indices);
+        var weights = replacement.Get(VertexAttribute.BlendWeight);
+        if (weights is not null)
+        {
+            var width = replacement.Dimensions.GetValueOrDefault(VertexAttribute.BlendWeight, 4);
+            for (int v = 0; v * width < weights.Length; v++)
+                for (int c = 0; c < width; c++)
+                    weights[v * width + c] = c == 0 ? 1f : 0f;
+        }
+        return SkinStrategy.BoundRigidly;
     }
 
     private static void WriteVertexData(
