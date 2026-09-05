@@ -29,9 +29,12 @@ Early development. See the roadmap below for what exists today.
 | --- | --- | --- |
 | P0 | Project foundation, installation discovery, bundle and `.assets` reading | done |
 | P1 | CLI item tree: catalogs, related namespaces, icons | done |
-| P2 | Texture extraction and replacement, mod packs, backup and toggling | done |
+| P2 | Texture, audio and mesh export; texture replacement; mod packs; backup and toggling | done |
 | P3 | Avalonia GUI with texture and model preview | planned |
 | P4 | `.assets` writing, sprite atlases | planned |
+
+Meshes come out as glTF, audio as WAV. Writing either back is not implemented yet: replacement
+covers textures only.
 
 ## Requirements
 
