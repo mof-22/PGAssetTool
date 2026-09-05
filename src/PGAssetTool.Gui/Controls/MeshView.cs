@@ -26,7 +26,7 @@ public sealed class MeshView : Control
     }
 
     private WriteableBitmap? _bitmap;
-    private byte[] _pixels = [];
+    private readonly RenderTarget _target = new();
     private PixelSize _size;
     private Camera _camera = new();
     private Point? _dragging;
@@ -55,8 +55,10 @@ public sealed class MeshView : Control
         var to = e.GetPosition(this);
         _dragging = to;
 
-        // A drag across the full width turns the model most of the way round.
-        _camera = _camera.Turned((float)((to.X - from.X) * 0.01), (float)((to.Y - from.Y) * -0.01));
+        // Dragging takes the model with it: cursor right turns the near face right. The opposite
+        // convention — moving the camera instead — reads as the model going the wrong way.
+        // A drag across the full width turns it most of the way round.
+        _camera = _camera.Turned((float)((from.X - to.X) * 0.01), (float)((from.Y - to.Y) * -0.01));
         InvalidateVisual();
     }
 
@@ -83,13 +85,13 @@ public sealed class MeshView : Control
             _size = new PixelSize(width, height);
             _bitmap?.Dispose();
             _bitmap = new WriteableBitmap(_size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-            _pixels = new byte[width * height * 4];
+            _target.Resize(width, height);
         }
 
-        MeshRenderer.Render(mesh, _camera, _pixels, width, height);
+        MeshRenderer.Render(mesh, _camera, _target);
 
         using (var locked = _bitmap.Lock())
-            System.Runtime.InteropServices.Marshal.Copy(_pixels, 0, locked.Address, _pixels.Length);
+            System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);
 
         context.DrawImage(_bitmap, new Rect(0, 0, width, height));
     }

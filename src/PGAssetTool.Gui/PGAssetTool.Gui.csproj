@@ -8,6 +8,16 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AssemblyName>PGAssetTool</AssemblyName>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- One executable, no .NET install, nothing beside it. The class database rides inside the
+         core assembly and everything the tool writes goes to PGAssetTool-data next to the exe. -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
   </PropertyGroup>
 
   <ItemGroup>

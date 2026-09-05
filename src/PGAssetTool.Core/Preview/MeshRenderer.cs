@@ -24,12 +24,42 @@ public sealed record Camera(float Yaw = 0.7f, float Pitch = 0.35f, float Distanc
 /// dependency on whatever driver the machine happens to have. These meshes are tiny — the largest
 /// weapon in the game is a few thousand triangles — so a plain z-buffered rasterizer redraws well
 /// inside a frame and cannot fail to initialise.
+/// The buffers a preview draws into, kept across frames.
+///
+/// The depth buffer is the size of the frame, and allocating one per frame is what made a large
+/// preview pane expensive: eleven megabytes a frame at 2000x1500, all of it immediately garbage.
+/// Held here, a frame allocates nothing at all.
+public sealed class RenderTarget
+{
+    public int Width { get; private set; }
+    public int Height { get; private set; }
+
+    /// Premultiplied BGRA, one row after another, ready to hand to a bitmap.
+    public byte[] Bgra { get; private set; } = [];
+
+    internal float[] Depth { get; private set; } = [];
+
+    public bool IsEmpty => Width < 1 || Height < 1;
+
+    public void Resize(int width, int height)
+    {
+        if (Width == width && Height == height) return;
+
+        (Width, Height) = (width, height);
+        var pixels = Math.Max(width * height, 0);
+        Bgra = new byte[pixels * 4];
+        Depth = new float[pixels];
+    }
+}
+
 public static class MeshRenderer
 {
-    public static void Render(UnityMesh mesh, Camera camera, byte[] bgra, int width, int height)
+    public static void Render(UnityMesh mesh, Camera camera, RenderTarget target)
     {
+        if (target.IsEmpty) return;
+
+        var (bgra, width, height) = (target.Bgra, target.Width, target.Height);
         Array.Clear(bgra);
-        if (width <= 0 || height <= 0) return;
 
         var positions = mesh.Get(VertexAttribute.Position);
         if (positions is null || mesh.VertexCount == 0) return;
@@ -43,7 +73,7 @@ public static class MeshRenderer
         // Distance is literally how many model radii the half-frame covers, so 1.5 leaves a margin.
         var scale = Math.Min(width, height) * 0.5f / (radius * camera.Distance);
 
-        var depth = new float[width * height];
+        var depth = target.Depth;
         Array.Fill(depth, float.NegativeInfinity);
 
         Span<float> sx = stackalloc float[3];

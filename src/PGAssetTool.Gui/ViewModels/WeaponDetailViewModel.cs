@@ -8,7 +8,8 @@ namespace PGAssetTool.Gui.ViewModels;
 
 /// One row in the tree. Only the leaves stand for something replaceable.
 public sealed class TreeNode(
-    string label, string? detail = null, AssetClassID? cls = null, long pathId = 0, string bundle = "")
+    string label, string? detail = null, AssetClassID? cls = null, long pathId = 0, string bundle = "",
+    bool alphaIsCoverage = false)
 {
     public string Label { get; } = label;
     public string? Detail { get; } = detail;
@@ -18,6 +19,10 @@ public sealed class TreeNode(
     /// Which bundle the object lives in. A weapon spans several, so the prefab's bundle is not
     /// enough to find one of its textures again.
     public string Bundle { get; } = bundle;
+
+    /// Whether this object's alpha channel means transparency. Icons sit on an empty background
+    /// and need it; a model texture usually keeps something else there and is holed by it.
+    public bool AlphaIsCoverage { get; } = alphaIsCoverage;
     public ObservableCollection<TreeNode> Children { get; } = [];
 
     public bool IsExpanded { get; set; }
@@ -94,7 +99,8 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
 
         if (tree.Icon is { } icon)
             roots.Add(new TreeNode("Icon", icon.Container, AssetClassID.Texture2D)
-                .With(new TreeNode(icon.TextureName, icon.AssetPath, AssetClassID.Texture2D, 0, icon.Container)));
+                .With(new TreeNode(icon.TextureName, icon.AssetPath, AssetClassID.Texture2D, 0,
+                    icon.Container, alphaIsCoverage: true)));
 
         if (tree.Skins.Count > 0)
         {

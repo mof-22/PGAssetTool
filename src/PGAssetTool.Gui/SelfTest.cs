@@ -13,8 +13,18 @@ namespace PGAssetTool.Gui;
 /// shows up as a failed run rather than a window that opens empty.
 internal static class SelfTest
 {
+    private const int AttachParentProcess = -1;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool AttachConsole(int processId);
+
     public static int Run()
     {
+        // A WinExe starts with no console, so a published build writing to one would print into
+        // nowhere. Borrowing the terminal that launched it is what makes --self-test usable on the
+        // thing that actually ships, rather than only under `dotnet run`.
+        AttachConsole(AttachParentProcess);
+
         // The tree labels carry emoji; the Windows console defaults to a code page that mangles them.
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch (IOException) { }
         // Bitmaps need a rendering backend even when nothing is shown, so the headless one stands
@@ -82,17 +92,44 @@ internal static class SelfTest
                 if (model.Preview.Nothing is { } why) return Fail($"{want} '{node.Label}': {why}");
                 Console.WriteLine($"preview  {model.Preview.Caption}");
 
+                // A texture reached through a material carries something other than coverage in its
+                // alpha — emission, usually — so honouring it would punch holes in the picture.
+                if (want == AssetClassID.Texture2D && model.Preview.ShowAlpha)
+                    return Fail($"'{node.Label}' is a model texture and was shown with alpha honoured");
+
                 if (want == AssetClassID.Mesh && model.Preview.Mesh is { } mesh)
                 {
                     // Draw a frame the way the control would, so a rasterizer that throws or leaves
                     // an empty image is caught here rather than by a person looking at a blank pane.
-                    var pixels = new byte[320 * 320 * 4];
-                    MeshRenderer.Render(mesh, new Camera(), pixels, 320, 320);
+                    var target = new RenderTarget();
+                    target.Resize(320, 320);
+                    MeshRenderer.Render(mesh, new Camera(), target);
                     var drawn = 0;
-                    for (var i = 3; i < pixels.Length; i += 4) if (pixels[i] != 0) drawn++;
+                    for (var i = 3; i < target.Bgra.Length; i += 4) if (target.Bgra[i] != 0) drawn++;
                     Console.WriteLine($"         rasterised {drawn:N0} of {320 * 320:N0} pixels");
                     if (drawn == 0) return Fail($"'{node.Label}' rendered to an empty image");
                 }
+            }
+
+            // The icon is the one thing addressed by name rather than by path id — the lookup table
+            // records no id for it — and for the newest weapons it lives in the game's own
+            // resources.assets rather than a bundle. It was silently unpreviewable.
+            var icon = detail.Roots
+                .FirstOrDefault(r => r.Label == "Icon")?.Children.FirstOrDefault();
+
+            if (icon is null) Console.WriteLine("preview  this weapon has no icon");
+            else
+            {
+                model.Preview.Clear();
+                detail.SelectedNode = icon;
+                for (var waited = 0; model.Preview.Nothing is not null && waited < 30_000; waited += 50)
+                    Thread.Sleep(50);
+
+                if (model.Preview.Nothing is { } why) return Fail($"icon '{icon.Label}': {why}");
+                Console.WriteLine($"preview  {model.Preview.Caption}");
+                Console.WriteLine($"         alpha honoured: {model.Preview.ShowAlpha} (an icon sits on nothing)");
+
+                if (!model.Preview.ShowAlpha) return Fail("an icon was shown with its alpha ignored");
             }
 
             return 0;

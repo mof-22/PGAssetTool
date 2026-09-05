@@ -84,14 +84,36 @@
         <!-- Preview. A texture is shown as it is; a mesh is drawn by the software rasterizer in
              the core, turned by dragging and zoomed with the wheel. -->
         <DockPanel Grid.Column="2" DataContext="{Binding Preview}" x:DataType="vm:PreviewViewModel">
-          <TextBlock DockPanel.Dock="Bottom" Text="{Binding Caption}" Classes="dim mono"
-                     Margin="0,8,0,0" TextWrapping="Wrap" />
+
+          <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+            <!-- Only textures have a channel to argue about. -->
+            <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
+                      IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
+            <TextBlock Text="{Binding Caption}" Classes="dim mono" TextWrapping="Wrap" />
+          </StackPanel>
 
           <Border Background="#111113" CornerRadius="4">
             <Panel>
-              <TextBlock Text="{Binding Nothing}" Classes="dim" IsVisible="{Binding Nothing, Converter={x:Static ObjectConverters.IsNotNull}}"
+              <TextBlock Text="{Binding Nothing}" Classes="dim"
+                         IsVisible="{Binding Nothing, Converter={x:Static ObjectConverters.IsNotNull}}"
                          HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
                          MaxWidth="300" TextAlignment="Center" />
+
+              <!-- The board sits behind the image and only where alpha is being honoured, so a
+                   texture shown opaque is not read against a pattern that means nothing. -->
+              <Panel IsVisible="{Binding ShowAlpha}">
+                <Panel.Background>
+                  <DrawingBrush TileMode="Tile" SourceRect="0,0,16,16" DestinationRect="0,0,16,16"
+                               Stretch="None">
+                    <DrawingBrush.Drawing>
+                      <DrawingGroup>
+                        <GeometryDrawing Brush="#2a2a2e" Geometry="M0,0 L16,0 16,16 0,16 Z" />
+                        <GeometryDrawing Brush="#1a1a1d" Geometry="M0,0 L8,0 8,8 0,8 Z M8,8 L16,8 16,16 8,16 Z" />
+                      </DrawingGroup>
+                    </DrawingBrush.Drawing>
+                  </DrawingBrush>
+                </Panel.Background>
+              </Panel>
 
               <Image Source="{Binding Image}" IsVisible="{Binding HasImage}"
                      Stretch="Uniform" Margin="12"

@@ -11,6 +11,18 @@ namespace PGAssetTool.Core.Preview;
 public sealed record PreviewImage(int Width, int Height, byte[] Bgra)
 {
     public int Stride => Width * 4;
+
+    /// The same pixels with every one made solid.
+    ///
+    /// Most model textures use alpha for something other than coverage — emission, most often — so
+    /// honouring it punches holes in them, and a few come out invisible. Icons are the opposite:
+    /// all 400 of them are more than half transparent because they sit on an empty background.
+    public PreviewImage Opaque()
+    {
+        var solid = (byte[])Bgra.Clone();
+        for (var i = 3; i < solid.Length; i += 4) solid[i] = 255;
+        return this with { Bgra = solid };
+    }
 }
 
 /// Reads an asset into something that can be shown, without going through a file.
@@ -37,6 +49,44 @@ public static class AssetPreview
         if (bgra is null || bgra.Length < texture.m_Width * texture.m_Height * 4) return null;
 
         return new PreviewImage(texture.m_Width, texture.m_Height, FlipRows(bgra, texture.m_Width, texture.m_Height));
+    }
+
+    /// Finds the object a preview was asked for.
+    ///
+    /// Most things are addressed by path id, but an icon is not: the lookup table registers it by
+    /// name and records no id, so it has to be found by the name it is registered under — and the
+    /// newest weapons keep theirs in the game's own resources.assets rather than in a bundle.
+    public static (AssetsFileInstance File, AssetFileInfo Info)? Locate(
+        BundleSet bundles, string container, AssetClassID cls, long pathId, string name)
+    {
+        if (OpenContainer(bundles, container) is not { } file) return null;
+
+        if (pathId != 0)
+            return file.file.GetAssetInfo(pathId) is { } byId ? (file, byId) : null;
+
+        // Icon names disagree with the slugs they were built from on capitalisation, which is why
+        // the lookup table is case-insensitive; matching exactly here would miss two dozen weapons.
+        var byName = ReferenceWalker.FindByName(
+            bundles.Context, file, cls, name, StringComparison.OrdinalIgnoreCase);
+        return byName is null ? null : (file, byName);
+    }
+
+    /// A container is a bundle name, unless it is one of the game's own serialized files.
+    private static AssetsFileInstance? OpenContainer(BundleSet bundles, string container)
+    {
+        if (!container.Contains('.', StringComparison.Ordinal))
+        {
+            try { return bundles.Open(container); }
+            catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
+        }
+
+        // Those carry no type tree, so nothing can be read out of them without the class database.
+        // Without it the icon is simply not previewable, which is worth saying rather than hiding.
+        if (!bundles.Context.HasClassDatabase) return null;
+
+        var path = bundles.Game.EnumerateSerializedFiles().FirstOrDefault(
+            f => string.Equals(Path.GetFileName(f), container, StringComparison.OrdinalIgnoreCase));
+        return path is null ? null : bundles.Context.OpenSerializedFile(path);
     }
 
     public static UnityMesh? Mesh(AssetTypeValueField field)

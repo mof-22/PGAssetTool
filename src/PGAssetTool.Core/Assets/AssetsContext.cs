@@ -72,7 +72,37 @@ public static class ClassPackage
             var candidate = Path.Combine(dir, FileName);
             if (File.Exists(candidate)) return candidate;
         }
-        return null;
+        return Unpack();
+    }
+
+    /// Writes out the copy carried inside the assembly.
+    ///
+    /// A single-file build is one executable with no folder to keep the database beside, and asking
+    /// people to fetch it separately would mean the newest weapons' icons silently fail to load.
+    /// AssetsTools wants a path rather than a stream, so it goes to a fixed place in the temp
+    /// directory and is reused from there.
+    private static string? Unpack()
+    {
+        using var embedded = typeof(ClassPackage).Assembly.GetManifestResourceStream(FileName);
+        if (embedded is null) return null;
+
+        var path = Path.Combine(Path.GetTempPath(), "PGAssetTool", FileName);
+        try
+        {
+            if (new FileInfo(path) is { Exists: true, Length: > 0 } existing && existing.Length == embedded.Length)
+                return path;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            using var file = File.Create(path);
+            embedded.CopyTo(file);
+            return path;
+        }
+        catch (IOException)
+        {
+            // Another process writing the same file, or nowhere to write at all. Reading .assets is
+            // optional everywhere it is used, so this degrades rather than fails.
+            return File.Exists(path) ? path : null;
+        }
     }
 }
 

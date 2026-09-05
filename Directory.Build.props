@@ -1,0 +1,9 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Debug symbols go inside each assembly rather than into a .pdb beside it, so a published
+         build really is the single file it claims to be and a crash still names lines. -->
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+</Project>

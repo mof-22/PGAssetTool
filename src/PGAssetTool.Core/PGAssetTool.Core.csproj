@@ -17,4 +17,11 @@
     <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
   </ItemGroup>
 
+
+  <ItemGroup>
+    <!-- Unity's engine class database, needed to read the game's own .assets files, which carry no
+         type tree. Embedded so a single-file build has nothing to sit beside; it is written out on
+         first use. MIT, from the UABEA distribution. -->
+    <EmbeddedResource Include="..\..\third_party\classdata.tpk" LogicalName="classdata.tpk" />
+  </ItemGroup>
 </Project>

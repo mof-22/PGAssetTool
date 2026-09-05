@@ -25,9 +25,10 @@ public class MeshRendererTests
 
     private static byte[] Draw(UnityMesh mesh, Camera camera)
     {
-        var pixels = new byte[Size * Size * 4];
-        MeshRenderer.Render(mesh, camera, pixels, Size, Size);
-        return pixels;
+        var target = new RenderTarget();
+        target.Resize(Size, Size);
+        MeshRenderer.Render(mesh, camera, target);
+        return target.Bgra;
     }
 
     private static int Covered(byte[] pixels)
@@ -245,4 +246,46 @@ public class MeshRendererTests
             }
         return (minX, maxX, minY, maxY);
     }
+
+    [Fact]
+    public void RedrawingTheSameSizeAllocatesNothing()
+    {
+        // Allocating a depth buffer per frame is what made a large preview pane expensive — eleven
+        // megabytes a frame at 2000x1500, all of it immediately garbage.
+        var mesh = Quad();
+        var target = new RenderTarget();
+        target.Resize(Size, Size);
+        var angles = Enumerable.Range(0, 20).Select(i => new Camera(Yaw: i * 0.1f)).ToArray();
+        MeshRenderer.Render(mesh, angles[0], target);   // warm anything lazy
+
+        // Per-thread, not process-wide: xUnit runs test classes in parallel, so the process-wide
+        // counter would pick up whatever another test happened to be doing.
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var frame = 0; frame < 20; frame++)
+            MeshRenderer.Render(mesh, angles[frame], target);
+
+        // A Camera is a record, so allocating one per frame would be the test's own doing, not the
+        // renderer's; the angles above are made in advance so only drawing is measured.
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    [Fact]
+    public void ResizingKeepsTheBuffersInStepWithEachOther()
+    {
+        var target = new RenderTarget();
+        target.Resize(320, 200);
+        Assert.Equal(320 * 200 * 4, target.Bgra.Length);
+
+        target.Resize(64, 64);
+        Assert.Equal(64 * 64 * 4, target.Bgra.Length);
+
+        // A stale depth buffer from the larger size would leave the new frame testing against
+        // whatever the old one held.
+        MeshRenderer.Render(Quad(), new Camera(Yaw: 0, Pitch: 0), target);
+        Assert.True(Covered(target.Bgra) > 0);
+    }
+
+    [Fact]
+    public void ATargetWithNoSizeYetDrawsNothingRatherThanThrowing()
+        => MeshRenderer.Render(Quad(), new Camera(), new RenderTarget());
 }

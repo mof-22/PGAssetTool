@@ -114,39 +114,49 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// quickly down a tree must not put two decodes into it at once.
     private async void ShowPreview(TreeNode? node)
     {
-        if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh) || node.PathId == 0)
+        if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh))
         {
             Preview.Clear(node?.Class is null ? null : $"No preview for {node.Class}.");
             return;
         }
 
-        var bundle = node.Bundle;
-        if (bundle.Length == 0) { Preview.Clear("This object's bundle is not known."); return; }
+        if (node.Bundle.Length == 0) { Preview.Clear("This object's container is not known."); return; }
 
         try
         {
+            // Reading goes through the same lock as resolving: one BundleSet, one reader, and
+            // clicking quickly down a tree must not put two decodes into it at once.
             await _reading.WaitAsync();
             try
             {
-                var loaded = await Task.Run(() =>
+                var loaded = await Task.Run(object? () =>
                 {
-                    var file = _bundles!.Open(bundle);
-                    var info = file.file.GetAssetInfo(node.PathId);
-                    if (info is null) return null;
+                    // An icon is registered by name with no path id, and may live in the game's own
+                    // resources.assets rather than in a bundle, so finding it is not a lookup by id.
+                    if (AssetPreview.Locate(_bundles!, node.Bundle, node.Class.Value, node.PathId, node.Label)
+                        is not var (file, info)) return null;
 
-                    var field = _bundles.Context.Deserialize(file, info);
+                    var field = _bundles!.Context.Deserialize(file, info);
                     if (field is null) return null;
 
                     return node.Class == AssetClassID.Texture2D
-                        ? AssetPreview.Texture(_bundles, bundle, field)
-                        : (object?)AssetPreview.Mesh(field);
+                        ? AssetPreview.Texture(_bundles, node.Bundle, field)
+                        : AssetPreview.Mesh(field);
                 });
 
                 switch (loaded)
                 {
-                    case PreviewImage picture: Preview.Show(picture, $"{node.Label}   @ {bundle}"); break;
-                    case UnityMesh mesh: Preview.Show(mesh, $"{node.Label}   @ {bundle}"); break;
-                    default: Preview.Clear($"'{node.Label}' could not be decoded."); break;
+                    case PreviewImage picture:
+                        Preview.Show(picture, $"{node.Label}   @ {node.Bundle}", node.AlphaIsCoverage);
+                        break;
+                    case UnityMesh mesh:
+                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}");
+                        break;
+                    default:
+                        Preview.Clear(_bundles!.Context.HasClassDatabase || !node.Bundle.Contains('.')
+                            ? $"'{node.Label}' could not be read from {node.Bundle}."
+                            : $"'{node.Label}' lives in {node.Bundle}, which needs {ClassPackage.FileName}.");
+                        break;
                 }
             }
             finally
