@@ -23,6 +23,9 @@ public class ItemCatalogTests
         new("Key_3", "ギルデッド・ゲイズ"),
     ]);
 
+    /// Search consults every language at once, so it takes the index rather than one table.
+    private static readonly WeaponNames JapaneseNames = WeaponNames.FromTables(Catalog, Japanese);
+
     [Fact]
     public void ABareNumberIsTheInGameNumber()
     {
@@ -64,21 +67,21 @@ public class ItemCatalogTests
     }
 
     [Fact]
-    public void SearchFindsNothingInAnotherLanguageWithoutALocalization()
+    public void SearchFindsNothingInAnotherLanguageWithoutTheNameIndex()
     {
         Assert.Empty(Catalog.Search("ギルデッド"));
     }
 
     [Fact]
-    public void SearchMatchesTheDisplayNameWhenALocalizationIsGiven()
+    public void SearchMatchesATranslatedNameWhenTheIndexIsGiven()
     {
-        Assert.Equal(1854, Assert.Single(Catalog.Search("ギルデッド", Japanese)).GameNumber);
-        Assert.Equal(819, Assert.Single(Catalog.Search("グレネード", Japanese)).GameNumber);
+        Assert.Equal(1854, Assert.Single(Catalog.Search("ギルデッド", JapaneseNames)).GameNumber);
+        Assert.Equal(819, Assert.Single(Catalog.Search("グレネード", JapaneseNames)).GameNumber);
     }
 
     [Fact]
-    public void ANumericQueryStaysExactEvenWithALocalization()
+    public void ANumericQueryStaysExactEvenWithTheIndex()
     {
-        Assert.Equal(819, Assert.Single(Catalog.Search("819", Japanese)).GameNumber);
+        Assert.Equal(819, Assert.Single(Catalog.Search("819", JapaneseNames)).GameNumber);
     }
 }

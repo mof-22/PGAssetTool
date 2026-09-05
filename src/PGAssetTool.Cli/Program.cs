@@ -340,7 +340,7 @@ var catalogTime = timer.ElapsedMilliseconds;
 if (command == "weapons")
 {
     var filter = positional.FirstOrDefault();
-    var matches = (filter is null ? catalogs.Items.Weapons : catalogs.Items.Search(filter, catalogs.Localization)).ToList();
+    var matches = (filter is null ? catalogs.Items.Weapons : catalogs.Items.Search(filter, catalogs.Names)).ToList();
     foreach (var w in matches)
         Console.WriteLine($"{w.GameNumber,5}  "
             + $"{TextColumn.Pad(catalogs.Localization.Translate(w.LocalizationKey) ?? w.Slug, 34)} "

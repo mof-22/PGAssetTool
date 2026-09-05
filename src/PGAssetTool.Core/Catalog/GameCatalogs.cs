@@ -12,6 +12,10 @@ public sealed class GameCatalogs
     private GameCatalogs(ItemCatalog items, AssetLookup lookup, Localization localization, SkinCatalog skins)
         => (Items, Lookup, Localization, Skins) = (items, lookup, localization, skins);
 
+    /// Every weapon name in every language, for searching. Filled in after construction because it
+    /// needs the item catalog that is being built alongside it.
+    public WeaponNames? Names { get; private set; }
+
     public ItemCatalog Items { get; }
     public AssetLookup Lookup { get; }
     public Localization Localization { get; }
@@ -26,10 +30,11 @@ public sealed class GameCatalogs
         => bundles.BundleNames
             .Where(b => b.StartsWith("l_", StringComparison.Ordinal))
             .OrderBy(b => b, StringComparer.Ordinal)
-            .Select(b => (b, Names.GetValueOrDefault(b, b)))
+            .Select(b => (b, NativeNames.GetValueOrDefault(b, b)))
             .ToList();
 
-    private static readonly Dictionary<string, string> Names = new(StringComparer.OrdinalIgnoreCase)
+    /// How each language calls itself, for a picker. Missing entries fall back to the bundle name.
+    private static readonly Dictionary<string, string> NativeNames = new(StringComparer.OrdinalIgnoreCase)
     {
         ["l_de"] = "Deutsch",
         ["l_en-gb"] = "English",
@@ -44,11 +49,25 @@ public sealed class GameCatalogs
         ["l_zh-cht"] = "繁體中文",
     };
 
-    public static GameCatalogs Load(BundleSet bundles, string language = DefaultLanguage) => new(
-        ItemCatalog.Load(bundles),
-        AssetLookup.Load(bundles),
-        Localization.Load(bundles, language),
-        SkinCatalog.Load(bundles));
+    public static GameCatalogs Load(BundleSet bundles, string language = DefaultLanguage)
+    {
+        var catalogs = new GameCatalogs(
+            ItemCatalog.Load(bundles),
+            AssetLookup.Load(bundles),
+            Localization.Load(bundles, language),
+            SkinCatalog.Load(bundles));
+
+        catalogs.Names = WeaponNames.Load(bundles, catalogs.Items);
+        return catalogs;
+    }
+
+    /// The same registries read again in another language.
+    ///
+    /// Only the translation table depends on the language; the items, the lookup table, the skins
+    /// and the search index do not. Rebuilding all of them to change which name is displayed cost
+    /// the better part of a second for no reason.
+    public GameCatalogs WithLanguage(BundleSet bundles, string language)
+        => new(Items, Lookup, Localization.Load(bundles, language), Skins) { Names = Names };
 }
 
 /// Maps a logical asset path such as "Weapons/Weapon25" to the bundle holding it. The game resolves

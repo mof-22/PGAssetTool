@@ -108,7 +108,12 @@ public sealed class ItemCatalog
     /// Anything else matches the slug, tag and prefab name, which are always English, plus the
     /// display name when a localization is supplied — otherwise searching in any other language
     /// finds nothing.
-    public IEnumerable<WeaponRecord> Search(string text, Localization? localization = null)
+    /// <param name="names">
+    /// Every language, when it has been read. A player knows one weapon by one name, and it is not
+    /// necessarily the one on screen — searching only the displayed language means already knowing
+    /// the English name to find the English entry.
+    /// </param>
+    public IEnumerable<WeaponRecord> Search(string text, WeaponNames? names = null)
     {
         if (int.TryParse(text, out var gameNumber))
             return Weapons.Where(w => w.GameNumber == gameNumber);
@@ -117,7 +122,6 @@ public sealed class ItemCatalog
             w.Slug.Contains(text, StringComparison.OrdinalIgnoreCase)
             || w.Tag.Contains(text, StringComparison.OrdinalIgnoreCase)
             || w.PrefabName.Contains(text, StringComparison.OrdinalIgnoreCase)
-            || localization?.Translate(w.LocalizationKey) is { } name
-               && name.Contains(text, StringComparison.OrdinalIgnoreCase));
+            || names?.Matches(w, text) == true);
     }
 }

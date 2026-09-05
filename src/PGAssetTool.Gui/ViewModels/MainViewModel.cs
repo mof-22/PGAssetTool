@@ -123,7 +123,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_catalogs is null) return;
         Show(value.Length == 0
             ? _catalogs.Items.Weapons
-            : _catalogs.Items.Search(value, _catalogs.Localization));
+            : _catalogs.Items.Search(value, _catalogs.Names));
     }
 
     private void Show(IEnumerable<WeaponRecord> records)
@@ -219,10 +219,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// Changing the language means every name in the catalogs, so the game is read again.
-    async partial void OnLanguageChanged(string value)
+    /// Only the translation table depends on the language. The items, the lookup table, the skins
+    /// and the search index do not, so changing which name is displayed re-reads one small bundle
+    /// rather than the whole game — it used to throw the reader away and start over.
+    partial void OnLanguageChanged(string value)
     {
         Remember();
-        if (!_loading && _bundles is not null) await ReloadAsync();
+        if (_loading || _bundles is null || _catalogs is null) return;
+
+        try
+        {
+            _catalogs = _catalogs.WithLanguage(_bundles, value);
+            _resolver = new WeaponResolver(_bundles, _catalogs);
+            Show(Search.Length == 0 ? _catalogs.Items.Weapons : _catalogs.Items.Search(Search, _catalogs.Names));
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
     }
 
     private void Remember()

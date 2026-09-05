@@ -43,6 +43,7 @@ internal static class SelfTest
         return Body();
     }
 
+
     private static int Body()
     {
         var model = new MainViewModel();
@@ -189,9 +190,23 @@ internal static class SelfTest
             if (model.Languages.Count < 2) return Fail("the game offers more than one language");
 
             // Switching reads the game again, so this is also the reload path.
+            // A weapon is known by one name, and not necessarily the one on screen: searching the
+            // Japanese name has to find it while the list is in English.
+            model.Search = "究極点";
+            Console.WriteLine($"search   '究極点' while displaying English -> "
+                + $"{string.Join(", ", model.Weapons.Select(w => $"#{w.Record.GameNumber} {w.Name}"))}");
+            if (model.Weapons.All(w => w.Record.GameNumber != 416))
+                return Fail("searching a Japanese name did not find the weapon");
+            model.Search = "";
+
+            // Switching the language re-reads one bundle, not the whole game.
             var before = model.Weapons.FirstOrDefault(w => w.Record.GameNumber == 16)?.Name;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             model.Language = "l_ja";
             for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+            Console.WriteLine($"options  switching language took {clock.ElapsedMilliseconds}ms");
+            if (clock.ElapsedMilliseconds > 3000)
+                return Fail($"switching language took {clock.ElapsedMilliseconds}ms, which is a reload");
 
             var after = model.Weapons.FirstOrDefault(w => w.Record.GameNumber == 16)?.Name;
             Console.WriteLine($"options  #16 reads '{before}' in English, '{after}' in Japanese");
@@ -199,6 +214,18 @@ internal static class SelfTest
 
             model.Language = "l_en-gb";
             for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+
+            // Ctrl+R throws the reader away and starts over, which is the slowest thing the GUI
+            // does on purpose. It used to take fifteen seconds, nearly all of it rebuilding the
+            // CAB index through a class database loaded once per bundle.
+            clock.Restart();
+            // Blocking rather than awaiting: an await here would resume on a pool thread, and the
+            // headless window can only be closed from the one that made it.
+            model.ReloadAsync().GetAwaiter().GetResult();
+            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+            Console.WriteLine($"reload   {clock.ElapsedMilliseconds}ms for the whole game");
+            if (clock.ElapsedMilliseconds > 8000)
+                return Fail($"reloading took {clock.ElapsedMilliseconds}ms");
 
             window.Close();
             return 0;
