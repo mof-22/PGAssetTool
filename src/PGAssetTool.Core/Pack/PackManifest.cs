@@ -7,6 +7,7 @@ namespace PGAssetTool.Core.Pack;
 public static class PackOperations
 {
     public const string ReplaceTexture = "replaceTexture";
+    public const string ReplaceMesh = "replaceMesh";
 }
 
 public sealed record PackOperation

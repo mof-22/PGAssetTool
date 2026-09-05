@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Game;
+using PGAssetTool.Core.Import.Meshes;
 using PGAssetTool.Core.Pack;
 
 namespace PGAssetTool.Core.Mods;
@@ -183,15 +184,16 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
             try
             {
-                var change = operation.Op switch
+                object change = operation.Op switch
                 {
                     PackOperations.ReplaceTexture => TextureImporter.Replace(field, source),
+                    PackOperations.ReplaceMesh => MeshImporter.Replace(field, GltfMeshReader.Read(source)),
                     _ => throw new NotSupportedException($"unknown operation '{operation.Op}'"),
                 };
                 editor.Stage(info, field);
                 changed = true;
                 applied.Add(new AppliedOperation(mod.Id, operation.Op, operation.Target,
-                    change.ToString(), byPathId));
+                    change.ToString()!, byPathId));
             }
             catch (Exception ex)
             {

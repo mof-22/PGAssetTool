@@ -16,6 +16,7 @@ public static class Workspace
     private static readonly Dictionary<string, string> OperationForFormat = new()
     {
         ["png"] = PackOperations.ReplaceTexture,
+        ["glb"] = PackOperations.ReplaceMesh,
     };
 
     /// `alreadyModified` marks a workspace whose files are the modification rather than a starting
