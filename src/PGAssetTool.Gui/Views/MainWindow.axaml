@@ -31,24 +31,40 @@
 
   <DockPanel>
 
+    <!-- HotKey, not InputGesture: the latter only prints the shortcut beside the item, while HotKey
+         is what registers it with the window. Digits are spelled D1..D3 because a bare "Ctrl+1"
+         parses as the Key whose numeric value is 1, so Ctrl+3 was quietly taking over Ctrl+Tab.
+
+         The checkable items are bound one way and toggled by their command: a checkable MenuItem
+         owns its own IsChecked, and a two-way binding lets whatever it holds when the menu is first
+         opened overwrite the value the model started with. -->
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="_File">
         <MenuItem Header="E_xit" Click="OnExit" InputGesture="Alt+F4" />
       </MenuItem>
       <MenuItem Header="_Edit">
-        <MenuItem Header="_Find weapon" Click="OnFocusSearch" InputGesture="Ctrl+F" />
-        <MenuItem Header="_Reload from disk" Click="OnReload" InputGesture="Ctrl+R" />
+        <MenuItem Header="_Find weapon" Command="{Binding FocusSearchCommand}" HotKey="Ctrl+F"
+                  InputGesture="Ctrl+F" />
+        <MenuItem Header="_Reload from disk" Command="{Binding ReloadCommand}" HotKey="Ctrl+R"
+                  InputGesture="Ctrl+R" />
       </MenuItem>
       <MenuItem Header="_View">
         <MenuItem Header="_Replaceable only" ToggleType="CheckBox"
-                  IsChecked="{Binding ReplaceableOnly, Mode=TwoWay}" InputGesture="Ctrl+Shift+R" />
+                  IsChecked="{Binding ReplaceableOnly, Mode=OneWay}"
+                  Command="{Binding ToggleReplaceableOnlyCommand}"
+                  HotKey="Ctrl+Shift+R" InputGesture="Ctrl+Shift+R" />
         <MenuItem Header="Show _alpha" ToggleType="CheckBox"
-                  IsChecked="{Binding Preview.ShowAlpha, Mode=TwoWay}"
-                  IsEnabled="{Binding Preview.CanToggleAlpha}" InputGesture="Ctrl+Shift+A" />
+                  IsChecked="{Binding Preview.ShowAlpha, Mode=OneWay}"
+                  IsEnabled="{Binding Preview.CanToggleAlpha}"
+                  Command="{Binding ToggleAlphaCommand}"
+                  HotKey="Ctrl+Shift+A" InputGesture="Ctrl+Shift+A" />
         <Separator />
-        <MenuItem Header="_Browse" Click="OnShowBrowse" InputGesture="Ctrl+1" />
-        <MenuItem Header="_Editor" Click="OnShowEditor" InputGesture="Ctrl+2" />
-        <MenuItem Header="_Manager" Click="OnShowManager" InputGesture="Ctrl+3" />
+        <MenuItem Header="_Browse" Command="{Binding ShowBrowseCommand}" HotKey="Ctrl+D1"
+                  InputGesture="Ctrl+D1" />
+        <MenuItem Header="_Editor" Command="{Binding ShowEditorCommand}" HotKey="Ctrl+D2"
+                  InputGesture="Ctrl+D2" />
+        <MenuItem Header="_Manager" Command="{Binding ShowManagerCommand}" HotKey="Ctrl+D3"
+                  InputGesture="Ctrl+D3" />
       </MenuItem>
     </Menu>
 

@@ -18,9 +18,14 @@ public partial class MainWindow : Window
         // here rather than on selection, because re-clicking an already selected row must still
         // fold it away.
         AddHandler(InputElement.TappedEvent, OnTapped, RoutingStrategies.Bubble);
-    }
 
-    private MainViewModel? Model => DataContext as MainViewModel;
+        // Everything else the menu does is a command on the model. Focus is the exception: the
+        // control belongs to the view, so the model only reports that someone asked for it.
+        DataContextChanged += (_, _) =>
+        {
+            if (DataContext is MainViewModel model) model.SearchRequested += FocusSearch;
+        };
+    }
 
     private static void OnTapped(object? sender, TappedEventArgs e)
     {
@@ -30,22 +35,7 @@ public partial class MainWindow : Window
         if (row?.DataContext is TreeNode { HasChildren: true } node) node.IsExpanded = !node.IsExpanded;
     }
 
+    private void FocusSearch() => this.FindControl<TextBox>("Search")?.Focus();
+
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
-
-    private void OnFocusSearch(object? sender, RoutedEventArgs e)
-    {
-        if (Model is { } model) model.Workspace = 0;
-        this.FindControl<TextBox>("Search")?.Focus();
-    }
-
-    private void OnReload(object? sender, RoutedEventArgs e) => _ = Model?.ReloadAsync();
-
-    private void OnShowBrowse(object? sender, RoutedEventArgs e) => Show(0);
-    private void OnShowEditor(object? sender, RoutedEventArgs e) => Show(1);
-    private void OnShowManager(object? sender, RoutedEventArgs e) => Show(2);
-
-    private void Show(int workspace)
-    {
-        if (Model is { } model) model.Workspace = workspace;
-    }
 }

@@ -149,6 +149,43 @@ internal static class SelfTest
             if (model.Detail is not { } refiltered || CountRows(refiltered.Roots) != everything)
                 return Fail("turning the filter back on did not restore the tree");
 
+            // Everything above exercises the models. The window is where a binding can quietly
+            // undo them, so it is built and read back too.
+            var window = new Views.MainWindow { DataContext = model };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            Console.WriteLine($"window   filter is {model.ReplaceableOnly} after the window bound to it");
+            if (!model.ReplaceableOnly)
+                return Fail("binding the window turned the replaceable-only filter off");
+
+            var bound = model.Detail?.Roots.FirstOrDefault()?.Children.Select(c => c.Label).ToList() ?? [];
+            Console.WriteLine($"window   classes shown: {string.Join(", ", bound)}");
+            if (bound.Contains("Transform") || bound.Contains("MonoScript"))
+                return Fail("the filter is not being applied to the tree the window shows");
+
+            // InputGesture only prints the shortcut beside the menu item; HotKey is what registers
+            // it. The first build shipped the former alone, so every key did nothing while the menu
+            // claimed otherwise. This asks the window what it will actually respond to.
+            var registered = window.KeyBindings.Select(b => b.Gesture?.ToString()).ToList();
+            Console.WriteLine($"keys     {string.Join(", ", registered)}");
+
+            foreach (var gesture in new[] { "Ctrl+F", "Ctrl+R", "Ctrl+Shift+R", "Ctrl+Shift+A", "Ctrl+D1", "Ctrl+D2", "Ctrl+D3" })
+                if (!registered.Contains(gesture))
+                    return Fail($"{gesture} is shown in the menu but not bound to anything");
+
+            // And the toggle has to survive being driven, since a two-way binding on a checkable
+            // menu item was what turned the filter off as soon as the menu was opened.
+            model.ToggleReplaceableOnlyCommand.Execute(null);
+            if (model.ReplaceableOnly) return Fail("the filter command did not turn it off");
+            model.ToggleReplaceableOnlyCommand.Execute(null);
+            if (!model.ReplaceableOnly) return Fail("the filter command did not turn it back on");
+
+            model.ShowManagerCommand.Execute(null);
+            if (model.Workspace != MainViewModel.Manager) return Fail("the workspace command did nothing");
+            model.ShowBrowseCommand.Execute(null);
+
+            window.Close();
             return 0;
         }
         catch (Exception ex)

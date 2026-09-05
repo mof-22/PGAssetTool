@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
@@ -142,6 +143,42 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// Reading goes through the same lock as resolving: one BundleSet, one reader, and clicking
     /// quickly down a tree must not put two decodes into it at once.
+    /// Raised when the search box should take focus. The view owns the control; the model only
+    /// knows that someone asked.
+    public event Action? SearchRequested;
+
+    [RelayCommand]
+    private void FocusSearch()
+    {
+        Workspace = Browse;
+        SearchRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private Task Reload() => ReloadAsync();
+
+    /// Toggled through a command rather than a two-way binding on the menu item. A checkable
+    /// MenuItem owns its own IsChecked, and letting it write back means the value the menu happens
+    /// to hold when it is first realized wins over the one the model started with.
+    [RelayCommand]
+    private void ToggleReplaceableOnly() => ReplaceableOnly = !ReplaceableOnly;
+
+    [RelayCommand]
+    private void ToggleAlpha() => Preview.ShowAlpha = !Preview.ShowAlpha;
+
+    [RelayCommand]
+    private void ShowBrowse() => Workspace = Browse;
+
+    [RelayCommand]
+    private void ShowEditor() => Workspace = Editor;
+
+    [RelayCommand]
+    private void ShowManager() => Workspace = Manager;
+
+    public const int Browse = 0;
+    public const int Editor = 1;
+    public const int Manager = 2;
+
     partial void OnReplaceableOnlyChanged(bool value)
     {
         if (_tree is null) return;
