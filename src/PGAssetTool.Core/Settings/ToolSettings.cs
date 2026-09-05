@@ -19,6 +19,14 @@ public sealed record ToolSettings
     /// something a Japanese player would recognise.
     public string Language { get; init; } = "l_en-gb";
 
+    /// Where extracted weapons and assets are written. Empty means beside the tool, under
+    /// PGAssetTool-data, which is the only place that works whatever directory the exe is launched
+    /// from — the CLI can default to the current one because a shell has a meaningful one.
+    public string WorkspaceRoot { get; init; } = "";
+
+    /// Recorded in the manifest of anything extracted as a workspace.
+    public string Author { get; init; } = "";
+
     /// Whether the asset tree starts filtered to what can be written back.
     public bool ReplaceableOnly { get; init; } = true;
 
@@ -30,6 +38,9 @@ public sealed record ToolSettings
     };
 
     public static string PathIn(string home) => Path.Combine(home, FileName);
+
+    public string WorkspaceIn(string home)
+        => WorkspaceRoot.Length > 0 ? WorkspaceRoot : Path.Combine(home, "workspace");
 
     /// A settings file that cannot be read is replaced by the defaults rather than stopping the
     /// tool: it holds preferences, and none of them is worth refusing to start over.

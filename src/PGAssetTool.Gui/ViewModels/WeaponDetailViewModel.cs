@@ -111,9 +111,30 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
 
         if (tree.Skins.Count > 0)
         {
+            // A skin is a set of materials, and what a modder wants from it is the textures they
+            // use. The materials themselves are a step on the way and stay collapsed.
             var skins = new TreeNode("Skins", $"{tree.Skins.Count}");
             foreach (var skin in tree.Skins)
-                skins.With(new TreeNode(skin.DisplayName ?? skin.Record.Id, skin.Record.Id));
+            {
+                var node = new TreeNode(skin.DisplayName ?? skin.Record.Id, skin.Record.Id);
+                foreach (var material in skin.Materials)
+                {
+                    // With one material there is nothing to distinguish, so its textures hang
+                    // straight off the skin rather than behind a row that says nothing.
+                    var into = node;
+                    if (skin.Materials.Count > 1)
+                    {
+                        into = new TreeNode(material.Name, material.Bundle, AssetClassID.Material);
+                        node.With(into);
+                    }
+
+                    foreach (var texture in material.Textures)
+                        into.With(new TreeNode(texture.Name, material.Bundle, AssetClassID.Texture2D,
+                            texture.PathId,
+                            texture.Bundle.Length > 0 ? texture.Bundle : material.Bundle));
+                }
+                skins.With(node);
+            }
             roots.Add(skins);
         }
 

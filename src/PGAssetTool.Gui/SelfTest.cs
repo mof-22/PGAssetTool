@@ -58,13 +58,11 @@ internal static class SelfTest
             Console.WriteLine($"search   'beretta' -> {model.Weapons.Count}");
 
             model.Search = "";
-            var wanted = model.Weapons.FirstOrDefault(w => w.Record.GameNumber == 16)
-                ?? model.Weapons[0];
+            model.Search = "";
+            if (!Select(model, 16)) return Fail($"#16 never resolved: {model.Status}");
 
-            model.Selected = wanted;
-            for (var waited = 0; model.Detail is null && waited < 60_000; waited += 50) Thread.Sleep(50);
-
-            if (model.Detail is not { } detail) return Fail($"'{wanted.Name}' never resolved: {model.Status}");
+            var detail = model.Detail!;
+            Console.WriteLine($"selected {detail.Name} — {detail.Subtitle}");
             Console.WriteLine($"selected {detail.Name} — {detail.Subtitle}");
 
             foreach (var root in detail.Roots)
@@ -227,7 +225,55 @@ internal static class SelfTest
             if (clock.ElapsedMilliseconds > 8000)
                 return Fail($"reloading took {clock.ElapsedMilliseconds}ms");
 
+            // With a window open the list box owns the selection, and rebuilding the collection —
+            // which searching and reloading both do — clears it. So pick one again before asking
+            // for it to be written out.
+            if (!Select(model, 16)) return Fail("selecting #16 resolved nothing");
+
+            // A skin is worth a row only if what it changes can be reached from it.
+            if (!Select(model, 416)) return Fail("selecting #416 resolved nothing");
+
+            var skins = model.Detail?.Roots.FirstOrDefault(r => r.Label == "Skins");
+            if (skins is null) return Fail("#416 has skins and the tree showed none");
+
+            Console.WriteLine($"skins    {skins.Children.Count} on #416, "
+                + $"{skins.Children.Sum(s => CountRows(s.Children))} rows beneath them");
+            foreach (var skin in skins.Children.Take(3))
+                Console.WriteLine($"         {skin.Label} -> "
+                    + string.Join(", ", skin.Children.Select(c => c.Label)));
+
+            if (skins.Children.All(s => s.Children.Count == 0))
+                return Fail("no skin reached a texture");
+
+            if (!Select(model, 16)) return Fail("selecting #16 resolved nothing");
+
+            // Closed before the writing starts: an async command raises CanExecuteChanged when it
+            // finishes, and with no synchronization context here that lands on a pool thread while
+            // a menu item is listening. The real app resumes on the UI thread and does not care.
             window.Close();
+
+            // Extraction has to land somewhere sensible whatever directory the exe was launched
+            // from, which is why it does not use the current one the way the CLI does.
+            Console.WriteLine($"extract  writing to {model.WorkspaceRoot}");
+            if (!Path.IsPathRooted(model.WorkspaceRoot))
+                return Fail("the workspace root has to be absolute; a window has no current directory");
+
+            model.ExtractWeaponCommand.Execute(null);
+            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+            Console.WriteLine($"extract  {model.Status}");
+
+            if (model.LastExport is not { } written || !Directory.Exists(written))
+                return Fail($"nothing was written: {model.Status}");
+
+            var manifest = Path.Combine(written, PGAssetTool.Core.Pack.PackManifest.FileName);
+            if (!File.Exists(manifest)) return Fail($"no manifest in {written}");
+
+            var operations = PGAssetTool.Core.Pack.Workspace.Read(written).Operations;
+            Console.WriteLine($"extract  {operations.Count} replaceable files across "
+                + $"{operations.Select(o => o.Target.Container).Distinct().Count()} bundles");
+            if (operations.Count == 0) return Fail("the manifest named nothing replaceable");
+
+
             return 0;
         }
         catch (Exception ex)
@@ -238,6 +284,19 @@ internal static class SelfTest
         {
             model.Dispose();
         }
+    }
+
+    /// Selecting resolves off the UI thread, and Detail holds the previous weapon while it does —
+    /// so waiting for it to be non-null passes immediately on the wrong tree.
+    private static bool Select(MainViewModel model, int number)
+    {
+        model.Selected = model.Weapons.First(w => w.Record.GameNumber == number);
+        for (var waited = 0; waited < 60_000; waited += 50)
+        {
+            if (model.Detail?.Tree.Record.GameNumber == number) return true;
+            Thread.Sleep(50);
+        }
+        return false;
     }
 
     private static int CountRows(IEnumerable<TreeNode> nodes)

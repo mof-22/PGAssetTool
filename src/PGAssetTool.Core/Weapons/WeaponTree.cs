@@ -4,7 +4,13 @@ using PGAssetTool.Core.Catalog;
 
 namespace PGAssetTool.Core.Weapons;
 
-public sealed record WeaponSkinView(SkinRecord Record, string? DisplayName);
+/// A skin, with the materials it names resolved to the bundles holding them and the textures those
+/// materials use. Resolved here rather than in the tree so both the exporter and the GUI see the
+/// same thing.
+public sealed record WeaponSkinView(
+    SkinRecord Record, string? DisplayName, IReadOnlyList<SkinMaterial> Materials);
+
+public sealed record SkinMaterial(string Path, string Bundle, string Name, IReadOnlyList<AssetNode> Textures);
 
 /// An asset tied to the weapon by the number in its name rather than by a binary reference.
 public sealed record RelatedAsset(string Namespace, string Path, string? Bundle);
@@ -57,7 +63,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         }
 
         var skins = catalogs.Skins.ForWeapon(record.Index)
-            .Select(s => new WeaponSkinView(s, catalogs.Localization.Translate(s.LocalizationKey)))
+            .Select(s => new WeaponSkinView(s, catalogs.Localization.Translate(s.LocalizationKey), Materials(s)))
             .ToList();
 
         // The skin materials are already listed under each skin, so they are left out here.
@@ -74,6 +80,41 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 
         return new WeaponTree(
             record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved);
+    }
+
+    /// The materials a skin names, and the textures each of them uses.
+    ///
+    /// A skin records its materials as paths relative to one of the skin roots rather than as
+    /// pointers, so they have to be looked up rather than followed. Anything that does not resolve
+    /// is left out: the tree shows what can be acted on, not what is missing.
+    private IReadOnlyList<SkinMaterial> Materials(SkinRecord skin)
+    {
+        var materials = new List<SkinMaterial>();
+
+        foreach (var path in skin.MaterialPaths)
+        {
+            if (catalogs.Lookup.Resolve(path, AssetLookup.SkinAssetRoots) is not var (full, bundle)) continue;
+
+            var name = full[(full.LastIndexOf('/') + 1)..];
+            AssetsFileInstance file;
+            try { file = bundles.Open(bundle); }
+            catch (Exception e) when (e is IOException or FileNotFoundException) { continue; }
+
+            var info = ReferenceWalker.FindByName(
+                bundles.Context, file, AssetClassID.Material, name, StringComparison.OrdinalIgnoreCase);
+            if (info is null) continue;
+
+            // Only the textures, not the whole closure: a material also reaches its shader, and a
+            // shader is neither replaceable nor worth a row.
+            var textures = ReferenceWalker
+                .Closure(bundles.Context, file, info.PathId, _graph.Resolve, skip: Opaque)
+                .Where(n => n.Class == AssetClassID.Texture2D)
+                .ToList();
+
+            materials.Add(new SkinMaterial(full, bundle, name, textures));
+        }
+
+        return materials;
     }
 
     private static string NamespaceOf(string path)

@@ -5,9 +5,11 @@ using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export.Meshes;
+using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Mods;
 using PGAssetTool.Core.Settings;
+using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Preview;
 using PGAssetTool.Core.Weapons;
 
@@ -38,6 +40,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// or reload the game once per setting.
     private bool _loading;
 
+    /// The preferences as last read or written. Held so extraction knows where to write and whose
+    /// name to record without going back to disk for each.
+    private ToolSettings _settings = new();
+
     /// Hides everything that cannot be written back. What counts comes from the import registry.
     [ObservableProperty] private bool _replaceableOnly = true;
 
@@ -66,10 +72,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // Preferences are read before the game, so the first catalog load is already in the right
         // language rather than being read once in English and then again. Nothing is resolved yet,
         // so the change handlers below find nothing to rebuild.
-        var settings = ToolSettings.Load();
+        _settings = ToolSettings.Load();
         _loading = true;
-        Language = settings.Language;
-        ReplaceableOnly = settings.ReplaceableOnly;
+        Language = _settings.Language;
+        ReplaceableOnly = _settings.ReplaceableOnly;
         _loading = false;
 
         try
@@ -177,6 +183,75 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// knows that someone asked.
     public event Action? SearchRequested;
 
+    /// Writes the whole weapon out as a workspace: every replaceable file plus a manifest that
+    /// already names each target, so the directory is ready to edit and pack without anything
+    /// being wired up by hand.
+    [RelayCommand]
+    private async Task ExtractWeapon()
+    {
+        if (_tree is null || _bundles is null) { Status = "Select a weapon first."; return; }
+
+        var tree = _tree;
+        await RunExclusively(async () =>
+        {
+            var version = _bundles.Context.HasClassDatabase
+                ? GameVersion.Read(_bundles.Context, _bundles.Game)
+                : null;
+
+            var export = await Task.Run(() => new WeaponExporter(_bundles)
+                .ExportAsWorkspace(tree, WorkspaceRoot, _settings.Author, version));
+
+            LastExport = export.Directory;
+            Status = $"{export.Assets.Count} files written to {export.Directory}"
+                + (export.Skipped.Count > 0 ? $", {export.Skipped.Count} skipped" : "");
+        });
+    }
+
+    /// Writes out the one object the tree has selected, for when the whole weapon is not wanted.
+    [RelayCommand]
+    private async Task ExtractSelected()
+    {
+        if (Detail?.SelectedNode is not { Class: not null, Bundle.Length: > 0 } node)
+        {
+            Status = "Select an asset in the tree first.";
+            return;
+        }
+
+        await RunExclusively(async () =>
+        {
+            var directory = Path.Combine(WorkspaceRoot, "assets");
+            var written = await Task.Run(() =>
+            {
+                if (AssetPreview.Locate(_bundles!, node.Bundle, node.Class.Value, node.PathId, node.Label)
+                    is not var (file, info)) return null;
+
+                return new AssetExporter(_bundles!).Export(node.Bundle, file, info, directory);
+            });
+
+            if (written is null || written.Count == 0) { Status = $"'{node.Label}' could not be written."; return; }
+
+            LastExport = directory;
+            Status = $"{string.Join(", ", written.Select(w => Path.GetFileName(w.Path)))} -> {directory}";
+        });
+    }
+
+    /// Where extraction writes. Beside the tool unless the settings say otherwise, because a
+    /// window has no meaningful current directory to fall back on.
+    public string WorkspaceRoot => _settings.WorkspaceIn(ModStore.DefaultHome());
+
+    /// The last directory written to, so the view can offer to open it.
+    [ObservableProperty] private string? _lastExport;
+
+    /// Long jobs share the one reader and say so while they run.
+    private async Task RunExclusively(Func<Task> work)
+    {
+        Busy = true;
+        await _reading.WaitAsync();
+        try { await work(); }
+        catch (Exception ex) { Status = ex.Message; }
+        finally { _reading.Release(); Busy = false; }
+    }
+
     [RelayCommand]
     private void FocusSearch()
     {
@@ -242,7 +317,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void Remember()
     {
         if (_loading) return;
-        try { new ToolSettings { Language = Language, ReplaceableOnly = ReplaceableOnly }.Save(); }
+        _settings = _settings with { Language = Language, ReplaceableOnly = ReplaceableOnly };
+        try { _settings.Save(); }
         catch (IOException) { }
     }
 

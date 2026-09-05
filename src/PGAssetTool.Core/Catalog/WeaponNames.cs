@@ -23,9 +23,10 @@ public sealed class WeaponNames
     public static WeaponNames FromTables(ItemCatalog items, params Localization[] tables)
         => new(items.Weapons.ToDictionary(w => w.Index, w => tables
             .Select(t => t.Translate(w.LocalizationKey))
-            .Where(n => !string.IsNullOrEmpty(n))
+            .OfType<string>()
+            .Where(n => n.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray()!));
+            .ToArray()));
 
     public static WeaponNames Load(BundleSet bundles, ItemCatalog items)
     {
@@ -41,9 +42,10 @@ public sealed class WeaponNames
         foreach (var weapon in items.Weapons)
             byIndex[weapon.Index] = tables
                 .Select(t => t.Translate(weapon.LocalizationKey))
-                .Where(n => !string.IsNullOrEmpty(n))
+                .OfType<string>()
+                .Where(n => n.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray()!;
+                .ToArray();
 
         return new WeaponNames(byIndex);
     }

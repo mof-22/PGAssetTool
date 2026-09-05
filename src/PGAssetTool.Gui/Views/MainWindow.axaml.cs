@@ -37,6 +37,16 @@ public partial class MainWindow : Window
 
     private void FocusSearch() => this.FindControl<TextBox>("Search")?.Focus();
 
+    /// Opens the folder extraction wrote to, or the root if nothing has been written yet.
+    private void OnOpenOutput(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel model) return;
+
+        var path = model.LastExport ?? model.WorkspaceRoot;
+        System.IO.Directory.CreateDirectory(path);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+    }
+
     private void OnOptions(object? sender, RoutedEventArgs e)
         => new OptionsWindow { DataContext = DataContext }.ShowDialog(this);
 
