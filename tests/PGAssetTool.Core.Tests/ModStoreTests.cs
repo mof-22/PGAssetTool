@@ -138,6 +138,23 @@ public class ModStoreTests : IDisposable
     }
 
     [Fact]
+    public void WritingKeepsTheStateItReplaced()
+    {
+        // Losing this file loses the record of which mod put what where, and with it the ability to
+        // uninstall through the tool.
+        var mod = new InstalledMod
+        {
+            Id = "a", Name = "A", PackPath = "a.pgmod", InstalledAt = DateTimeOffset.UnixEpoch,
+            GameVersion = "26.11.0", TouchedBundles = new Dictionary<string, string>(),
+        };
+        _store.Write([mod]);
+        _store.Write([]);
+
+        Assert.Empty(_store.Read());
+        Assert.Contains("\"a\"", File.ReadAllText(Path.Combine(_store.Root, "installed.json.previous")));
+    }
+
+    [Fact]
     public void InstalledModsRoundTrip()
     {
         _store.Write([

@@ -87,9 +87,15 @@ public sealed class ModStore
             ? JsonSerializer.Deserialize<List<InstalledMod>>(File.ReadAllText(StatePath), Json) ?? []
             : [];
 
+    /// Keeps the previous contents beside the file before overwriting.
+    ///
+    /// Losing this file does not lose the backups, but it does lose the record of which mod put what
+    /// where — and with it the ability to uninstall through the tool rather than by hand. It has gone
+    /// empty once for reasons that were never pinned down, so the previous state is worth the copy.
     public void Write(IEnumerable<InstalledMod> mods)
     {
         Directory.CreateDirectory(Root);
+        if (File.Exists(StatePath)) File.Copy(StatePath, StatePath + ".previous", overwrite: true);
         File.WriteAllText(StatePath, JsonSerializer.Serialize(mods.ToList(), Json));
     }
 

@@ -41,6 +41,8 @@ if (command is "-h" or "--help" or "help")
 
           apply <pack>         Install a .pgmod into the game.
           verify               Check every bundle against the hash the game recorded for it.
+          consolidate          Report what emptying the downloaded cache would change. --apply
+                               removes only the copies that change nothing.
           mods                 List installed mods.
           enable <id>          Turn a mod back on.
           disable <id>         Turn a mod off without uninstalling it.
@@ -164,6 +166,55 @@ if (command == "convert")
     }
     Console.WriteLine($"\n  pgassettool pack \"{destination}\"");
     return results.Count == sources.Count ? 0 : 1;
+}
+
+if (command == "consolidate")
+{
+    if (game.Downloaded is null)
+    {
+        Console.WriteLine("No downloaded cache; everything already loads from the game's own folder.");
+        return 0;
+    }
+
+    var plan = CacheConsolidation.Plan(game);
+    if (plan.Count == 0)
+    {
+        Console.WriteLine("The downloaded cache claims nothing.");
+        return 0;
+    }
+
+    foreach (var group in plan.GroupBy(i => i.Verdict))
+    {
+        Console.WriteLine($"\n{group.Key}  ({group.Count()})");
+        Console.WriteLine("  " + group.Key switch
+        {
+            ConsolidationVerdict.Redundant => "identical to the shipped copy; removing changes nothing",
+            ConsolidationVerdict.DownloadedIsDamaged => "differs from its own hash while the shipped copy matches; the shipped one is intact",
+            ConsolidationVerdict.ShippedCarriesAMod => "the shipped copy is the edited one; removing these is what lets that edit load",
+            ConsolidationVerdict.NewerVersion => "a different version from the one shipped; removing these rolls the game back",
+            ConsolidationVerdict.OnlyHere => "nothing shipped under this name and version; removing these loses the content",
+            ConsolidationVerdict.BrokenClaim => "claimed with no file; the game logs a read failure for each on every launch",
+            _ => "",
+        });
+        foreach (var item in group.Take(10)) Console.WriteLine($"    {item.Bundle}");
+        if (group.Count() > 10) Console.WriteLine($"    and {group.Count() - 10} more");
+    }
+
+    var safe = plan.Count(i => i.SafeToRemove);
+    var keep = plan.Count - safe;
+    Console.WriteLine($"\n{safe} of {plan.Count} can be removed without changing what the game loads.");
+    if (keep > 0) Console.WriteLine($"{keep} would change it and are left alone.");
+
+    if (!args.Contains("--apply"))
+    {
+        Console.WriteLine("\nNothing was changed. Pass --apply to remove the safe ones.");
+        Console.WriteLine("Whether the game refills the cache afterwards is not known, so check before relying on it.");
+        return 0;
+    }
+
+    var removed = CacheConsolidation.Apply(game, plan);
+    Console.WriteLine($"\nRemoved {removed.Count}; the ledger now claims {game.Downloaded.Claimed.Count - removed.Count}.");
+    return 0;
 }
 
 if (command == "verify")
