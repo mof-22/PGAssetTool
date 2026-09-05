@@ -3,6 +3,7 @@ using AssetsTools.NET.Extra;
 using AssetsTools.NET.Texture;
 using Fmod5Sharp;
 using PGAssetTool.Core.Assets;
+using PGAssetTool.Core.Export.Meshes;
 
 namespace PGAssetTool.Core.Export;
 
@@ -41,6 +42,7 @@ public sealed class AssetExporter(BundleSet bundles)
             {
                 AssetClassID.Texture2D => ExportTexture(bundle, field, stem),
                 AssetClassID.AudioClip => ExportAudio(bundle, field, stem),
+                AssetClassID.Mesh => ExportMesh(field, stem),
                 _ => null,
             };
             if (exported is not null) return [exported with { Class = cls, Name = name, Address = address }];
@@ -92,6 +94,23 @@ public sealed class AssetExporter(BundleSet bundles)
         texture.pictureData = pixels;
         if (!texture.DecodeTextureImage(pixels, path, ImageExportType.Png, 100)) return null;
         return new ExportedAsset(path, AssetClassID.Texture2D, "", "png", new FileInfo(path).Length, Placeholder);
+    }
+
+    /// A mesh that cannot be unpacked falls through to the field dump rather than failing the export.
+    private static ExportedAsset? ExportMesh(AssetTypeValueField field, string stem)
+    {
+        try
+        {
+            var mesh = UnityMesh.Read(field);
+            if (mesh.VertexCount == 0) return null;
+            var path = stem + ".glb";
+            GlbWriter.Write(mesh, path);
+            return new ExportedAsset(path, AssetClassID.Mesh, "", "glb", new FileInfo(path).Length, Placeholder);
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private ExportedAsset? ExportAudio(string bundle, AssetTypeValueField field, string stem)

@@ -30,7 +30,7 @@ if (command is "-h" or "--help" or "help")
                                in-game number and the prefab number are different sequences.
 
           extract <weapon>     Write out everything belonging to a weapon: images as PNG, audio as
-                               WAV, the object graph as JSON. With --workspace, also writes a
+                               WAV, meshes as glTF, the object graph as JSON. With --workspace, also writes a
                                pgmod.json naming every replaceable file.
           pack [<directory>]   Build a .pgmod from a workspace. Only files edited since the
                                extract are included.
