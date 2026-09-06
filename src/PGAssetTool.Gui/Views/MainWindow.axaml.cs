@@ -25,6 +25,12 @@ public partial class MainWindow : Window
         // straight back whenever typing is what space means.
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
 
+        // Something inside the window has to hold the keyboard for a key press to have anywhere to
+        // travel from. Freshly opened, nothing did, and every shortcut stayed dead until a click
+        // landed somewhere. The weapon list is the right thing to hand it to: the arrow keys then
+        // walk the list, which is what a person reaches for first anyway.
+        Opened += (_, _) => this.FindControl<ListBox>("Weapons")?.Focus();
+
         // Everything else the menu does is a command on the model. Focus is the exception: the
         // control belongs to the view, so the model only reports that someone asked for it.
         DataContextChanged += (_, _) =>
@@ -48,12 +54,22 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        if (DataContext is not MainViewModel model) return;
+
+        // The one shortcut that cannot be a key binding on the window: opening a dialog needs the
+        // window to be its owner, which is the view's business rather than the model's.
+        if (e is { Key: Key.OemComma, KeyModifiers: KeyModifiers.Control })
+        {
+            OnOptions(this, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
         if (e.KeyModifiers != KeyModifiers.None) return;
 
-        // Whatever the key means to something being typed into, it means that. Both of these are
-        // bare letters and a space, which is exactly what a search box is for.
+        // Whatever a bare key means to something being typed into, it means that. Both of the ones
+        // below are a letter and a space, which is exactly what a search box is for.
         if (FocusManager?.GetFocusedElement() is TextBox) return;
-        if (DataContext is not MainViewModel model) return;
 
         switch (e.Key)
         {

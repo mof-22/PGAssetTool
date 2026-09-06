@@ -89,50 +89,67 @@
     </DataTemplate>
   </Window.DataTemplates>
 
+  <!-- Declared on the window, not as HotKey on each menu item. A HotKey is registered when the
+       item carrying it is built, and the items inside a menu are not built until that menu is first
+       opened - so every shortcut was dead until its own menu had been pulled down once.
+
+       Digits are spelled D1..D3 because a bare "Ctrl+1" parses as the Key whose numeric value is 1,
+       so Ctrl+3 was quietly taking over Ctrl+Tab. The items below keep InputGesture, which only
+       prints the shortcut beside the item and registers nothing. -->
+  <Window.KeyBindings>
+    <KeyBinding Gesture="Ctrl+E" Command="{Binding ExtractWeaponCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+E" Command="{Binding ExtractSelectedCommand}" />
+    <KeyBinding Gesture="Ctrl+F" Command="{Binding FocusSearchCommand}" />
+    <KeyBinding Gesture="Ctrl+R" Command="{Binding ReloadCommand}" />
+    <KeyBinding Gesture="F5" Command="{Binding RescanWorkspacesCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding ToggleReplaceableOnlyCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding ToggleAlphaCommand}" />
+    <KeyBinding Gesture="Ctrl+D1" Command="{Binding ShowBrowseCommand}" />
+    <KeyBinding Gesture="Ctrl+D2" Command="{Binding ShowEditorCommand}" />
+    <KeyBinding Gesture="Ctrl+D3" Command="{Binding ShowManagerCommand}" />
+  </Window.KeyBindings>
+
   <DockPanel>
 
-    <!-- HotKey, not InputGesture: the latter only prints the shortcut beside the item, while HotKey
-         is what registers it with the window. Digits are spelled D1..D3 because a bare "Ctrl+1"
-         parses as the Key whose numeric value is 1, so Ctrl+3 was quietly taking over Ctrl+Tab.
-
-         The checkable items are bound one way and toggled by their command: a checkable MenuItem
+    <!-- The checkable items are bound one way and toggled by their command: a checkable MenuItem
          owns its own IsChecked, and a two-way binding lets whatever it holds when the menu is first
          opened overwrite the value the model started with. -->
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="_File">
         <MenuItem Header="Extract _weapon" Command="{Binding ExtractWeaponCommand}"
-                  HotKey="Ctrl+E" InputGesture="Ctrl+E" />
+                  InputGesture="Ctrl+E" />
         <MenuItem Header="Extract _selected asset" Command="{Binding ExtractSelectedCommand}"
-                  HotKey="Ctrl+Shift+E" InputGesture="Ctrl+Shift+E" />
+                  InputGesture="Ctrl+Shift+E" />
         <MenuItem Header="Open _output folder" Click="OnOpenOutput" />
         <Separator />
-        <MenuItem Header="_Options…" Click="OnOptions" HotKey="Ctrl+OemComma" InputGesture="Ctrl+OemComma" />
+        <MenuItem Header="_Options…" Click="OnOptions" InputGesture="Ctrl+OemComma" />
         <Separator />
         <MenuItem Header="E_xit" Click="OnExit" InputGesture="Alt+F4" />
       </MenuItem>
       <MenuItem Header="_Edit">
-        <MenuItem Header="_Find weapon" Command="{Binding FocusSearchCommand}" HotKey="Ctrl+F"
+        <MenuItem Header="_Find weapon" Command="{Binding FocusSearchCommand}"
                   InputGesture="Ctrl+F" />
-        <MenuItem Header="_Reload from disk" Command="{Binding ReloadCommand}" HotKey="Ctrl+R"
+        <MenuItem Header="_Reload from disk" Command="{Binding ReloadCommand}"
                   InputGesture="Ctrl+R" />
-        <MenuItem Header="Rescan _workspaces" Click="OnRescan" HotKey="F5" InputGesture="F5" />
+        <MenuItem Header="Rescan _workspaces" Command="{Binding RescanWorkspacesCommand}"
+                  InputGesture="F5" />
       </MenuItem>
       <MenuItem Header="_View">
         <MenuItem Header="_Replaceable only" ToggleType="CheckBox"
                   IsChecked="{Binding ReplaceableOnly, Mode=OneWay}"
                   Command="{Binding ToggleReplaceableOnlyCommand}"
-                  HotKey="Ctrl+Shift+R" InputGesture="Ctrl+Shift+R" />
+                  InputGesture="Ctrl+Shift+R" />
         <MenuItem Header="Show _alpha" ToggleType="CheckBox"
                   IsChecked="{Binding Preview.ShowAlpha, Mode=OneWay}"
                   IsEnabled="{Binding Preview.CanToggleAlpha}"
                   Command="{Binding ToggleAlphaCommand}"
-                  HotKey="Ctrl+Shift+A" InputGesture="Ctrl+Shift+A" />
+                  InputGesture="Ctrl+Shift+A" />
         <Separator />
-        <MenuItem Header="_Browse" Command="{Binding ShowBrowseCommand}" HotKey="Ctrl+D1"
+        <MenuItem Header="_Browse" Command="{Binding ShowBrowseCommand}"
                   InputGesture="Ctrl+D1" />
-        <MenuItem Header="_Editor" Command="{Binding ShowEditorCommand}" HotKey="Ctrl+D2"
+        <MenuItem Header="_Editor" Command="{Binding ShowEditorCommand}"
                   InputGesture="Ctrl+D2" />
-        <MenuItem Header="_Manager" Command="{Binding ShowManagerCommand}" HotKey="Ctrl+D3"
+        <MenuItem Header="_Manager" Command="{Binding ShowManagerCommand}"
                   InputGesture="Ctrl+D3" />
       </MenuItem>
     </Menu>
@@ -153,7 +170,7 @@
           <DockPanel Grid.Column="0" Margin="10">
             <TextBox Name="Search" DockPanel.Dock="Top" Text="{Binding Search}"
                      Watermark="Search weapons" Margin="0,0,0,8" />
-            <ListBox ItemsSource="{Binding Weapons}" SelectedItem="{Binding Selected}">
+            <ListBox Name="Weapons" ItemsSource="{Binding Weapons}" SelectedItem="{Binding Selected}">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:WeaponListItem">
                   <Grid ColumnDefinitions="52,*" Margin="0,2">

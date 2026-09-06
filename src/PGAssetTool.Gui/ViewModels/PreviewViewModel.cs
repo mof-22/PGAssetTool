@@ -148,14 +148,19 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Changed();
     }
 
-    /// A texture chosen by hand covers the whole model, which is the point: it answers what this
-    /// mesh looks like wearing a different skin, and a skin is not per-submesh.
+    /// Going back to the automatic answer is immediate; anything else waits for its picture, which
+    /// the shell reads and hands back through Wear.
     partial void OnChosenTextureChanged(TextureChoice? value)
     {
-        MeshTextures = value?.Image is { } picture
-            ? Enumerable.Repeat<PreviewImage?>(picture, Math.Max(Mesh?.SubMeshes.Count ?? 1, 1)).ToList()
-            : _automatic;
+        if (value is null || value.PathId == 0) MeshTextures = _automatic;
     }
+
+    /// Covers the whole model with one texture, which is the point: the question it answers is what
+    /// this mesh looks like wearing a different skin, and a skin is not per-submesh.
+    public void Wear(PreviewImage picture)
+        => MeshTextures = Enumerable
+            .Repeat<PreviewImage?>(picture, Math.Max(Mesh?.SubMeshes.Count ?? 1, 1))
+            .ToList();
 
     private IReadOnlyList<PreviewImage?>? _automatic;
 
@@ -189,8 +194,14 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     }
 }
 
-/// A texture offered for a mesh preview, loaded when it is first picked.
-public sealed record TextureChoice(string Name, string Bundle, long PathId, PreviewImage? Image)
+/// A texture offered for a mesh preview: what it is called and where to find it, and nothing else.
+///
+/// Deliberately without the decoded picture. It used to carry one, filled in once the texture had
+/// been read — but a record is compared by its contents, so the filled-in copy was a different value
+/// from the one in the list the combo box was showing. The combo box, asked to select something it
+/// did not have, selected nothing instead, and the model went straight back to the texture it
+/// started with. Picking a skin appeared to do nothing at all.
+public sealed record TextureChoice(string Name, string Bundle, long PathId)
 {
     public override string ToString() => Name;
 }

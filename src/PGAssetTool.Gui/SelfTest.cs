@@ -209,6 +209,31 @@ internal static class SelfTest
                     if (drawn == 0) return Fail($"'{node.Label}' rendered to an empty image");
                     if (slots?.Any(s => s is not null) == true && coloured == 0)
                         return Fail($"'{node.Label}' has a texture but drew in flat grey");
+
+                    // Wearing a texture chosen by hand is how a skin gets tried on a model the
+                    // automatic answer knows nothing about. It silently did nothing: the choice
+                    // carried its picture, filling that in made a different value, and the combo
+                    // box dropped a selection it could no longer find in its own list.
+                    if (model.Preview.TextureChoices.FirstOrDefault(c => c.PathId != 0) is { } wanted)
+                    {
+                        model.Preview.ChosenTexture = wanted;
+                        WaitWhile(() => model.Preview.MeshTextures == slots, 30_000);
+
+                        var worn = model.Preview.MeshTextures;
+                        Console.WriteLine($"         wearing '{wanted.Name}': "
+                            + $"{(worn is null ? "nothing" : string.Join(", ", worn.Select(s => s is null ? "-" : $"{s.Width}x{s.Height}")))}");
+
+                        if (model.Preview.ChosenTexture != wanted)
+                            return Fail("the chosen texture did not stay chosen");
+                        if (worn is null || worn.Any(s => s is null))
+                            return Fail($"'{wanted.Name}' was chosen and the model is still wearing the old one");
+                        if (worn.Distinct().Count() != 1)
+                            return Fail("a texture chosen by hand has to cover the whole model");
+
+                        model.Preview.ChosenTexture = model.Preview.TextureChoices[0];
+                        if (model.Preview.MeshTextures != slots)
+                            return Fail("going back to the automatic answer did not restore it");
+                    }
                 }
             }
 
@@ -277,15 +302,29 @@ internal static class SelfTest
             if (bound.Contains("Transform") || bound.Contains("MonoScript"))
                 return Fail("the filter is not being applied to the tree the window shows");
 
-            // InputGesture only prints the shortcut beside the menu item; HotKey is what registers
+            // InputGesture only prints the shortcut beside the menu item; something has to register
             // it. The first build shipped the former alone, so every key did nothing while the menu
-            // claimed otherwise. This asks the window what it will actually respond to.
-            var registered = window.KeyBindings.Select(b => b.Gesture?.ToString()).ToList();
-            Console.WriteLine($"keys     {string.Join(", ", registered)}");
+            // claimed otherwise. Then they were registered per menu item, which registers them when
+            // that item is built — and a menu's items are not built until it has been opened once,
+            // so every shortcut was still dead until its own menu had been pulled down.
+            //
+            // Asked of a window that has never been shown, let alone had a menu opened, and with
+            // the commands checked rather than only the gestures: a binding that resolves to
+            // nothing is registered and does nothing, which is the same failure wearing a hat.
+            var untouched = new Views.MainWindow { DataContext = model };
+            var registered = untouched.KeyBindings.ToList();
+            Console.WriteLine($"keys     {string.Join(", ", registered.Select(b => b.Gesture?.ToString()))}"
+                + $" (on a window nobody has opened)");
 
-            foreach (var gesture in new[] { "Ctrl+F", "Ctrl+R", "Ctrl+Shift+R", "Ctrl+Shift+A", "Ctrl+D1", "Ctrl+D2", "Ctrl+D3" })
-                if (!registered.Contains(gesture))
-                    return Fail($"{gesture} is shown in the menu but not bound to anything");
+            foreach (var gesture in new[]
+                     { "Ctrl+E", "Ctrl+Shift+E", "Ctrl+F", "Ctrl+R", "F5", "Ctrl+Shift+R",
+                       "Ctrl+Shift+A", "Ctrl+D1", "Ctrl+D2", "Ctrl+D3" })
+            {
+                var binding = registered.FirstOrDefault(b => b.Gesture?.ToString() == gesture);
+                if (binding is null) return Fail($"{gesture} is shown in the menu but not bound to anything");
+                if (binding.Command is null) return Fail($"{gesture} is bound to nothing that can run");
+            }
+            untouched.Close();
 
             // And the toggle has to survive being driven, since a two-way binding on a checkable
             // menu item was what turned the filter off as soon as the menu was opened.

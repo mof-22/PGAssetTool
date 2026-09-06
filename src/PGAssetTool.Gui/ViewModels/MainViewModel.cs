@@ -479,6 +479,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnOpaqueTexturesChanged(bool value) => Remember();
 
+    /// Re-reads the workspace directory. Files there are edited by other programs, and a watcher
+    /// does miss things, so asking outright stays available.
+    [RelayCommand]
+    private void RescanWorkspaces() => Editor.Rescan(WorkspaceRoot);
+
     // Typed rather than picked, so it lands here on every keystroke. The file is a few hundred
     // bytes and writing it costs nothing worth debouncing for.
     partial void OnAuthorChanged(string value) => Remember();
@@ -560,7 +565,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async void OnPreviewChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(PreviewViewModel.ChosenTexture)) return;
-        if (Preview.ChosenTexture is not { PathId: not 0, Image: null } choice) return;
+        if (Preview.ChosenTexture is not { PathId: not 0 } choice) return;
 
         try
         {
@@ -575,8 +580,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     return field is null ? null : AssetPreview.Texture(_bundles, choice.Bundle, field);
                 });
 
-                if (loaded is not null && ReferenceEquals(Preview.ChosenTexture, choice))
-                    Preview.ChosenTexture = choice with { Image = loaded };
+                // Only if the choice still stands: reading a texture takes long enough for someone
+                // to have moved on to another one.
+                if (loaded is not null && Preview.ChosenTexture == choice) Preview.Wear(loaded);
             }
             finally { _reading.Release(); }
         }
@@ -587,7 +593,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OfferTextures()
     {
         Preview.TextureChoices.Clear();
-        Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0, null));
+        Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0));
 
         if (Detail is null) return;
 
@@ -596,7 +602,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (node.Class != AssetClassID.Texture2D || node.Bundle.Length == 0) continue;
             if (!seen.Add((node.Bundle, node.PathId))) continue;
-            Preview.TextureChoices.Add(new TextureChoice(node.Label, node.Bundle, node.PathId, null));
+            Preview.TextureChoices.Add(new TextureChoice(node.Label, node.Bundle, node.PathId));
         }
     }
 
