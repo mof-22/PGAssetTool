@@ -44,6 +44,10 @@ public sealed record ToolSettings
     /// is not covered by this and is never skipped.
     public bool ConfirmChanges { get; init; } = true;
 
+    /// How large the manager draws an installed mod, in pixels down one side. A zoom level is set
+    /// once and meant to stay set.
+    public int TileSize { get; init; } = 112;
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

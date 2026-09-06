@@ -44,6 +44,53 @@ public sealed record InstalledRow(InstalledMod Mod)
     public bool HasIcon => Icon is not null;
 }
 
+/// What a pack says about itself, read out of the manifest inside it.
+///
+/// The ledger keeps only what the tool needs to undo an install. Everything an author wrote — what
+/// the mod is called, who made it, what it says it does, and which assets it replaces — lives in
+/// the pack, and is worth showing to whoever is deciding whether to keep it.
+public sealed record ModDetails(
+    string Name, string Id, string Author, string Version, string Description,
+    string BuiltAgainst, string Pack, IReadOnlyList<string> Replaces)
+{
+    public bool HasDescription => Description.Length > 0;
+    public string Summary => $"{Version}   by {(Author.Length > 0 ? Author : "nobody in particular")}";
+
+    public string Built => BuiltAgainst.Length > 0
+        ? $"built against game {BuiltAgainst}"
+        : "built against an unrecorded game version";
+
+    public string Changes => Replaces.Count == 1 ? "Replaces one asset" : $"Replaces {Replaces.Count} assets";
+
+    public static ModDetails? Read(InstalledMod mod)
+    {
+        try
+        {
+            var manifest = PackBuilder.ReadManifest(mod.PackPath);
+            return new ModDetails(
+                manifest.Name, manifest.Id, manifest.Author, manifest.Version, manifest.Description,
+                manifest.BuiltAgainstGameVersion ?? "", mod.PackPath,
+                manifest.Operations
+                    .Select(o => $"{Verb(o.Op)}  {o.Target.Name}  ({o.Target.Class} in {o.Target.Container})")
+                    .ToList());
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException)
+        {
+            // The pack is gone or unreadable, which the manager says elsewhere; there is simply
+            // nothing to show here.
+            return null;
+        }
+    }
+
+    private static string Verb(string op) => op switch
+    {
+        PackOperations.ReplaceTexture => "texture",
+        PackOperations.ReplaceMesh => "mesh",
+        PackOperations.ReplaceAudio => "sound",
+        _ => op,
+    };
+}
+
 /// What a request needs confirming before it happens.
 public sealed record Confirmation(string Title, string Body, Func<Task> Proceed);
 
@@ -76,6 +123,32 @@ public sealed partial class ManagerViewModel : ObservableObject
 
     /// Skips the confirmation for routine changes. Never skips the warning about the game running.
     [ObservableProperty] private bool _confirmChanges = true;
+
+    /// What the selected pack says about itself, read from the pack rather than from the ledger.
+    [ObservableProperty] private ModDetails? _details;
+
+    partial void OnSelectedChanged(InstalledRow? value) => Details = value is null ? null : ModDetails.Read(value.Mod);
+
+    /// How big a tile is drawn, in pixels down one side.
+    ///
+    /// Worked with Ctrl and the wheel, because how many mods fit on the page against how well each
+    /// one can be made out is a judgement that changes with how many are installed — and with how
+    /// close somebody is looking.
+    [ObservableProperty] private int _tileSize = 112;
+
+    /// The tile itself is a little wider than its picture, to leave the name somewhere to sit.
+    public int TileWidth => TileSize + 12;
+
+    partial void OnTileSizeChanged(int value) => OnPropertyChanged(nameof(TileWidth));
+
+    public const int SmallestTile = 56;
+    public const int LargestTile = 224;
+
+    /// One notch of the wheel. Proportional rather than fixed: the same step feels like a lot at
+    /// the small end and like nothing at the large one.
+    public void ResizeTiles(int notches)
+        => TileSize = Math.Clamp(
+            (int)Math.Round(TileSize * Math.Pow(1.15, notches)), SmallestTile, LargestTile);
 
     /// Runs the work with the reader put down and picks it up again afterwards.
     ///

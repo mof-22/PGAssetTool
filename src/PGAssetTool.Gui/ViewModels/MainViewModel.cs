@@ -46,7 +46,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         };
         Manager.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ManagerViewModel.ConfirmChanges)) Remember();
+            if (e.PropertyName is nameof(ManagerViewModel.ConfirmChanges) or nameof(ManagerViewModel.TileSize))
+                Remember();
         };
     }
 
@@ -130,6 +131,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Author = _settings.Author;
         Editor.SideBySide = _settings.SideBySide;
         Manager.ConfirmChanges = _settings.ConfirmChanges;
+        Manager.TileSize = _settings.TileSize;
         _loading = false;
 
         try
@@ -526,6 +528,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
             Author = Author.Trim(),
             SideBySide = Editor.SideBySide, ConfirmChanges = Manager.ConfirmChanges,
+            TileSize = Manager.TileSize,
         };
         try { _settings.Save(SettingsHome); }
         catch (IOException) { }

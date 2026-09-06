@@ -348,7 +348,7 @@
                    of the weapon says which one at a glance where a line of text does not. The
                    detail moves to the tooltip: it is what somebody checks once, not what they scan
                    the list for. -->
-              <ListBox ItemsSource="{Binding Mods}" SelectedItem="{Binding Selected}"
+              <ListBox Name="Installed" ItemsSource="{Binding Mods}" SelectedItem="{Binding Selected}"
                        SelectedItems="{Binding Selection}" SelectionMode="Multiple">
                 <ListBox.ItemsPanel>
                   <ItemsPanelTemplate>
@@ -363,8 +363,11 @@
                 </ListBox.Styles>
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="vm:InstalledRow">
-                    <StackPanel Width="124" ToolTip.Tip="{Binding Detail}">
-                      <Border Width="112" Height="112" Background="#111113" CornerRadius="4">
+                    <StackPanel Width="{Binding $parent[ListBox].((vm:ManagerViewModel)DataContext).TileWidth}"
+                                ToolTip.Tip="{Binding Detail}">
+                      <Border Width="{Binding $parent[ListBox].((vm:ManagerViewModel)DataContext).TileSize}"
+                              Height="{Binding $parent[ListBox].((vm:ManagerViewModel)DataContext).TileSize}"
+                              Background="#111113" CornerRadius="4">
                         <Panel>
                           <TextBlock Text="?" Classes="dim" FontSize="28"
                                      IsVisible="{Binding !HasIcon}"
@@ -409,6 +412,34 @@
                 <CheckBox Content="Ask before changing the game" IsChecked="{Binding ConfirmChanges}" />
                 <TextBlock Text="{Binding Backups}" Classes="dim mono" TextWrapping="Wrap" Margin="0,4,0,0" />
               </StackPanel>
+
+              <!-- What the pack says about itself. The ledger keeps only what is needed to undo an
+                   install; everything the author wrote lives in the pack, and is what somebody
+                   deciding whether to keep a mod actually wants to read. -->
+              <Border DockPanel.Dock="Bottom" Margin="0,8,0,0" Padding="10" CornerRadius="4"
+                      Background="#18181b" IsVisible="{Binding Details, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="3" DataContext="{Binding Details}" x:DataType="vm:ModDetails">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Summary}" Classes="dim" />
+                  <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,4,0,0"
+                             IsVisible="{Binding HasDescription}" />
+
+                  <TextBlock Text="{Binding Changes}" Classes="dim" Margin="0,6,0,0" />
+                  <ScrollViewer MaxHeight="120" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Replaces}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <TextBlock Text="{Binding}" Classes="dim mono" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+
+                  <TextBlock Text="{Binding Id, StringFormat='id: {0}'}" Classes="dim mono" Margin="0,6,0,0" />
+                  <TextBlock Text="{Binding Built}" Classes="dim" />
+                  <TextBlock Text="{Binding Pack}" Classes="dim mono" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
 
               <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="Bundles that differ" FontWeight="SemiBold"

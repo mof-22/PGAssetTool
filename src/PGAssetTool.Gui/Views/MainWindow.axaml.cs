@@ -26,6 +26,10 @@ public partial class MainWindow : Window
         // straight back whenever typing is what space means.
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
 
+        // Ctrl and the wheel resize the tiles. Seen on the way down, because the list would
+        // otherwise scroll on the same gesture and the tiles would resize under a moving view.
+        AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
+
         // Something inside the window has to hold the keyboard for a key press to have anywhere to
         // travel from. Freshly opened, nothing did, and every shortcut stayed dead until a click
         // landed somewhere. The weapon list is the right thing to hand it to: the arrow keys then
@@ -90,6 +94,22 @@ public partial class MainWindow : Window
                 }
                 break;
         }
+    }
+
+    private void OnWheel(object? sender, PointerWheelEventArgs e)
+    {
+        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        if (DataContext is not MainViewModel model) return;
+
+        // Only over the tiles. Ctrl and the wheel mean nothing anywhere else in this window, and
+        // swallowing the gesture over a list that scrolls would be worse than ignoring it.
+        if (e.Source is not Control over
+            || this.FindControl<ListBox>("Installed") is not { } tiles
+            || (!ReferenceEquals(over, tiles) && !over.GetVisualAncestors().Contains(tiles)))
+            return;
+
+        model.Manager.ResizeTiles(e.Delta.Y > 0 ? 1 : -1);
+        e.Handled = true;
     }
 
     private void FocusSearch() => this.FindControl<TextBox>("Search")?.Focus();

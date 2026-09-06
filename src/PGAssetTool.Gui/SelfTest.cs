@@ -622,6 +622,37 @@ internal static class SelfTest
             if (showing < expected)
                 return Fail($"{expected} mods have a picture and only {showing} of them are being shown");
 
+            // Ctrl and the wheel resize the tiles, and the tiles have to follow. Measured off the
+            // controls: the size is a number on the model whatever happens, and a binding that
+            // resolves to nothing leaves the tiles their default size while it changes.
+            var was = model.Manager.TileSize;
+            var tileWas = Tile(dialog);
+            for (var i = 0; i < 4; i++) model.Manager.ResizeTiles(1);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            var tileNow = Tile(dialog);
+            Console.WriteLine($"manager  tiles {was} -> {model.Manager.TileSize} px, "
+                + $"drawn {tileWas?.ToString() ?? "?"} -> {tileNow?.ToString() ?? "?"}");
+
+            if (model.Manager.TileSize <= was) return Fail("the tiles did not grow");
+            if (tileWas is null || tileNow is null) return Fail("no tile to measure");
+            if (tileNow <= tileWas) return Fail("the tiles were resized and the drawing did not follow");
+
+            for (var i = 0; i < 40; i++) model.Manager.ResizeTiles(-1);
+            if (model.Manager.TileSize != ManagerViewModel.SmallestTile)
+                return Fail($"shrinking without end reached {model.Manager.TileSize}");
+            for (var i = 0; i < 80; i++) model.Manager.ResizeTiles(1);
+            if (model.Manager.TileSize != ManagerViewModel.LargestTile)
+                return Fail($"growing without end reached {model.Manager.TileSize}");
+            model.Manager.TileSize = was;
+
+            // And the pack's own words, read out of the pack rather than out of the ledger.
+            if (model.Manager.Details is not { } about) return Fail("the selected mod shows no details");
+            Console.WriteLine($"manager  '{about.Name}' {about.Summary}, {about.Changes.ToLowerInvariant()}, "
+                + $"{about.Built}");
+            if (about.Id != PackIdentity) return Fail($"the details are for '{about.Id}', not the selected mod");
+            if (about.Replaces.Count == 0) return Fail("the pack replaces something and the details say nothing");
+
             // The lists themselves have to accept more than one row, or none of the above is
             // reachable by anyone actually using the window.
             var lists = dialog.GetVisualDescendants().OfType<Avalonia.Controls.ListBox>()
@@ -862,6 +893,12 @@ internal static class SelfTest
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
     }
+
+    /// How wide the first tile in the manager is actually being drawn, or null when there is none.
+    private static double? Tile(Views.MainWindow window)
+        => window.GetVisualDescendants().OfType<Avalonia.Controls.Image>()
+            .Select(i => i.FindAncestorOfType<Avalonia.Controls.Border>()?.Width)
+            .FirstOrDefault(w => w is > 0);
 
     /// The pack shows a drawing of the model, and can be given another one from a different angle.
     ///
