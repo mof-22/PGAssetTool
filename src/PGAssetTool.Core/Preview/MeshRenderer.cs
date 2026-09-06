@@ -37,6 +37,19 @@ public sealed record Camera(
         };
     }
 
+    /// Turns the model by a drag across the screen: rightwards and downwards, in radians.
+    ///
+    /// The drag is taken out of the roll before it is used. Yaw goes about the world's up axis and
+    /// pitch about the camera's right, and a rolled view has neither of those lying along the screen
+    /// any more — so feeding the drag straight in meant that after a quarter turn of tilt, dragging
+    /// up span the model sideways. Undoing the roll first asks the question the drag actually means:
+    /// which way did the cursor go across the picture as it now stands.
+    public Camera Dragged(float right, float down)
+    {
+        var (c, s) = (MathF.Cos(Roll), MathF.Sin(Roll));
+        return Turned(-(c * right + s * down), -(s * right - c * down));
+    }
+
     public Camera Turned(float dYaw, float dPitch) => this with
     {
         Yaw = Yaw + dYaw,

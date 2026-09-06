@@ -102,7 +102,7 @@ public sealed class MeshView : Control
         // Dragging takes the model with it: cursor right turns the near face right. The opposite
         // convention — moving the camera instead — reads as the model going the wrong way.
         // A drag across the full width turns it most of the way round.
-        _camera = _camera.Turned((float)((from.X - to.X) * 0.01), (float)((from.Y - to.Y) * -0.01));
+        _camera = _camera.Dragged((float)((to.X - from.X) * 0.01), (float)((to.Y - from.Y) * 0.01));
         InvalidateVisual();
     }
 

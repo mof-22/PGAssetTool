@@ -534,4 +534,41 @@ public class MeshRendererTests
         Assert.Equal(start.PivotZ, back.PivotZ, 5);
         Assert.Equal(Covered(Draw(quad, start)), Covered(Draw(quad, back)));
     }
+
+    [Fact]
+    public void WithNoTiltADragMeansExactlyWhatItAlwaysMeant()
+    {
+        var start = new Camera(Yaw: 0.2f, Pitch: 0.3f);
+
+        Assert.Equal(start.Turned(-0.1f, 0.2f), start.Dragged(0.1f, 0.2f));
+    }
+
+    [Fact]
+    public void AQuarterTurnOfTiltSwapsWhichWayADragTurnsTheModel()
+    {
+        // Yaw is about the world's up axis and pitch about the camera's right. Tilt the view a
+        // quarter turn and neither of those lies along the screen any more: the axis a downward
+        // drag now works is the one a sideways drag worked before. Feeding the drag in unchanged
+        // is what made dragging up spin the model sideways.
+        var tilted = new Camera(Yaw: 0.2f, Pitch: 0.3f).Rolled(MathF.PI / 2);
+
+        var down = tilted.Dragged(0, 0.25f);
+        Assert.Equal(tilted.Pitch, down.Pitch, 4);
+        Assert.NotEqual(tilted.Yaw, down.Yaw, 4);
+
+        var across = tilted.Dragged(0.25f, 0);
+        Assert.Equal(tilted.Yaw, across.Yaw, 4);
+        Assert.NotEqual(tilted.Pitch, across.Pitch, 4);
+    }
+
+    [Fact]
+    public void ADragAndItsOppositeCancelAtAnyTilt()
+    {
+        var tilted = new Camera(Yaw: 0.2f, Pitch: 0.3f).Rolled(0.9f);
+
+        var back = tilted.Dragged(0.2f, -0.15f).Dragged(-0.2f, 0.15f);
+
+        Assert.Equal(tilted.Yaw, back.Yaw, 5);
+        Assert.Equal(tilted.Pitch, back.Pitch, 5);
+    }
 }
