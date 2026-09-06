@@ -111,14 +111,7 @@ public static class AssetPreview
     {
         try
         {
-            if (!Fmod5Sharp.FsbLoader.TryLoadFsbFromByteArray(bank, out var loaded) || loaded is null) return null;
-            if (loaded.Samples.FirstOrDefault() is not { } sample) return null;
-            if (!sample.RebuildAsStandardFileFormat(out var data, out var extension)) return null;
-
-            // The rebuilder leaves a WAV's lengths at zero; see WaveFile.
-            if (extension == "wav") data = Import.Audio.WaveFile.WithLengthsFilledIn(data!);
-
-            return new PreviewSound(Import.Audio.SoundFile.Parse(data!, $"a {extension} clip"));
+            return Import.Audio.FsbSound.Read(bank) is { } sound ? new PreviewSound(sound) : null;
         }
         catch (Exception e) when (e is InvalidDataException or NotSupportedException or IndexOutOfRangeException)
         {

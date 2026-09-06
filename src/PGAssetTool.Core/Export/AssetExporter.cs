@@ -2,6 +2,7 @@ using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using AssetsTools.NET.Texture;
 using Fmod5Sharp;
+using Fmod5Sharp.FmodTypes;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Import.Audio;
@@ -165,14 +166,28 @@ public sealed class AssetExporter(BundleSet bundles)
 
         if (!FsbLoader.TryLoadFsbFromByteArray(payload, out var bank) || bank is null) return null;
         var sample = bank.Samples.FirstOrDefault();
-        if (sample is null || !sample.RebuildAsStandardFileFormat(out var data, out var extension)) return null;
+        if (sample is null) return null;
 
-        // The rebuilt WAV declares neither its RIFF length nor its data length; see WaveFile.
-        if (extension == "wav") data = WaveFile.WithLengthsFilledIn(data!);
+        // Anything the library can hand back in its own container — Vorbis as an Ogg — is written
+        // out that way, since a clip the game already holds compressed gains nothing from being
+        // decoded on the way out. Everything that would have become a WAV goes through the same
+        // decoding the preview uses instead, which for ADPCM is ours rather than the library's.
+        // See FsbAdpcm for why that matters.
+        if (bank.Header.AudioType != FmodAudioType.IMAADPCM
+            && sample.RebuildAsStandardFileFormat(out var rebuilt, out var extension)
+            && rebuilt is not null && extension != "wav")
+        {
+            var asIs = $"{stem}.{extension}";
+            File.WriteAllBytes(asIs, rebuilt);
+            return new ExportedAsset(asIs, AssetClassID.AudioClip, "", extension!, rebuilt.Length, Placeholder);
+        }
 
-        var path = $"{stem}.{extension}";
-        File.WriteAllBytes(path, data!);
-        return new ExportedAsset(path, AssetClassID.AudioClip, "", extension!, data!.Length, Placeholder);
+        if (FsbSound.Read(sample, bank.Header) is not { } sound) return null;
+
+        var data = WaveFile.Write(sound);
+        var path = $"{stem}.wav";
+        File.WriteAllBytes(path, data);
+        return new ExportedAsset(path, AssetClassID.AudioClip, "", "wav", data.Length, Placeholder);
     }
 
     /// Payload bytes either sit inline on the object or in a stream entry it points at.
