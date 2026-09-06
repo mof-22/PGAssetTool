@@ -43,6 +43,13 @@
                     IsVisible="{Binding HasMesh}" HorizontalAlignment="Stretch" Margin="0,0,0,4" />
           <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
                     IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
+          <!-- Nothing plays until asked: moving down a weapon's six sounds would otherwise set six
+               of them off. -->
+          <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasSound}"
+                      Margin="0,0,0,4">
+            <Button Content="▶  Play" Command="{Binding PlayCommand}" />
+            <Button Content="■" Command="{Binding SilenceCommand}" ToolTip.Tip="Stop" />
+          </StackPanel>
           <TextBlock Text="{Binding Caption}" Classes="dim mono" TextWrapping="Wrap" />
         </StackPanel>
       
@@ -73,6 +80,9 @@
       
             <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
                           IsVisible="{Binding HasMesh}" />
+
+            <ctl:WaveformView Sound="{Binding Sound}" IsVisible="{Binding HasSound}"
+                              Margin="12" />
           </Panel>
         </Border>
       </DockPanel>

@@ -12,11 +12,10 @@ public static class SoundFile
 {
     public static IReadOnlyList<string> Extensions { get; } = ["wav", "mp3", "ogg"];
 
-    public static PcmSound Read(string path)
-    {
-        var raw = File.ReadAllBytes(path);
-        var what = Path.GetFileName(path);
+    public static PcmSound Read(string path) => Parse(File.ReadAllBytes(path), Path.GetFileName(path));
 
+    public static PcmSound Parse(byte[] raw, string what)
+    {
         return Magic(raw) switch
         {
             "RIFF" => WaveFile.Parse(raw, what),

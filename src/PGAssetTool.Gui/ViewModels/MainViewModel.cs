@@ -597,7 +597,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private async void ShowPreview(TreeNode? node)
     {
-        if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh))
+        if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh or AssetClassID.AudioClip))
         {
             Preview.Clear(node?.Class is null ? null : $"No preview for {node.Class}.");
             return;
@@ -622,9 +622,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     var field = _bundles!.Context.Deserialize(file, info);
                     if (field is null) return null;
 
-                    return node.Class == AssetClassID.Texture2D
-                        ? AssetPreview.Texture(_bundles, node.Bundle, field)
-                        : AssetPreview.Mesh(field);
+                    return node.Class switch
+                    {
+                        AssetClassID.Texture2D => AssetPreview.Texture(_bundles, node.Bundle, field),
+                        AssetClassID.AudioClip => AssetPreview.Audio(_bundles, node.Bundle, field),
+                        _ => AssetPreview.Mesh(field),
+                    };
                 });
 
                 switch (loaded)
@@ -634,6 +637,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         break;
                     case UnityMesh mesh:
                         Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(node.PathId));
+                        break;
+                    case PreviewSound sound:
+                        Preview.Show(sound, $"{node.Label}   @ {node.Bundle}");
                         break;
                     default:
                         Preview.Clear(_bundles!.Context.HasClassDatabase || !node.Bundle.Contains('.')

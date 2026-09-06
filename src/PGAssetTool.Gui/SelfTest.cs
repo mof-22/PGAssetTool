@@ -140,7 +140,7 @@ internal static class SelfTest
 
             // The previews are the half of the GUI a self-test can still check: decoding a texture
             // and unpacking a mesh happen in the core, and only the drawing needs a window.
-            foreach (var want in new[] { AssetClassID.Texture2D, AssetClassID.Mesh })
+            foreach (var want in new[] { AssetClassID.Texture2D, AssetClassID.Mesh, AssetClassID.AudioClip })
             {
                 var node = detail.Roots
                     .SelectMany(r => r.Children)
@@ -161,6 +161,26 @@ internal static class SelfTest
                 // alpha — emission, usually — so honouring it would punch holes in the picture.
                 if (want == AssetClassID.Texture2D && model.Preview.ShowAlpha)
                     return Fail($"'{node.Label}' is a model texture and was shown with alpha honoured");
+
+                if (want == AssetClassID.AudioClip && model.Preview.Sound is { } clip)
+                {
+                    // The envelope is what the pane draws; a clip that decodes to silence would
+                    // otherwise look like a working preview of a flat line.
+                    var envelope = clip.Envelope(320);
+                    var loudest = envelope.Max(c => Math.Max(Math.Abs(c.Low), Math.Abs(c.High)));
+                    Console.WriteLine($"         {clip.Frames:N0} frames, peak {loudest:0.00}, "
+                        + $"{clip.ToWave().Length:N0} bytes as a wave");
+
+                    if (clip.Frames == 0) return Fail($"'{node.Label}' decoded to no audio at all");
+                    if (loudest <= 0) return Fail($"'{node.Label}' decoded to silence");
+
+                    // What the player is handed has to be a wave Windows will take; the exporter
+                    // used to produce one that declared itself empty.
+                    var wave = clip.ToWave();
+                    var again = PGAssetTool.Core.Import.Audio.WaveFile.Parse(wave, "the preview");
+                    if (again.Frames != clip.Frames)
+                        return Fail($"the wave handed to the player holds {again.Frames} of {clip.Frames} frames");
+                }
 
                 if (want == AssetClassID.Mesh && model.Preview.Mesh is { } mesh)
                 {
@@ -365,15 +385,15 @@ internal static class SelfTest
             // Renamed before anything is built from it, folder and manifest both. Left alone this
             // pack would be called "Hitman Pistol", built into 0016_Beretta.pgmod and filed in the
             // mods folder beside a real mod of the same weapon — twenty of them accumulated there
-            // before anyone looked. Under its own name it is obvious, and it can only remove its
-            // own. The rename is the editor's own, so this exercises it too.
-            var written = PGAssetTool.Core.Pack.Workspace.Rename(exported, PackFolder);
-            var manifest = Path.Combine(written, PGAssetTool.Core.Pack.PackManifest.FileName);
+            // before anyone looked. Under its own name it is obvious, and it can only remove its own.
+            //
+            // Through the editor rather than around it: renaming the directory underneath a live
+            // file watcher is refused by Windows, and the editor is what knows to put the watcher
+            // down first. So this is also the test of that.
+            var written = Rename(model, exported, PackFolder, PackName, PackIdentity);
+            if (written is null) return Fail($"the workspace could not be renamed: {model.Editor.Status}");
 
-            var identified = PGAssetTool.Core.Pack.Workspace.Read(written)
-                with { Id = PackIdentity, Name = PackName };
-            File.WriteAllText(manifest, identified.ToJson());
-
+            var identified = PGAssetTool.Core.Pack.Workspace.Read(written);
             var operations = identified.Operations;
             Console.WriteLine($"extract  {operations.Count} replaceable files across "
                 + $"{operations.Select(o => o.Target.Container).Distinct().Count()} bundles");
@@ -737,6 +757,36 @@ internal static class SelfTest
         return null;
     }
 
+    /// Renames a workspace and re-labels its manifest, the way the editor's form does.
+    ///
+    /// The id is set here rather than through the form, which deliberately does not offer it: the
+    /// ledger keys an installed mod by it, so changing it in the window would turn an update into a
+    /// second copy. This test needs its own, which is a different thing from an author needing one.
+    private static string? Rename(
+        MainViewModel model, string directory, string folder, string name, string id)
+    {
+        model.Editor.Rescan(model.WorkspaceRoot);
+
+        var full = Path.GetFullPath(directory);
+        model.Editor.SelectedWorkspace = model.Editor.Workspaces.FirstOrDefault(
+            w => string.Equals(Path.GetFullPath(w.Directory), full, StringComparison.OrdinalIgnoreCase));
+        if (model.Editor.SelectedWorkspace is null) return null;
+
+        model.Editor.FolderName = folder;
+        model.Editor.PackName = name;
+        model.Editor.ApplyDetailsCommand.Execute(null);
+
+        if (model.Editor.SelectedWorkspace is not { } moved) return null;
+        if (!string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(moved.Directory)), folder,
+                StringComparison.Ordinal))
+            return null;
+
+        var renamed = Path.GetFullPath(Path.TrimEndingDirectorySeparator(moved.Directory));
+        PGAssetTool.Core.Pack.Workspace.Save(
+            renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
+        return renamed;
+    }
+
     /// Extracts another weapon under this test's own name, with one file edited so there is
     /// something to pack. Answers where it landed, or null when a step of that fell short.
     private static string? SecondWorkspace(
@@ -748,9 +798,8 @@ internal static class SelfTest
         WaitWhile(() => model.Busy, 120_000);
         if (model.LastExport is not { } exported || !Directory.Exists(exported)) return null;
 
-        var directory = PGAssetTool.Core.Pack.Workspace.Rename(exported, folder);
-        var manifest = PGAssetTool.Core.Pack.Workspace.Read(directory) with { Id = id, Name = name };
-        PGAssetTool.Core.Pack.Workspace.Save(directory, manifest);
+        if (Rename(model, exported, folder, name, id) is not { } directory) return null;
+        var manifest = PGAssetTool.Core.Pack.Workspace.Read(directory);
 
         // Packing keeps only what differs from the export, so an untouched workspace packs nothing.
         var texture = manifest.Operations.FirstOrDefault(o => o.Source.EndsWith(".png"));

@@ -3,6 +3,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Preview;
 
@@ -31,6 +32,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     [ObservableProperty] private Bitmap? _image;
     [ObservableProperty] private UnityMesh? _mesh;
+    [ObservableProperty] private PreviewSound? _sound;
 
     /// One per submesh, resolved from the materials the renderer drawing this mesh holds.
     [ObservableProperty] private IReadOnlyList<PreviewImage?>? _meshTextures;
@@ -41,7 +43,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     [ObservableProperty] private TextureChoice? _chosenTexture;
     [ObservableProperty] private string _caption = "";
-    [ObservableProperty] private string? _nothing = "Select a texture or a mesh.";
+    [ObservableProperty] private string? _nothing = "Select a texture, a mesh or a sound.";
 
     /// Whether the alpha channel is being honoured.
     ///
@@ -54,7 +56,20 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     public bool HasImage => Image is not null;
     public bool HasMesh => Mesh is not null;
+    public bool HasSound => Sound is not null;
     public bool CanToggleAlpha => _picture is not null;
+
+    /// Plays the clip through the speakers. Only one plays at a time; see Speaker.
+    [RelayCommand]
+    private void Play()
+    {
+        if (Sound is not { } sound) return;
+        try { Audio.Speaker.Play(sound.ToWave()); }
+        catch (Exception ex) { Caption = $"{ex.Message}  (while playing the clip)"; }
+    }
+
+    [RelayCommand]
+    private static void Silence() => Audio.Speaker.Stop();
 
     partial void OnShowAlphaChanged(bool value)
     {
@@ -68,8 +83,23 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Image?.Dispose();
         Image = null;
         Mesh = null;
+        Sound = null;
         Caption = "";
-        Nothing = why ?? "Select a texture or a mesh.";
+        Nothing = why ?? "Select a texture, a mesh or a sound.";
+        Changed();
+    }
+
+    /// A clip, drawn as its envelope and playable. Nothing starts playing on its own: moving down a
+    /// weapon's six sounds would otherwise mean six of them going off unasked.
+    public void Show(PreviewSound sound, string caption)
+    {
+        _picture = null;
+        Image?.Dispose();
+        Image = null;
+        Mesh = null;
+        Sound = sound;
+        Caption = $"{caption}   {sound.Describe}";
+        Nothing = null;
         Changed();
     }
 
@@ -77,6 +107,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     {
         _picture = picture;
         Mesh = null;
+        Sound = null;
         Caption = $"{caption}   {picture.Width}×{picture.Height}";
         Nothing = null;
 
@@ -96,6 +127,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures)
     {
         _picture = null;
+        Sound = null;
         _automatic = textures;
         Image?.Dispose();
         Image = null;
@@ -133,6 +165,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     {
         OnPropertyChanged(nameof(HasImage));
         OnPropertyChanged(nameof(HasMesh));
+        OnPropertyChanged(nameof(HasSound));
         OnPropertyChanged(nameof(CanToggleAlpha));
     }
 

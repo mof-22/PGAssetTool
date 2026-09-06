@@ -268,6 +268,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         {
             AssetClassID.Texture2D => AssetPreview.Texture(bundles, file.Target.Container, field),
             AssetClassID.Mesh => AssetPreview.Mesh(field),
+            AssetClassID.AudioClip => AssetPreview.Audio(bundles, file.Target.Container, field),
             _ => null,
         };
     }
@@ -278,6 +279,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         {
             case PreviewImage picture: preview.Show(picture, caption, alphaIsCoverage); break;
             case UnityMesh mesh: preview.Show(mesh, caption, null); break;
+            case PreviewSound sound: preview.Show(sound, caption); break;
             default: preview.Clear("Nothing to show for this one."); break;
         }
     }

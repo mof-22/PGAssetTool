@@ -66,6 +66,32 @@ public static class WaveFile
         return new PcmSound(Narrow(raw.AsSpan(dataAt, dataLength), format, bits, what), channels, frequency);
     }
 
+    /// The sound as a RIFF file: the one format Windows will play from memory without help.
+    public static byte[] Write(PcmSound sound)
+    {
+        var data = sound.Samples.Length * sizeof(short);
+        var file = new byte[44 + data];
+        var at = file.AsSpan();
+
+        "RIFF"u8.CopyTo(at);
+        BinaryPrimitives.WriteInt32LittleEndian(at[4..], 36 + data);
+        "WAVEfmt "u8.CopyTo(at[8..]);
+        BinaryPrimitives.WriteInt32LittleEndian(at[16..], 16);
+        BinaryPrimitives.WriteUInt16LittleEndian(at[20..], Pcm);
+        BinaryPrimitives.WriteUInt16LittleEndian(at[22..], (ushort)sound.Channels);
+        BinaryPrimitives.WriteInt32LittleEndian(at[24..], sound.Frequency);
+        BinaryPrimitives.WriteInt32LittleEndian(at[28..], sound.Frequency * sound.Channels * sizeof(short));
+        BinaryPrimitives.WriteUInt16LittleEndian(at[32..], (ushort)(sound.Channels * sizeof(short)));
+        BinaryPrimitives.WriteUInt16LittleEndian(at[34..], 16);
+        "data"u8.CopyTo(at[36..]);
+        BinaryPrimitives.WriteInt32LittleEndian(at[40..], data);
+
+        for (var i = 0; i < sound.Samples.Length; i++)
+            BinaryPrimitives.WriteInt16LittleEndian(at[(44 + i * 2)..], sound.Samples[i]);
+
+        return file;
+    }
+
     /// Fills in the two length fields a RIFF header carries, in place, when they were left at zero.
     ///
     /// Fmod5Sharp rebuilds a sample by writing the header first and the audio after it, and never

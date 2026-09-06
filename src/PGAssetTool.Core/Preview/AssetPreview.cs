@@ -89,6 +89,43 @@ public static class AssetPreview
         return path is null ? null : bundles.Context.OpenSerializedFile(path);
     }
 
+    /// An AudioClip, decoded from the FMOD bank its bytes actually live in.
+    ///
+    /// The clip object holds nothing but a pointer into a sibling .resource; the bank there is FSB5,
+    /// and the clips inside it are PCM or Vorbis depending on the sound. Fmod5Sharp rebuilds one as
+    /// a WAV or an Ogg, and from there it is the same decoding path a replacement takes on the way
+    /// in — so a clip that previews wrong is one that would have been packed wrong.
+    public static PreviewSound? Audio(BundleSet bundles, string bundle, AssetTypeValueField field)
+    {
+        var resource = field["m_Resource"];
+        if (resource.IsDummy) return null;
+
+        var payload = bundles.ReadResource(
+            bundle, resource["m_Source"].AsString, resource["m_Offset"].AsLong, resource["m_Size"].AsLong);
+
+        return Audio(payload);
+    }
+
+    /// <param name="bank">An FSB5 bank, as it sits in the bundle's .resource entry.</param>
+    public static PreviewSound? Audio(byte[] bank)
+    {
+        try
+        {
+            if (!Fmod5Sharp.FsbLoader.TryLoadFsbFromByteArray(bank, out var loaded) || loaded is null) return null;
+            if (loaded.Samples.FirstOrDefault() is not { } sample) return null;
+            if (!sample.RebuildAsStandardFileFormat(out var data, out var extension)) return null;
+
+            // The rebuilder leaves a WAV's lengths at zero; see WaveFile.
+            if (extension == "wav") data = Import.Audio.WaveFile.WithLengthsFilledIn(data!);
+
+            return new PreviewSound(Import.Audio.SoundFile.Parse(data!, $"a {extension} clip"));
+        }
+        catch (Exception e) when (e is InvalidDataException or NotSupportedException or IndexOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
     public static UnityMesh? Mesh(AssetTypeValueField field)
     {
         try
@@ -116,6 +153,7 @@ public static class AssetPreview
             {
                 "png" or "jpg" or "jpeg" or "bmp" or "tga" => Picture(path),
                 "glb" or "gltf" => Import.Meshes.GltfMeshReader.Read(path),
+                "wav" or "mp3" or "ogg" => new PreviewSound(Import.Audio.SoundFile.Read(path)),
                 _ => null,
             };
         }
