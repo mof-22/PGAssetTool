@@ -4,7 +4,7 @@ namespace PGAssetTool.Core.Preview;
 
 /// How the model is being looked at. Angles are radians; distance is a multiple of the model's own
 /// radius, so a pistol and a rocket launcher both start out filling the frame.
-public sealed record Camera(float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1.5f)
+public sealed record Camera(float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1.5f, float Roll = 0f)
 {
     public Camera Turned(float dYaw, float dPitch) => this with
     {
@@ -14,6 +14,14 @@ public sealed record Camera(float Yaw = 0.7f, float Pitch = 0.35f, float Distanc
         // are parallel and the frame cannot be built.
         Pitch = Math.Clamp(Pitch + dPitch, -1.55f, 1.55f),
     };
+
+    /// Tilts the model in the plane of the screen.
+    ///
+    /// Yaw and pitch orbit the camera, which covers two of the three ways an object can be turned;
+    /// this is the third. Without it a weapon can be looked at from any side but never straightened,
+    /// and the automatic uprighting has to be right for every model in the game because nothing can
+    /// correct it by hand.
+    public Camera Rolled(float dRoll) => this with { Roll = Roll + dRoll };
 
     public Camera Zoomed(float factor) => this with { Distance = Math.Clamp(Distance * factor, 0.4f, 20f) };
 }
@@ -268,6 +276,16 @@ public static class MeshRenderer
         var (fx, fy, fz) = (cp * sy, sp, cp * cy);
         var (rx, ry, rz) = (cy, 0f, -sy);
         var (ux, uy, uz) = (fy * rz - fz * ry, fz * rx - fx * rz, fx * ry - fy * rx);
+
+        // Roll turns the frame about the direction it already looks along, so the model tilts in
+        // the plane of the screen and nothing about which side is facing you changes.
+        if (camera.Roll != 0)
+        {
+            var (cr, sr) = (MathF.Cos(camera.Roll), MathF.Sin(camera.Roll));
+            (rx, ry, rz, ux, uy, uz) = (
+                rx * cr + ux * sr, ry * cr + uy * sr, rz * cr + uz * sr,
+                ux * cr - rx * sr, uy * cr - ry * sr, uz * cr - rz * sr);
+        }
 
         return new Basis(rx, ry, rz, ux, uy, uz, fx, fy, fz);
     }

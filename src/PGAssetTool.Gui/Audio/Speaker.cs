@@ -22,16 +22,30 @@ public static class Speaker
     /// clip starts or playing stops, which is also what keeps two clips from overlapping.
     private static GCHandle _pinned;
 
-    public static void Play(byte[] wave)
+    /// When the clip that is playing runs out.
+    ///
+    /// PlaySound does not say whether it is still going, and asking Windows would mean the much
+    /// larger waveOut interface. The length of the clip is already known, so the end is arithmetic:
+    /// good enough for a key that means "play, or stop if it is still playing", and wrong only in
+    /// the moment either answer would do.
+    private static DateTime _until = DateTime.MinValue;
+
+    public static bool IsPlaying => DateTime.UtcNow < _until;
+
+    public static void Play(byte[] wave, TimeSpan length)
     {
         Stop();
         _pinned = GCHandle.Alloc(wave, GCHandleType.Pinned);
-        if (!PlaySound(_pinned.AddrOfPinnedObject(), IntPtr.Zero, Memory | Async | NoDefault)) Stop();
+        if (PlaySound(_pinned.AddrOfPinnedObject(), IntPtr.Zero, Memory | Async | NoDefault))
+            _until = DateTime.UtcNow + length;
+        else
+            Stop();
     }
 
     public static void Stop()
     {
         PlaySound(IntPtr.Zero, IntPtr.Zero, 0);
         if (_pinned.IsAllocated) _pinned.Free();
+        _until = DateTime.MinValue;
     }
 }

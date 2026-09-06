@@ -56,6 +56,15 @@ public sealed class MeshView : Control
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
+        // The middle button puts it back where it started. A tilt is easy to lose track of, and
+        // hunting the way back to square by hand is worse than the tilt was useful.
+        if (e.GetCurrentPoint(this).Properties.IsMiddleButtonPressed)
+        {
+            _camera = new Camera();
+            InvalidateVisual();
+            return;
+        }
+
         _dragging = e.GetPosition(this);
         e.Pointer.Capture(this);
     }
@@ -65,6 +74,16 @@ public sealed class MeshView : Control
         if (_dragging is not { } from) return;
         var to = e.GetPosition(this);
         _dragging = to;
+
+        // Shift tilts the model in the plane of the screen instead of turning it. A modifier rather
+        // than a mode: the ordinary drag keeps working exactly as it did, and this is the third way
+        // of turning something, which orbiting alone cannot reach.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            _camera = _camera.Rolled((float)((to.X - from.X) * 0.01));
+            InvalidateVisual();
+            return;
+        }
 
         // Dragging takes the model with it: cursor right turns the near face right. The opposite
         // convention — moving the camera instead — reads as the model going the wrong way.

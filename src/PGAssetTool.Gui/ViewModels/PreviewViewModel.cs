@@ -64,12 +64,19 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     private void Play()
     {
         if (Sound is not { } sound) return;
-        try { Audio.Speaker.Play(sound.ToWave()); }
+        try { Audio.Speaker.Play(sound.ToWave(), TimeSpan.FromSeconds(sound.Seconds)); }
         catch (Exception ex) { Caption = $"{ex.Message}  (while playing the clip)"; }
     }
 
     [RelayCommand]
     private static void Silence() => Audio.Speaker.Stop();
+
+    /// What the space bar does: start it, or stop it if it is still going.
+    public void PlayOrStop()
+    {
+        if (Audio.Speaker.IsPlaying) Audio.Speaker.Stop();
+        else Play();
+    }
 
     partial void OnShowAlphaChanged(bool value)
     {

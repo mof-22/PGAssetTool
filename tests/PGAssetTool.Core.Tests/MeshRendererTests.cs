@@ -397,4 +397,52 @@ public class MeshRendererTests
 
         Assert.True(Covered(target.Bgra) > 0);
     }
+
+    [Fact]
+    public void RollTiltsTheModelInThePlaneOfTheScreen()
+    {
+        // A bar lying across the screen, rolled a quarter turn, has to end up standing up it —
+        // and nothing about which side faces the viewer may change, which is what separates this
+        // from turning the camera.
+        var bar = Mesh([-1, -0.1f, 0, 1, -0.1f, 0, 1, 0.1f, 0, -1, 0.1f, 0], [0, 1, 2, 0, 2, 3]);
+
+        var flat = Draw(bar, new Camera(Yaw: 0, Pitch: 0));
+        var tilted = Draw(bar, new Camera(Yaw: 0, Pitch: 0).Rolled(MathF.PI / 2));
+
+        Assert.NotNull(At(flat, Size / 2, Size / 2));
+        Assert.NotNull(At(tilted, Size / 2, Size / 2));
+
+        // Wide before, tall after: measured rather than assumed, because a roll applied to the
+        // wrong pair of axes still draws something and still looks plausible in one frame.
+        Assert.True(Width(flat) > Height(flat), "the bar was not drawn lying down to begin with");
+        Assert.True(Height(tilted) > Width(tilted), "rolling it a quarter turn did not stand it up");
+    }
+
+    [Fact]
+    public void AFullTurnOfRollComesBackToWhereItStarted()
+    {
+        var bar = Mesh([-1, -0.1f, 0, 1, -0.1f, 0, 1, 0.1f, 0, -1, 0.1f, 0], [0, 1, 2, 0, 2, 3]);
+
+        Assert.Equal(
+            Covered(Draw(bar, new Camera(Yaw: 0.4f, Pitch: 0.2f))),
+            Covered(Draw(bar, new Camera(Yaw: 0.4f, Pitch: 0.2f).Rolled(MathF.Tau))),
+            tolerance: 4);
+    }
+
+    private static int Width(byte[] pixels) => Extent(pixels, horizontal: true);
+    private static int Height(byte[] pixels) => Extent(pixels, horizontal: false);
+
+    private static int Extent(byte[] pixels, bool horizontal)
+    {
+        int low = Size, high = -1;
+        for (var y = 0; y < Size; y++)
+            for (var x = 0; x < Size; x++)
+            {
+                if (At(pixels, x, y) is null) continue;
+                var along = horizontal ? x : y;
+                low = Math.Min(low, along);
+                high = Math.Max(high, along);
+            }
+        return high < low ? 0 : high - low + 1;
+    }
 }

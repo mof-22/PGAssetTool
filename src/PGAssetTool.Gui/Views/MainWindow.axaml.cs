@@ -19,6 +19,12 @@ public partial class MainWindow : Window
         // fold it away.
         AddHandler(InputElement.TappedEvent, OnTapped, RoutingStrategies.Bubble);
 
+        // Space plays the clip in front of you. Not a menu shortcut: registering it as one would
+        // take the space bar away from the search box and from every button that a keyboard user
+        // presses with it. Tunnelled so it is seen before a focused control acts on it, and given
+        // straight back whenever typing is what space means.
+        AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+
         // Everything else the menu does is a command on the model. Focus is the exception: the
         // control belongs to the view, so the model only reports that someone asked for it.
         DataContextChanged += (_, _) =>
@@ -38,6 +44,16 @@ public partial class MainWindow : Window
 
         var row = control.FindAncestorOfType<TreeViewItem>();
         if (row?.DataContext is TreeNode { HasChildren: true } node) node.IsExpanded = !node.IsExpanded;
+    }
+
+    private void OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Space || e.KeyModifiers != KeyModifiers.None) return;
+        if (FocusManager?.GetFocusedElement() is TextBox) return;
+        if (DataContext is not MainViewModel model || model.Showing is not { HasSound: true } preview) return;
+
+        preview.PlayOrStop();
+        e.Handled = true;
     }
 
     private void FocusSearch() => this.FindControl<TextBox>("Search")?.Focus();

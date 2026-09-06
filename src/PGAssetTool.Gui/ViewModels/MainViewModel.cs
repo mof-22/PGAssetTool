@@ -469,6 +469,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public const int EditorTab = 1;
     public const int ManagerTab = 2;
 
+    /// The pane a key press means, which depends on which workspace is showing.
+    public PreviewViewModel? Showing => Workspace switch
+    {
+        BrowseTab => Preview,
+        EditorTab => Editor.Shown,
+        _ => null,
+    };
+
     partial void OnOpaqueTexturesChanged(bool value) => Remember();
 
     // Typed rather than picked, so it lands here on every keystroke. The file is a few hundred
