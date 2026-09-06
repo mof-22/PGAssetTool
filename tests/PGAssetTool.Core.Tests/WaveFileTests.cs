@@ -133,4 +133,53 @@ public class WaveFileTests
     public void SomethingThatIsNotAWavIsRejectedByName()
         => Assert.Contains("beep.mp3",
             Assert.Throws<InvalidDataException>(() => WaveFile.Parse([1, 2, 3, 4], "beep.mp3")).Message);
+
+    /// A header whose lengths were never patched: what FMOD's rebuilder hands back.
+    private static byte[] Unfinished(byte[] data)
+    {
+        var file = new MemoryStream();
+        file.Write("RIFF"u8);
+        file.Write(new byte[4]);                       // never filled in
+        file.Write("WAVE"u8);
+        file.Write("fmt "u8);
+        file.Write(BitConverter.GetBytes(16));
+        var fmt = new byte[16];
+        BinaryPrimitives.WriteUInt16LittleEndian(fmt, 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(fmt.AsSpan(2), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(fmt.AsSpan(4), 31000);
+        BinaryPrimitives.WriteUInt16LittleEndian(fmt.AsSpan(14), 16);
+        file.Write(fmt);
+        file.Write("data"u8);
+        file.Write(new byte[4]);                       // never filled in either
+        file.Write(data);
+        return file.ToArray();
+    }
+
+    [Fact]
+    public void AZeroLengthDataChunkIsReadToTheEndRatherThanAsSilence()
+    {
+        // Taking that zero at its word turns every exported sound into an empty one, which packs
+        // and applies and plays nothing.
+        var wave = WaveFile.Parse(Unfinished(Pcm16(5, -5, 100)), "shoot.wav");
+
+        Assert.Equal([5, -5, 100], wave.Samples);
+        Assert.Equal(31000, wave.Frequency);
+    }
+
+    [Fact]
+    public void FillingInTheLengthsMakesTheHeaderSayWhatTheFileHolds()
+    {
+        var fixedUp = WaveFile.WithLengthsFilledIn(Unfinished(Pcm16(1, 2, 3, 4)));
+
+        Assert.Equal(fixedUp.Length - 8, BinaryPrimitives.ReadInt32LittleEndian(fixedUp.AsSpan(4)));
+        Assert.Equal(8, BinaryPrimitives.ReadInt32LittleEndian(fixedUp.AsSpan(40)));   // four 16-bit samples
+        Assert.Equal([1, 2, 3, 4], WaveFile.Parse(fixedUp, "t").Samples);
+    }
+
+    [Fact]
+    public void AHeaderThatAlreadyStatesItsLengthsIsLeftAlone()
+    {
+        var wav = Wav(1, 16, 1, 44100, Pcm16(9, 9));
+        Assert.Equal(wav, WaveFile.WithLengthsFilledIn((byte[])wav.Clone()));
+    }
 }

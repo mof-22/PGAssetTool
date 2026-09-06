@@ -31,6 +31,11 @@ public static class WaveFile
             var size = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(at + 4));
             if (size < 0 || at + 8 + size > raw.Length) size = raw.Length - at - 8;
 
+            // A writer that streamed its output and never went back to patch the header leaves this
+            // at zero. Fmod5Sharp does exactly that, so a WAV rebuilt from a bank claims to hold no
+            // audio at all — which is silence rather than a refusal, and worth stepping around.
+            if (id == "data" && size == 0) size = raw.Length - at - 8;
+
             if (id == "fmt " && size >= 16)
             {
                 format = BinaryPrimitives.ReadUInt16LittleEndian(raw.AsSpan(at + 8));
@@ -59,6 +64,35 @@ public static class WaveFile
                 $"'{what}' is compressed (WAV format tag {format}). Save it as uncompressed PCM.");
 
         return new PcmSound(Narrow(raw.AsSpan(dataAt, dataLength), format, bits, what), channels, frequency);
+    }
+
+    /// Fills in the two length fields a RIFF header carries, in place, when they were left at zero.
+    ///
+    /// Fmod5Sharp rebuilds a sample by writing the header first and the audio after it, and never
+    /// returns to say how much it wrote. A player that seeks by those lengths — Windows Media Player
+    /// does — then finds a file that declares itself empty and plays nothing, while one that reads
+    /// to the end of the stream, like VLC, never notices. Only zeroes are touched, so a file that
+    /// already states its lengths is returned exactly as it came.
+    public static byte[] WithLengthsFilledIn(byte[] wav)
+    {
+        if (wav.Length < 12 || !wav.AsSpan(0, 4).SequenceEqual("RIFF"u8)) return wav;
+
+        if (BinaryPrimitives.ReadInt32LittleEndian(wav.AsSpan(4)) == 0)
+            BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(4), wav.Length - 8);
+
+        for (var at = 12; at + 8 <= wav.Length;)
+        {
+            var size = BinaryPrimitives.ReadInt32LittleEndian(wav.AsSpan(at + 4));
+            if (wav.AsSpan(at, 4).SequenceEqual("data"u8) && size == 0)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(wav.AsSpan(at + 4), wav.Length - at - 8);
+                return wav;
+            }
+
+            if (size <= 0 || at + 8 + size > wav.Length) return wav;
+            at += 8 + size + (size & 1);
+        }
+        return wav;
     }
 
     private static short[] Narrow(ReadOnlySpan<byte> data, int format, int bits, string what)

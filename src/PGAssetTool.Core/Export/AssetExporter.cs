@@ -4,6 +4,7 @@ using AssetsTools.NET.Texture;
 using Fmod5Sharp;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Export.Meshes;
+using PGAssetTool.Core.Import.Audio;
 
 namespace PGAssetTool.Core.Export;
 
@@ -165,6 +166,9 @@ public sealed class AssetExporter(BundleSet bundles)
         if (!FsbLoader.TryLoadFsbFromByteArray(payload, out var bank) || bank is null) return null;
         var sample = bank.Samples.FirstOrDefault();
         if (sample is null || !sample.RebuildAsStandardFileFormat(out var data, out var extension)) return null;
+
+        // The rebuilt WAV declares neither its RIFF length nor its data length; see WaveFile.
+        if (extension == "wav") data = WaveFile.WithLengthsFilledIn(data!);
 
         var path = $"{stem}.{extension}";
         File.WriteAllBytes(path, data!);
