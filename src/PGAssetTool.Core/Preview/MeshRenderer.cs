@@ -4,8 +4,18 @@ namespace PGAssetTool.Core.Preview;
 
 /// How the model is being looked at. Angles are radians; distance is a multiple of the model's own
 /// radius, so a pistol and a rocket launcher both start out filling the frame.
-public sealed record Camera(float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1.5f, float Roll = 0f)
+/// <param name="PanX">
+/// Where the model sits in the frame, as a fraction of the half-frame: 0 is centred, 1 is a half
+/// frame to the right. Kept in those units rather than in pixels so a resized pane keeps the model
+/// where it was put, and so zooming in on the muzzle of a rocket launcher does not have to be
+/// redone after every drag.
+/// </param>
+public sealed record Camera(
+    float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1.5f, float Roll = 0f,
+    float PanX = 0f, float PanY = 0f)
 {
+    public Camera Panned(float dx, float dy) => this with { PanX = PanX + dx, PanY = PanY + dy };
+
     public Camera Turned(float dYaw, float dPitch) => this with
     {
         Yaw = Yaw + dYaw,
@@ -88,6 +98,12 @@ public static class MeshRenderer
         // Distance is literally how many model radii the half-frame covers, so 1.5 leaves a margin.
         var scale = Math.Min(width, height) * 0.5f / (radius * camera.Distance);
 
+        // Panning moves where the middle of the model lands, in half-frames, so it survives a
+        // resize and does not have to be redone every time the pane changes size.
+        var half = Math.Min(width, height) * 0.5f;
+        var centreX = width * 0.5f + camera.PanX * half;
+        var centreY = height * 0.5f - camera.PanY * half;
+
         var depth = target.Depth;
         Array.Fill(depth, float.NegativeInfinity);
 
@@ -124,8 +140,8 @@ public static class MeshRenderer
                         positions[vertex * 3 + 2] - centre.Z);
                     var (x, y, z) = view.Apply(mx, my, mz);
 
-                    sx[corner] = width * 0.5f + x * scale;
-                    sy[corner] = height * 0.5f - y * scale;
+                    sx[corner] = centreX + x * scale;
+                    sy[corner] = centreY - y * scale;
                     sz[corner] = z;
 
                     shade[corner] = normals is null ? 1f : Lambert(view, upright, normals, vertex);

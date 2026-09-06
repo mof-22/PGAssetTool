@@ -48,12 +48,31 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Space || e.KeyModifiers != KeyModifiers.None) return;
-        if (FocusManager?.GetFocusedElement() is TextBox) return;
-        if (DataContext is not MainViewModel model || model.Showing is not { HasSound: true } preview) return;
+        if (e.KeyModifiers != KeyModifiers.None) return;
 
-        preview.PlayOrStop();
-        e.Handled = true;
+        // Whatever the key means to something being typed into, it means that. Both of these are
+        // bare letters and a space, which is exactly what a search box is for.
+        if (FocusManager?.GetFocusedElement() is TextBox) return;
+        if (DataContext is not MainViewModel model) return;
+
+        switch (e.Key)
+        {
+            case Key.Space when model.Showing is { HasSound: true } preview:
+                preview.PlayOrStop();
+                e.Handled = true;
+                break;
+
+            // Every model pane on the page, because both halves of the editor's comparison show
+            // one and straightening only the half that happens to be in front would leave the two
+            // at different angles — which is the one thing that comparison exists to avoid.
+            case Key.R:
+                foreach (var view in this.GetVisualDescendants().OfType<Controls.MeshView>())
+                {
+                    view.Recentre();
+                    e.Handled = true;
+                }
+                break;
+        }
     }
 
     private void FocusSearch() => this.FindControl<TextBox>("Search")?.Focus();

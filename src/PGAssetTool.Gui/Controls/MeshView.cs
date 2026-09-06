@@ -49,22 +49,24 @@ public sealed class MeshView : Control
         {
             // A new model gets a fresh viewpoint; keeping the old one leaves the next mesh at
             // whatever angle happened to suit the last.
-            view._camera = new Camera();
-            view.InvalidateVisual();
+            view.Recentre();
         });
+    }
+
+    /// Set while the middle button is down, which pans instead of turning.
+    private bool _panning;
+
+    /// Puts the view back to square. A tilt or a pan is easy to lose track of, and hunting the way
+    /// back by hand is worse than either was useful.
+    public void Recentre()
+    {
+        _camera = new Camera();
+        InvalidateVisual();
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
-        // The middle button puts it back where it started. A tilt is easy to lose track of, and
-        // hunting the way back to square by hand is worse than the tilt was useful.
-        if (e.GetCurrentPoint(this).Properties.IsMiddleButtonPressed)
-        {
-            _camera = new Camera();
-            InvalidateVisual();
-            return;
-        }
-
+        _panning = e.GetCurrentPoint(this).Properties.IsMiddleButtonPressed;
         _dragging = e.GetPosition(this);
         e.Pointer.Capture(this);
     }
@@ -74,6 +76,18 @@ public sealed class MeshView : Control
         if (_dragging is not { } from) return;
         var to = e.GetPosition(this);
         _dragging = to;
+
+        // The middle button drags the model around the frame, as it does in the modelling tools
+        // this sits beside. Zooming in on the muzzle of a rocket launcher is otherwise impossible:
+        // the view is centred on the whole model and only the middle of it can be reached.
+        if (_panning)
+        {
+            var half = Math.Min(Bounds.Width, Bounds.Height) * 0.5;
+            if (half > 0)
+                _camera = _camera.Panned((float)((to.X - from.X) / half), (float)((from.Y - to.Y) / half));
+            InvalidateVisual();
+            return;
+        }
 
         // Shift tilts the model in the plane of the screen instead of turning it. A modifier rather
         // than a mode: the ordinary drag keeps working exactly as it did, and this is the third way
@@ -95,6 +109,7 @@ public sealed class MeshView : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         _dragging = null;
+        _panning = false;
         e.Pointer.Capture(null);
     }
 

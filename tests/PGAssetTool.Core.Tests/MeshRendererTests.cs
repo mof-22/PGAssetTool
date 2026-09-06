@@ -445,4 +445,57 @@ public class MeshRendererTests
             }
         return high < low ? 0 : high - low + 1;
     }
+
+    [Fact]
+    public void PanningMovesWhereTheModelSitsWithoutTurningIt()
+    {
+        // Half a frame to the right means half a frame to the right, and the model itself is
+        // unchanged — which is what separates a pan from an orbit that happens to look similar.
+        var quad = Quad(scale: 0.3f);
+
+        var centred = Draw(quad, new Camera(Yaw: 0, Pitch: 0));
+        var moved = Draw(quad, new Camera(Yaw: 0, Pitch: 0).Panned(0.5f, 0));
+
+        Assert.Equal(Covered(centred), Covered(moved), tolerance: 4);
+        Assert.Equal(Middle(centred) + Size / 4, Middle(moved), tolerance: 2);
+    }
+
+    [Fact]
+    public void PanningUpMovesItUpTheScreenRatherThanDownIt()
+    {
+        var quad = Quad(scale: 0.3f);
+
+        var centred = Rows(Draw(quad, new Camera(Yaw: 0, Pitch: 0)));
+        var raised = Rows(Draw(quad, new Camera(Yaw: 0, Pitch: 0).Panned(0, 0.5f)));
+
+        Assert.True(raised < centred, $"panning up put it at row {raised}, below row {centred}");
+    }
+
+    /// The middle column of whatever was drawn.
+    private static int Middle(byte[] pixels)
+    {
+        int low = Size, high = -1;
+        for (var y = 0; y < Size; y++)
+            for (var x = 0; x < Size; x++)
+            {
+                if (At(pixels, x, y) is null) continue;
+                low = Math.Min(low, x);
+                high = Math.Max(high, x);
+            }
+        return (low + high) / 2;
+    }
+
+    /// The middle row of whatever was drawn.
+    private static int Rows(byte[] pixels)
+    {
+        int low = Size, high = -1;
+        for (var y = 0; y < Size; y++)
+            for (var x = 0; x < Size; x++)
+            {
+                if (At(pixels, x, y) is null) continue;
+                low = Math.Min(low, y);
+                high = Math.Max(high, y);
+            }
+        return (low + high) / 2;
+    }
 }
