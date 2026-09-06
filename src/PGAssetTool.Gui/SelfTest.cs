@@ -610,6 +610,18 @@ internal static class SelfTest
                 .Where(b => b.Content is "Cancel" or "Go ahead")
                 .ToList();
 
+            // What is installed is shown as tiles with the picture on top, so a picture that never
+            // reaches a control is the whole point of the tab going missing. Counted from the
+            // window rather than the model: the model held its icons correctly the entire time the
+            // combo box was dropping the texture chosen for a mesh.
+            var showing = dialog.GetVisualDescendants().OfType<Avalonia.Controls.Image>()
+                .Count(i => i.Source is not null);
+            var expected = model.Manager.Mods.Count(m => m.HasIcon);
+            Console.WriteLine($"manager  {expected} of {model.Manager.Mods.Count} mods carry a picture, "
+                + $"{showing} reached a tile");
+            if (showing < expected)
+                return Fail($"{expected} mods have a picture and only {showing} of them are being shown");
+
             // The lists themselves have to accept more than one row, or none of the above is
             // reachable by anyone actually using the window.
             var lists = dialog.GetVisualDescendants().OfType<Avalonia.Controls.ListBox>()

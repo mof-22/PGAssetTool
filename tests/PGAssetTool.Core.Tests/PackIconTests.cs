@@ -77,4 +77,70 @@ public class PackIconTests : IDisposable
         for (var i = 3; i < picture.Bgra.Length; i += 4) if (picture.Bgra[i] != 0) count++;
         return count;
     }
+
+    /// A long thin bar, which is what most weapons are shaped like.
+    private static UnityMesh Bar() => new()
+    {
+        Name = "bar",
+        VertexCount = 4,
+        Attributes = new Dictionary<VertexAttribute, float[]>
+        {
+            [VertexAttribute.Position] = [-1, -0.08f, 0, 1, -0.08f, 0, 1, 0.08f, 0, -1, 0.08f, 0],
+        },
+        Dimensions = new Dictionary<VertexAttribute, int> { [VertexAttribute.Position] = 3 },
+        Indices = [0, 1, 2, 0, 2, 3],
+        SubMeshes = [new SubMesh(0, 6, 0, 0)],
+        BindPoses = [],
+        BoneNameHashes = [],
+    };
+
+    [Fact]
+    public void TheModelIsDrawnAcrossTheWholeFrame()
+    {
+        // A fixed distance is a multiple of the bounding sphere, which for anything long is mostly
+        // empty air — so the icon came out as a small object in a large empty square.
+        var picture = PackIcon.Render(Quad(), null, new Camera(Yaw: 0, Pitch: 0), size: 128);
+
+        var (left, top, right, bottom) = Extent(picture);
+        Assert.True(right - left >= 112, $"only {right - left + 1} of 128 columns were used");
+        Assert.True(bottom - top >= 112, $"only {bottom - top + 1} of 128 rows were used");
+    }
+
+    [Fact]
+    public void ALongModelFillsTheFrameToo()
+    {
+        // Scaled by whichever side is wider, or a bar would be fitted to its height and hang off
+        // both edges.
+        var picture = PackIcon.Render(Bar(), null, new Camera(Yaw: 0, Pitch: 0), size: 128);
+
+        var (left, top, right, bottom) = Extent(picture);
+        Assert.True(right - left >= 112, $"only {right - left + 1} of 128 columns were used");
+        Assert.True(left >= 0 && right < 128 && top >= 0 && bottom < 128, "it spilled out of the frame");
+    }
+
+    [Fact]
+    public void ItIsCentredWhereverItStarted()
+    {
+        // Framing has to undo a pan as well as a zoom: an icon of a model shoved into one corner is
+        // not an icon of the model.
+        var pushed = new Camera(Yaw: 0, Pitch: 0).Panned(0.6f, -0.4f);
+        var picture = PackIcon.Render(Quad(), null, pushed, size: 128);
+
+        var (left, top, right, bottom) = Extent(picture);
+        Assert.InRange((left + right) / 2, 60, 68);
+        Assert.InRange((top + bottom) / 2, 60, 68);
+    }
+
+    private static (int Left, int Top, int Right, int Bottom) Extent(PreviewImage picture)
+    {
+        int left = picture.Width, top = picture.Height, right = -1, bottom = -1;
+        for (var y = 0; y < picture.Height; y++)
+            for (var x = 0; x < picture.Width; x++)
+            {
+                if (picture.Bgra[(y * picture.Width + x) * 4 + 3] == 0) continue;
+                left = Math.Min(left, x); right = Math.Max(right, x);
+                top = Math.Min(top, y); bottom = Math.Max(bottom, y);
+            }
+        return (left, top, right, bottom);
+    }
 }
