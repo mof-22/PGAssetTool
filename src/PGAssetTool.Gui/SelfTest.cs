@@ -635,6 +635,8 @@ internal static class SelfTest
                 .Where(b => b.Content is "Cancel" or "Go ahead")
                 .ToList();
 
+            if (TheFormFitsASmallWindow(model) is { } tooTall) return Fail(tooTall);
+
             // What is installed is shown as tiles with the picture on top, so a picture that never
             // reaches a control is the whole point of the tab going missing. Counted from the
             // window rather than the model: the model held its icons correctly the entire time the
@@ -920,6 +922,49 @@ internal static class SelfTest
         PGAssetTool.Core.Pack.Workspace.Save(
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
+    }
+
+    /// The pack details form keeps its buttons on the page in a window squeezed to its smallest.
+    ///
+    /// It did not: the form is docked to the bottom of a column, and a window short enough simply
+    /// clipped it — Save and Revert went off the bottom with no way to reach them. Measured at the
+    /// smallest size the window will go to, because that is the case that failed.
+    private static string? TheFormFitsASmallWindow(MainViewModel model)
+    {
+        var showing = model.Workspace;
+        var window = new Views.MainWindow { DataContext = model, Width = 900, Height = 560 };
+        window.Show();
+        model.Workspace = MainViewModel.EditorTab;
+
+        // The form is behind an expander, which builds nothing until it is opened.
+        foreach (var expander in window.GetVisualDescendants().OfType<Avalonia.Controls.Expander>())
+            expander.IsExpanded = true;
+
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        window.Measure(new Avalonia.Size(900, 560));
+        window.Arrange(new Avalonia.Rect(0, 0, 900, 560));
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        var buttons = window.GetVisualDescendants().OfType<Avalonia.Controls.Button>()
+            .Where(b => b.Content is "Save" or "Revert")
+            .ToList();
+
+        var offscreen = buttons
+            .Select(b => b.TranslatePoint(new Avalonia.Point(0, b.Bounds.Height), window))
+            .Count(p => p is null || p.Value.Y > 560);
+
+        Console.WriteLine($"editor   at 900x560 the form's {buttons.Count} buttons are on the page: "
+            + $"{buttons.Count - offscreen} of {buttons.Count}");
+
+        window.Close();
+
+        // Put the tab back: the caller is part way through the manager, and this borrowed the model
+        // to look at the editor.
+        model.Workspace = showing;
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        if (buttons.Count != 2) return $"the pack details form shows {buttons.Count} buttons, not two";
+        return offscreen > 0 ? $"{offscreen} of the form's buttons fall off a 900x560 window" : null;
     }
 
     /// How wide the first tile in the manager is actually being drawn, or null when there is none.

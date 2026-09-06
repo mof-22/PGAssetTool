@@ -247,7 +247,19 @@
                  called, so it belongs beside the rest rather than being a property of the disk. -->
             <Expander DockPanel.Dock="Bottom" Header="Pack details" Margin="0,8,0,0"
                       IsVisible="{Binding CanPack}">
-              <StackPanel Spacing="6" Margin="0,6,0,0">
+              <!-- The buttons are docked and the fields scroll, so a short window loses the middle
+                   of the form rather than the way out of it. Docked first, which is what gives them
+                   their height before anything else is measured: without that the whole form was
+                   simply clipped and Save went off the bottom of the window. -->
+              <DockPanel MaxHeight="360">
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                            Margin="0,8,0,0">
+                  <Button Content="Save" Command="{Binding ApplyDetailsCommand}" />
+                  <Button Content="Revert" Command="{Binding RevertDetailsCommand}" />
+                </StackPanel>
+
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Spacing="6" Margin="0,6,12,0">
                 <!-- Three names looked like three settings. They are one setting, one working
                      detail and one thing the tool keeps to itself, and saying which is which is
                      most of the fix. -->
@@ -280,11 +292,9 @@
                            Margin="0,6,0,0" />
                 <TextBlock Classes="dim" TextWrapping="Wrap"
                            Text="How the tool recognises this mod again. Installing a pack replaces whatever is already installed under the same id, so renaming the mod still updates it rather than leaving two." />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Button Content="Save" Command="{Binding ApplyDetailsCommand}" />
-                  <Button Content="Revert" Command="{Binding RevertDetailsCommand}" />
-                </StackPanel>
-              </StackPanel>
+                  </StackPanel>
+                </ScrollViewer>
+              </DockPanel>
             </Expander>
 
             <!-- Multiple, so a click still replaces the selection and Ctrl or Shift extends it:
@@ -442,8 +452,12 @@
               <!-- What the pack says about itself. The ledger keeps only what is needed to undo an
                    install; everything the author wrote lives in the pack, and is what somebody
                    deciding whether to keep a mod actually wants to read. -->
+              <!-- Capped and scrolling for the same reason as the editor's form: docked to the
+                   bottom of a short window it would otherwise take the whole column and leave the
+                   bundle list with nothing. -->
               <Border DockPanel.Dock="Bottom" Margin="0,8,0,0" Padding="10" CornerRadius="4"
                       Background="#18181b" IsVisible="{Binding Details, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <ScrollViewer MaxHeight="320" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Spacing="3" DataContext="{Binding Details}" x:DataType="vm:ModDetails">
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
                   <TextBlock Text="{Binding Summary}" Classes="dim" />
@@ -470,6 +484,7 @@
                   <TextBlock Text="{Binding Built}" Classes="dim" />
                   <TextBlock Text="{Binding Pack}" Classes="dim mono" TextWrapping="Wrap" />
                 </StackPanel>
+                </ScrollViewer>
               </Border>
 
               <DockPanel>
