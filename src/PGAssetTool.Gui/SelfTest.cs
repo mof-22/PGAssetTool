@@ -48,9 +48,20 @@ internal static class SelfTest
     }
 
 
+    /// What this test's own pack is called wherever it turns up: in the workspace list, in the
+    /// manager, in the mods folder. Nothing a person would build is named this, so nothing this test
+    /// removes can be theirs by accident.
+    private const string PackName = "PGAssetTool self test";
+    private const string PackIdentity = "pgassettool-selftest";
+    private const string PackFolder = "pgassettool-selftest";
+
     private static int Body()
     {
-        var model = new MainViewModel();
+        // Its own directory, thrown away afterwards. This test extracts, edits, packs and installs
+        // for real; doing that in the author's workspace put its scratch work in the same list as
+        // theirs and, when the selection drifted, packed one of theirs instead.
+        var scratch = Directory.CreateTempSubdirectory("pgassettool-selftest").FullName;
+        var model = new MainViewModel { WorkspaceOverride = scratch };
         try
         {
             model.LoadAsync().GetAwaiter().GetResult();
@@ -300,13 +311,25 @@ internal static class SelfTest
             for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
             Console.WriteLine($"extract  {model.Status}");
 
-            if (model.LastExport is not { } written || !Directory.Exists(written))
+            if (model.LastExport is not { } exported || !Directory.Exists(exported))
                 return Fail($"nothing was written: {model.Status}");
 
-            var manifest = Path.Combine(written, PGAssetTool.Core.Pack.PackManifest.FileName);
-            if (!File.Exists(manifest)) return Fail($"no manifest in {written}");
+            if (!File.Exists(Path.Combine(exported, PGAssetTool.Core.Pack.PackManifest.FileName)))
+                return Fail($"no manifest in {exported}");
 
-            var operations = PGAssetTool.Core.Pack.Workspace.Read(written).Operations;
+            // Renamed before anything is built from it, folder and manifest both. Left alone this
+            // pack would be called "Hitman Pistol", built into 0016_Beretta.pgmod and filed in the
+            // mods folder beside a real mod of the same weapon — twenty of them accumulated there
+            // before anyone looked. Under its own name it is obvious, and it can only remove its
+            // own. The rename is the editor's own, so this exercises it too.
+            var written = PGAssetTool.Core.Pack.Workspace.Rename(exported, PackFolder);
+            var manifest = Path.Combine(written, PGAssetTool.Core.Pack.PackManifest.FileName);
+
+            var identified = PGAssetTool.Core.Pack.Workspace.Read(written)
+                with { Id = PackIdentity, Name = PackName };
+            File.WriteAllText(manifest, identified.ToJson());
+
+            var operations = identified.Operations;
             Console.WriteLine($"extract  {operations.Count} replaceable files across "
                 + $"{operations.Select(o => o.Target.Container).Distinct().Count()} bundles");
             if (operations.Count == 0) return Fail("the manifest named nothing replaceable");
@@ -320,12 +343,29 @@ internal static class SelfTest
 
             // The one just written, found by name: rescanning keeps whatever was selected before,
             // and the root also holds earlier extracts whose edits are not this test's business.
-            var fresh = model.Editor.Workspaces.FirstOrDefault(w => w.Directory == model.LastExport);
+            var fresh = model.Editor.Workspaces.FirstOrDefault(w => string.Equals(Path.GetFullPath(w.Directory), written, StringComparison.OrdinalIgnoreCase));
             if (fresh is null) return Fail("the freshly extracted workspace is not listed");
             if (fresh.Edited != 0) return Fail($"'{fresh.Name}' was just extracted and shows {fresh.Edited} edited");
 
             model.Editor.SelectedWorkspace = fresh;
             if (model.Editor.Files.Count == 0) return Fail("the editor saw no files in a fresh extract");
+
+            // The pack's descriptive half is editable from the editor. Saving it must not disturb
+            // the operations underneath: they carry the baseline hashes that decide what gets
+            // packed, and losing those would make every untouched file look edited.
+            if (model.Editor.PackName != PackName)
+                return Fail($"the form shows '{model.Editor.PackName}', not what the manifest says");
+
+            model.Editor.PackAuthor = "self test";
+            model.Editor.PackVersion = "9.9.9";
+            model.Editor.ApplyDetailsCommand.Execute(null);
+
+            var saved = PGAssetTool.Core.Pack.Workspace.Read(written);
+            Console.WriteLine($"editor   pack details saved: {saved.Name} {saved.Version} by {saved.Author}");
+            if (saved.Author != "self test" || saved.Version != "9.9.9")
+                return Fail($"the pack details did not reach the manifest: {model.Editor.Status}");
+            if (PGAssetTool.Core.Pack.Workspace.Changed(written, saved).Count != 0)
+                return Fail("saving the details made untouched files look edited");
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
@@ -360,6 +400,15 @@ internal static class SelfTest
             var wasInstalled = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read()
                 .Select(m => m.Id).ToHashSet();
 
+            // Exactly one file was touched, so exactly one belongs in the pack. Printed because a
+            // pack that quietly grew to everything in the workspace is indistinguishable from a
+            // working one until it is applied and writes five bundles instead of one.
+            var willPack = PGAssetTool.Core.Pack.Workspace.Changed(written, PGAssetTool.Core.Pack.Workspace.Read(written));
+            Console.WriteLine($"pack     {willPack.Count} of {operations.Count} files differ: "
+                + string.Join(", ", willPack.Select(o => o.Source)));
+            if (willPack.Count != 1)
+                return Fail($"one file was edited and {willPack.Count} are about to be packed");
+
             // With something genuinely edited, the whole loop: build a pack and put it in the game.
             // Only files that differ are packed, so this is also what says the edit was noticed.
             model.Editor.PackAndApplyCommand.Execute(null);
@@ -370,8 +419,12 @@ internal static class SelfTest
                 return Fail($"applying reported failures: {model.Status}");
             if (!model.Status.Contains("applied")) return Fail($"the pack was not applied: {model.Status}");
 
-            // Only what this run installed: someone else's mods are not this test's to touch.
+            // Only what this run installed: someone else's mods are not this test's to touch. Read
+            // back from the pack rather than assumed, so a rename that failed to take is caught
+            // here instead of at the point where something gets removed under the wrong name.
             var mine = PackId(model);
+            if (mine != PackIdentity)
+                return Fail($"the pack built is '{mine}', not this test's own — refusing to install it");
             var installed = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
             var strays = installed.Select(m => m.Id).Where(id => id != mine && !wasInstalled.Contains(id)).ToList();
             if (strays.Count > 0)
@@ -457,6 +510,11 @@ internal static class SelfTest
             Console.WriteLine($"manager  after removing: {model.Manager.Status}");
             if (model.Manager.Mods.Any(m => m.Mod.Id == mine)) return Fail("the mod is still installed");
 
+            // Removing a mod deliberately leaves its kept pack, so reinstalling does not depend on
+            // the workspace still existing. That is right for a person and wrong for a test that
+            // runs on every change: twenty copies of this one had piled up in the mods folder.
+            if (File.Exists(kept)) File.Delete(kept);
+
             var left = model.Manager.Mods.Select(m => m.Mod.Id).Where(id => !wasInstalled.Contains(id)).ToList();
             Console.WriteLine($"manager  installed before this run: {wasInstalled.Count}, left behind by it: {left.Count}");
             if (left.Count > 0) return Fail($"this run left {string.Join(", ", left)} in the game");
@@ -477,6 +535,8 @@ internal static class SelfTest
         finally
         {
             model.Dispose();
+            try { Directory.Delete(scratch, recursive: true); }
+            catch (IOException) { }
         }
     }
 

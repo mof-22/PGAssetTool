@@ -48,6 +48,40 @@ public static class Workspace
     public static PackManifest Read(string directory)
         => PackManifest.Parse(File.ReadAllText(Path.Combine(directory, PackManifest.FileName)));
 
+    /// Writes the manifest back, keeping the operations exactly as they were.
+    ///
+    /// Only the descriptive half is ever edited by hand — what the mod is called, who wrote it,
+    /// which version it is. The operations are the addresses the export resolved, and nothing that
+    /// edits a name has any business rewriting those.
+    public static void Save(string directory, PackManifest manifest)
+        => File.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
+
+    /// Gives the workspace directory a different name, in place, and answers where it went.
+    ///
+    /// The directory name is what the built pack is called, so this is how an author decides what
+    /// their mod's file is named rather than living with the number and prefab the export chose.
+    /// Nothing inside the workspace refers to the directory by name — operations are relative — so
+    /// there is nothing to rewrite afterwards.
+    public static string Rename(string directory, string name)
+    {
+        var trimmed = name.Trim();
+        if (trimmed.Length == 0) throw new ArgumentException("A workspace needs a name.", nameof(name));
+        if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new ArgumentException($"'{trimmed}' cannot be a folder name.", nameof(name));
+
+        var from = Path.GetFullPath(Path.TrimEndingDirectorySeparator(directory));
+        var to = Path.Combine(Path.GetDirectoryName(from)!, trimmed);
+        if (from == to) return from;
+
+        // Changing only the capitalisation is a real rename, and the directory it "already exists"
+        // as is the one being renamed — so that check has to let this one case through.
+        if (!string.Equals(from, to, StringComparison.OrdinalIgnoreCase) && Directory.Exists(to))
+            throw new IOException($"There is already a workspace called '{trimmed}'.");
+
+        Directory.Move(from, to);
+        return to;
+    }
+
     /// The operations whose source file no longer matches what was exported.
     public static List<PackOperation> Changed(string directory, PackManifest manifest)
     {

@@ -239,7 +239,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_tree is null || _bundles is null) { Status = "Select a weapon first."; return; }
 
         var tree = _tree;
-        await RunExclusively(async () =>
+        await RunExclusively("extracting the weapon", async () =>
         {
             var version = _bundles.Context.HasClassDatabase
                 ? GameVersion.Read(_bundles.Context, _bundles.Game)
@@ -266,7 +266,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await RunExclusively(async () =>
+        await RunExclusively("extracting the selected asset", async () =>
         {
             var directory = Path.Combine(WorkspaceRoot, "assets");
             var written = await Task.Run(() =>
@@ -319,7 +319,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var output = Path.Combine(workspace,
             Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace)) + PackBuilder.Extension);
 
-        await RunExclusively(async () =>
+        await RunExclusively(install ? "building and applying the pack" : "building the pack", async () =>
         {
             var built = await Task.Run(() => PackBuilder.Build(workspace, output));
             Status = $"{built.Operations} operation(s), {built.Bytes:N0} bytes -> {built.Path}";
@@ -358,7 +358,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// Where extraction writes. Beside the tool unless the settings say otherwise, because a
     /// window has no meaningful current directory to fall back on.
-    public string WorkspaceRoot => _settings.WorkspaceIn(ModStore.DefaultHome());
+    /// Somewhere other than the author's workspace to extract into.
+    ///
+    /// Only the self-test sets it. That test writes, edits, packs and installs for real, and doing
+    /// so among directories a person is keeping actual work in means its scratch extracts sit in
+    /// the same list as theirs — and, worse, that whichever workspace it happened to select was
+    /// sometimes one of theirs.
+    public string? WorkspaceOverride { get; set; }
+
+    public string WorkspaceRoot => WorkspaceOverride ?? _settings.WorkspaceIn(ModStore.DefaultHome());
 
     /// The installation, once it is open. The self-test uses it to put the game back.
     public GameInstallation? Game => _installation;
@@ -372,12 +380,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         => $"{ex.Message}  (while {what})";
 
     /// Long jobs share the one reader and say so while they run.
-    private async Task RunExclusively(Func<Task> work)
+    private async Task RunExclusively(string what, Func<Task> work)
     {
         Busy = true;
         await _reading.WaitAsync();
         try { await work(); }
-        catch (Exception ex) { Status = Describe(ex, "changing the language"); }
+        catch (Exception ex) { Status = Describe(ex, what); }
         finally { _reading.Release(); Busy = false; }
     }
 
@@ -441,7 +449,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = Describe(ex, "loading a texture for the preview");
+            Status = Describe(ex, "changing the language");
         }
     }
 
@@ -511,7 +519,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
             finally { _reading.Release(); }
         }
-        catch (Exception ex) { Status = Describe(ex, "showing an asset"); }
+        catch (Exception ex) { Status = Describe(ex, "loading a texture for the preview"); }
     }
 
     /// Every texture the weapon reaches, offered so a skin can be tried on a mesh by hand.

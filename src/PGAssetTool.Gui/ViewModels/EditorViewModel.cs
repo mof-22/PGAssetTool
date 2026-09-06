@@ -81,6 +81,86 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     public bool CanPack => SelectedWorkspace is not null;
 
+    /// The manifest's descriptive half, as a form.
+    ///
+    /// Held apart from the manifest on disk rather than written through on every keystroke: a
+    /// half-typed version string is not something to save, and a workspace is a directory other
+    /// programs are watching. Nothing moves until Apply.
+    [ObservableProperty] private string _folderName = "";
+    [ObservableProperty] private string _packName = "";
+    [ObservableProperty] private string _packAuthor = "";
+    [ObservableProperty] private string _packVersion = "";
+    [ObservableProperty] private string _packDescription = "";
+
+    /// The id is what the ledger keys an installed mod by. Changing it turns an update into a
+    /// second, separate install of the same mod, so it is shown and not edited.
+    [ObservableProperty] private string _packId = "";
+
+    private void ShowDetails(WorkspaceItem? workspace)
+    {
+        var manifest = workspace is null ? null : Details(workspace.Directory);
+        FolderName = workspace?.Name ?? "";
+        PackId = manifest?.Id ?? "";
+        PackName = manifest?.Name ?? "";
+        PackAuthor = manifest?.Author ?? "";
+        PackVersion = manifest?.Version ?? "";
+        PackDescription = manifest?.Description ?? "";
+    }
+
+    private static PackManifest? Details(string directory)
+    {
+        try { return WorkspaceView.Open(directory)?.Manifest; }
+        catch (Exception e) when (e is IOException or InvalidDataException) { return null; }
+    }
+
+    /// Writes the edited manifest and, if the folder was renamed too, moves the directory.
+    ///
+    /// The rename happens last: the manifest is written into the workspace, and writing it after a
+    /// move would mean knowing which of the two paths to write to when the move half-failed.
+    [RelayCommand]
+    private void ApplyDetails()
+    {
+        if (SelectedWorkspace is not { } workspace) { Status = "Nothing selected."; return; }
+
+        try
+        {
+            var manifest = Workspace.Read(workspace.Directory) with
+            {
+                Name = PackName.Trim(),
+                Author = PackAuthor.Trim(),
+                Version = PackVersion.Trim(),
+                Description = PackDescription.Trim(),
+            };
+            Workspace.Save(workspace.Directory, manifest);
+
+            // The watcher holds a handle on the directory it is watching, and Windows will not
+            // rename a directory out from under one. Rescan puts a watcher back on wherever it ends.
+            Watch(null);
+
+            var was = Path.GetFullPath(Path.TrimEndingDirectorySeparator(workspace.Directory));
+            var moved = Workspace.Rename(was, FolderName);
+            var renamed = !string.Equals(moved, was, StringComparison.Ordinal);
+
+            // The watcher is still pointed at the old path, and rescanning from a moved directory
+            // finds nothing under the name it was selected by.
+            Rescan(Root);
+            SelectedWorkspace = Workspaces.FirstOrDefault(w =>
+                string.Equals(Path.GetFullPath(w.Directory), moved, StringComparison.OrdinalIgnoreCase));
+
+            Status = renamed
+                ? $"Saved, and the folder is now '{Path.GetFileName(moved)}'."
+                : "Saved.";
+        }
+        catch (Exception ex)
+        {
+            Status = $"{ex.Message}  (while saving the pack details)";
+        }
+    }
+
+    /// Puts the form back to what is on disk, for after a change nobody wants to keep.
+    [RelayCommand]
+    private void RevertDetails() => ShowDetails(SelectedWorkspace);
+
     public void Rescan(string root)
     {
         Root = root;
@@ -102,6 +182,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedWorkspaceChanged(WorkspaceItem? value)
     {
+        ShowDetails(value);
         var chosen = SelectedFile?.RelativePath;
 
         Files.Clear();
@@ -130,13 +211,17 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// never contain.
     private async Task CompareAsync(WorkspaceFile file)
     {
-        if (_bundles() is not { } bundles) { Edited.Clear("The game is not open."); return; }
-
         try
         {
             await _reading.WaitAsync();
             try
             {
+                // Asked for inside the lock, not outside it. A file watcher fires this off on its
+                // own thread, and reading the reader first meant holding one that the pack-and-apply
+                // waiting on the same lock was about to put down — so the comparison ran against a
+                // disposed reader, or kept the bundle open across a write to it.
+                if (_bundles() is not { } bundles) { Edited.Clear("The game is not open."); return; }
+
                 var loaded = await Task.Run(() => (
                     Game: FromGame(bundles, file),
                     Disk: AssetPreview.FromFile(file.FullPath)));

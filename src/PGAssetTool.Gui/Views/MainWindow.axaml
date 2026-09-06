@@ -204,6 +204,32 @@
             <TextBlock DockPanel.Dock="Top" Text="Extracted" FontWeight="SemiBold" Margin="0,0,0,6" />
             <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="dim"
                        TextWrapping="Wrap" Margin="0,6,0,0" />
+
+            <!-- What the pack will say about itself. The folder name is what the built .pgmod is
+                 called, so it belongs beside the rest rather than being a property of the disk. -->
+            <Expander DockPanel.Dock="Bottom" Header="Pack details" Margin="0,8,0,0"
+                      IsVisible="{Binding CanPack}">
+              <StackPanel Spacing="6" Margin="0,6,0,0">
+                <TextBlock Text="Folder" Classes="dim" />
+                <TextBox Text="{Binding FolderName}" />
+                <TextBlock Text="Name" Classes="dim" />
+                <TextBox Text="{Binding PackName}" />
+                <TextBlock Text="Author" Classes="dim" />
+                <TextBox Text="{Binding PackAuthor}" />
+                <TextBlock Text="Version" Classes="dim" />
+                <TextBox Text="{Binding PackVersion}" />
+                <TextBlock Text="Description" Classes="dim" />
+                <TextBox Text="{Binding PackDescription}" AcceptsReturn="True" Height="60"
+                         TextWrapping="Wrap" />
+                <TextBlock Text="{Binding PackId, StringFormat='id: {0}'}" Classes="dim mono"
+                           ToolTip.Tip="The ledger keys an installed mod by this. It is fixed so that reinstalling replaces the mod rather than adding a second copy of it." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="Save" Command="{Binding ApplyDetailsCommand}" />
+                  <Button Content="Revert" Command="{Binding RevertDetailsCommand}" />
+                </StackPanel>
+              </StackPanel>
+            </Expander>
+
             <ListBox ItemsSource="{Binding Workspaces}" SelectedItem="{Binding SelectedWorkspace}">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:WorkspaceItem">

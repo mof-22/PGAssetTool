@@ -170,9 +170,12 @@ public sealed partial class ManagerViewModel : ObservableObject
     [RelayCommand]
     private async Task Proceed()
     {
+        // Run owns the busy flag: it raises it before the work and lowers it in a finally. Raising
+        // it again here — after the work had already finished and lowered it — left the manager
+        // stuck showing itself as busy for the rest of the session, and every confirmed action
+        // after the first one looked like it had hung.
         if (Asking is { } asking) await asking.Proceed();
         Asking = null;
-        Busy = true;
     }
 
     [RelayCommand]

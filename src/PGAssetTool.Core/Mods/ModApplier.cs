@@ -89,6 +89,15 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         {
             var live = LivePathIn(cache, bundle, hash);
             if (live is null || !File.Exists(live)) continue;
+
+            // Nothing to put back if it is already what the game shipped. A backup outlives the mod
+            // that caused it — nothing prunes one for being unneeded — so this loop kept copying
+            // every bundle the tool had ever touched over an identical copy of itself: seventy
+            // megabytes of writing, on every install and every toggle, to no effect. Hashing the
+            // one file is a fraction of the cost of rewriting it, and a write that never happens is
+            // a write that cannot collide with something still reading the file.
+            if (BundleIntegrity.IsPristine(live, hash)) continue;
+
             if (store.RestoreIfBackedUp(cache, bundle, hash, live))
                 restored.Add($"{bundle} ({cache.ToString().ToLowerInvariant()})");
         }

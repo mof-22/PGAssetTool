@@ -125,4 +125,80 @@ public class WorkspaceViewTests : IDisposable
 
         Assert.Equal(coverage, file.AlphaIsCoverage);
     }
+
+    [Fact]
+    public void RenamingMovesTheDirectoryAndLeavesTheContentsAlone()
+    {
+        // The folder name is what the built .pgmod is called, so this is how an author names their
+        // mod rather than living with the number and prefab the export chose.
+        var directory = MakeWorkspace("0016_Beretta", ("icon/a.png", "one"), ("textures/b.png", "two"));
+
+        var moved = Workspace.Rename(directory, "Synthwave Beretta");
+
+        Assert.Equal(Path.Combine(_root, "Synthwave Beretta"), moved);
+        Assert.False(Directory.Exists(directory));
+        Assert.Equal("one", File.ReadAllText(Path.Combine(moved, "icon", "a.png")));
+        Assert.Equal(2, WorkspaceView.Open(moved)!.Files.Count);
+    }
+
+    [Fact]
+    public void RenamingOntoAnExistingWorkspaceIsRefusedRatherThanMerged()
+    {
+        var mine = MakeWorkspace("0016_Beretta", ("icon/a.png", "mine"));
+        MakeWorkspace("theirs", ("icon/a.png", "theirs"));
+
+        Assert.Contains("already a workspace",
+            Assert.Throws<IOException>(() => Workspace.Rename(mine, "theirs")).Message);
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(mine, "icon", "a.png")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("a/b")]
+    [InlineData("what?")]
+    public void ANameThatCannotBeAFolderIsRefused(string name)
+    {
+        var directory = MakeWorkspace("0016_Beretta", ("icon/a.png", "one"));
+        Assert.Throws<ArgumentException>(() => Workspace.Rename(directory, name));
+        Assert.True(Directory.Exists(directory));
+    }
+
+    [Fact]
+    public void ChangingOnlyTheCapitalisationIsStillARename()
+    {
+        // The directory it "already exists" as is the one being renamed, so the collision check has
+        // to let this one through.
+        var directory = MakeWorkspace("beretta", ("icon/a.png", "one"));
+
+        var moved = Workspace.Rename(directory, "Beretta");
+
+        Assert.Equal("Beretta", Path.GetFileName(moved));
+        Assert.Equal("Beretta", new DirectoryInfo(moved).Name);
+    }
+
+    [Fact]
+    public void SavingTheManifestKeepsTheOperationsAndTheirBaselines()
+    {
+        // Only the descriptive half is ever edited by hand; the operations are addresses the export
+        // resolved, and losing a baseline would make every unedited file look changed.
+        var directory = MakeWorkspace("0016_Beretta", ("icon/a.png", "one"), ("textures/b.png", "two"));
+        var before = Workspace.Read(directory);
+
+        Workspace.Save(directory, before with
+        {
+            Name = "Synthwave Beretta", Author = "mof-22", Version = "2.1.0", Description = "neon",
+        });
+
+        var after = Workspace.Read(directory);
+        Assert.Equal("Synthwave Beretta", after.Name);
+        Assert.Equal("mof-22", after.Author);
+        Assert.Equal("2.1.0", after.Version);
+        Assert.Equal("neon", after.Description);
+        Assert.Equal(before.Id, after.Id);
+        Assert.Equal(
+            before.Operations.Select(o => (o.Source, o.BaselineSha256)),
+            after.Operations.Select(o => (o.Source, o.BaselineSha256)));
+        Assert.Empty(Workspace.Changed(directory, after));
+    }
 }
