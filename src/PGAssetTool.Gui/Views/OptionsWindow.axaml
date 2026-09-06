@@ -17,6 +17,13 @@
     </StackPanel>
 
     <StackPanel Spacing="6">
+      <TextBlock Text="Author" FontWeight="SemiBold" />
+      <TextBox Text="{Binding Author}" Watermark="Left blank if you would rather not be named" />
+      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                 Text="Recorded in the manifest of everything extracted from here on, and shown to whoever installs the pack. It can be changed per pack in the editor." />
+    </StackPanel>
+
+    <StackPanel Spacing="6">
       <CheckBox Content="Write textures without an alpha channel" IsChecked="{Binding OpaqueTextures}" />
       <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
                  Text="Most weapon textures keep emission rather than transparency in that channel, so an image editor opens them almost invisible. An image brought back without an alpha channel is given the original one, so nothing is lost by turning this on." />

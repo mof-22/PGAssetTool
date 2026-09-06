@@ -90,11 +90,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Textures written with no alpha channel. The original is put back on the way in.
     [ObservableProperty] private bool _opaqueTextures;
 
+    /// Recorded in the manifest of anything extracted from here on. Editable per pack afterwards.
+    [ObservableProperty] private string _author = "";
+
     public ObservableCollection<LanguageOption> Languages { get; } = [];
 
     /// Shown in the options window, because where a portable tool keeps its state is worth being
     /// able to see rather than having to guess.
-    public string SettingsPath => ToolSettings.PathIn(ModStore.DefaultHome());
+    public string SettingsPath => ToolSettings.PathIn(SettingsHome ?? ModStore.DefaultHome());
+
+    /// Somewhere other than beside the executable to keep preferences.
+    ///
+    /// Only the self-test sets it. That test drives the asset filter, the language and the alpha
+    /// toggle, and every one of those is written back the moment it moves — so a run rewrote the
+    /// author's settings file as a side effect, and left their tree filter switched off.
+    public string? SettingsHome { get; set; }
 
     /// Which workspace tab is showing: browse, editor, manager.
     [ObservableProperty] private int _workspace;
@@ -112,11 +122,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // Preferences are read before the game, so the first catalog load is already in the right
         // language rather than being read once in English and then again. Nothing is resolved yet,
         // so the change handlers below find nothing to rebuild.
-        _settings = ToolSettings.Load();
+        _settings = ToolSettings.Load(SettingsHome);
         _loading = true;
         Language = _settings.Language;
         ReplaceableOnly = _settings.ReplaceableOnly;
         OpaqueTextures = _settings.OpaqueTextures;
+        Author = _settings.Author;
         Editor.SideBySide = _settings.SideBySide;
         Manager.ConfirmChanges = _settings.ConfirmChanges;
         _loading = false;
@@ -287,19 +298,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
-    /// Puts the reader down and picks it up again around anything that rewrites the game.
-    ///
-    /// The bundles are held open for browsing and applying rewrites those same files. A separate
-    /// process never had to care; a window that browses and installs does.
     /// Runs something that rewrites the game with the reader put down, then opens it again.
     ///
     /// The bundles are held open for browsing and applying rewrites those same files. A separate
     /// process never had to care; a window that browses and installs does.
+    ///
+    /// Under the same lock as every other use of that reader. Closing it is not enough on its own:
+    /// a preview or a workspace comparison already part-way through a bundle keeps that file open
+    /// however firmly the reader is disposed underneath it, and the write that follows then fails
+    /// with the file in use — intermittently, and only ever on whichever bundle was last looked at.
     private async Task WithReaderClosed(Func<Task> work)
     {
-        CloseReader();
-        try { await work(); }
-        finally { await LoadAsync(); }
+        await _reading.WaitAsync();
+        try
+        {
+            CloseReader();
+            try { await work(); }
+            finally { await LoadAsync(); }
+        }
+        finally
+        {
+            _reading.Release();
+        }
     }
 
     private void CloseReader()
@@ -310,23 +330,50 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Preview.Clear();
     }
 
-    /// Builds a pack from a workspace, and installs it when asked.
+    /// Builds a pack from each workspace, and installs them when asked.
     ///
     /// Building and applying are one gesture because an author repeats them: edit, pack, apply,
     /// look at it in the game. Building alone stays separate for packs meant to be handed out.
-    private async Task BuildPack(string workspace, bool install)
+    ///
+    /// Several at once install together rather than one after another. Installing is a whole-game
+    /// reconcile — restore everything modified, reapply everything enabled — so doing it per pack
+    /// repeats that work per pack and passes through states with some of them applied and not the
+    /// rest. A pack that will not build does not stop the others; it is reported by name.
+    private async Task BuildPack(IReadOnlyList<string> workspaces, bool install)
     {
-        var output = Path.Combine(workspace,
-            Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace)) + PackBuilder.Extension);
-
-        await RunExclusively(install ? "building and applying the pack" : "building the pack", async () =>
+        await RunExclusively(install ? "building and applying the packs" : "building the packs", async () =>
         {
-            var built = await Task.Run(() => PackBuilder.Build(workspace, output));
-            Status = $"{built.Operations} operation(s), {built.Bytes:N0} bytes -> {built.Path}";
-            if (!install) return;
+            var built = new List<PackResult>();
+            var refused = new List<string>();
 
+            foreach (var workspace in workspaces)
+            {
+                var output = Path.Combine(workspace,
+                    Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace)) + PackBuilder.Extension);
+                try { built.Add(await Task.Run(() => PackBuilder.Build(workspace, output))); }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException)
+                {
+                    refused.Add($"{Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace))}: {ex.Message}");
+                }
+            }
+
+            var trouble = refused.Count > 0 ? "  " + string.Join("  ", refused) : "";
+            Status = $"{built.Count} pack(s), {built.Sum(b => b.Operations)} operation(s), "
+                + $"{built.Sum(b => b.Bytes):N0} bytes" + trouble;
+
+            if (!install || built.Count == 0) return;
             if (_bundles is null) { Status = "The game is not open."; return; }
             var game = _bundles.Game;
+
+            // The manager has always refused to write while the game is running; this path never
+            // did, and it is the one an author uses over and over. The packs are built and on disk,
+            // so nothing is lost by stopping here — only the writing waits.
+            if (GameProcess.IsRunning(game))
+            {
+                Status = $"{built.Count} pack(s) built. The game is running, and rewriting its "
+                    + "bundles now can leave a half-written file behind — close it, then apply.";
+                return;
+            }
 
             CloseReader();
 
@@ -338,7 +385,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 using (var reading = new BundleSet(game))
                     if (reading.Context.HasClassDatabase) version = GameVersion.Read(reading.Context, game);
 
-                result = await Task.Run(() => new ModApplier(game, store).Install(built.Path, version));
+                var paths = built.Select(b => b.Path).ToList();
+                result = await Task.Run(() => new ModApplier(game, store).Install(paths, version));
             }
             finally
             {
@@ -352,7 +400,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 : "";
 
             Status = $"{result.Applied.Count} applied, {result.Failed.Count} failed."
-                + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + shared;
+                + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + shared + trouble;
         });
     }
 
@@ -366,7 +414,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// sometimes one of theirs.
     public string? WorkspaceOverride { get; set; }
 
-    public string WorkspaceRoot => WorkspaceOverride ?? _settings.WorkspaceIn(ModStore.DefaultHome());
+    public string WorkspaceRoot => WorkspaceOverride ?? _settings.WorkspaceIn(SettingsHome ?? ModStore.DefaultHome());
 
     /// The installation, once it is open. The self-test uses it to put the game back.
     public GameInstallation? Game => _installation;
@@ -423,6 +471,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnOpaqueTexturesChanged(bool value) => Remember();
 
+    // Typed rather than picked, so it lands here on every keystroke. The file is a few hundred
+    // bytes and writing it costs nothing worth debouncing for.
+    partial void OnAuthorChanged(string value) => Remember();
+
     partial void OnReplaceableOnlyChanged(bool value)
     {
         Remember();
@@ -459,9 +511,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _settings = _settings with
         {
             Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
+            Author = Author.Trim(),
             SideBySide = Editor.SideBySide, ConfirmChanges = Manager.ConfirmChanges,
         };
-        try { _settings.Save(); }
+        try { _settings.Save(SettingsHome); }
         catch (IOException) { }
     }
 

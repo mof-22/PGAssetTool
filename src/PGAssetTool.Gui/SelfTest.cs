@@ -39,11 +39,11 @@ internal static class SelfTest
         // in for a window. Everything below it is the same code the real app runs.
         AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions()).SetupWithoutStarting();
 
-        // Setup installs Avalonia's dispatcher as the synchronization context, and nothing here runs
-        // its loop — every await would queue a continuation that never executes. Without a window
-        // there is no UI thread to marshal back to, so continuations belong on the thread pool.
-        SynchronizationContext.SetSynchronizationContext(null);
-
+        // Avalonia's dispatcher stays the synchronization context, as it is in the real app, and
+        // WaitWhile runs it. Clearing it instead put every continuation on the thread pool, which
+        // works right up until one of them touches a collection a control is bound to — and then
+        // fails with "call from invalid thread" somewhere far from the cause. The whole point of
+        // this test is to be the app, so it waits the way the app does.
         return Body();
     }
 
@@ -55,17 +55,65 @@ internal static class SelfTest
     private const string PackIdentity = "pgassettool-selftest";
     private const string PackFolder = "pgassettool-selftest";
 
+    /// A second, so batch operations have more than one thing to act on.
+    private const string PackNameB = "PGAssetTool self test B";
+    private const string PackIdentityB = "pgassettool-selftest-b";
+    private const string PackFolderB = "pgassettool-selftest-b";
+
+    /// Waits for something to settle while running the dispatcher, the way a live window does.
+    ///
+    /// Once a window has been created, Avalonia's dispatcher is the synchronization context that
+    /// awaits are posted back to. A test that only sleeps never runs those, so anything that
+    /// awaited while the window was up stops there for good — still holding whatever lock it took.
+    /// That looked exactly like a deadlock in the tool, and was not one.
+    /// Waits for one task, running the dispatcher meanwhile, and rethrows what it threw.
+    ///
+    /// Blocking on it instead would deadlock: its continuations are posted to this very thread.
+    private static void Settle(Task task, string what)
+    {
+        if (!WaitWhile(() => !task.IsCompleted, 300_000))
+            throw new TimeoutException($"{what} did not finish");
+        task.GetAwaiter().GetResult();
+    }
+
+    private static bool WaitWhile(Func<bool> busy, int milliseconds)
+    {
+        for (var waited = 0; waited < milliseconds; waited += 25)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            if (!busy()) return true;
+            Thread.Sleep(25);
+        }
+        return false;
+    }
+
     private static int Body()
     {
         // Its own directory, thrown away afterwards. This test extracts, edits, packs and installs
         // for real; doing that in the author's workspace put its scratch work in the same list as
         // theirs and, when the selection drifted, packed one of theirs instead.
         var scratch = Directory.CreateTempSubdirectory("pgassettool-selftest").FullName;
-        var model = new MainViewModel { WorkspaceOverride = scratch };
+        var model = new MainViewModel { WorkspaceOverride = scratch, SettingsHome = scratch };
         try
         {
-            model.LoadAsync().GetAwaiter().GetResult();
+            Settle(model.LoadAsync(), "opening the game");
             Console.WriteLine($"status   {model.Status}");
+
+            // Before anything, not after. This test writes to the game for real, and it used to ask
+            // this question only once it reached the manager — by which point it had already
+            // installed two mods into a game somebody was playing.
+            if (model.Game is { } open && PGAssetTool.Core.Game.GameProcess.IsRunning(open))
+                return Fail("the game is running; close it before running a test that writes to it");
+
+            // The author's own preferences, as they stand. This test drives the filter, the language
+            // and the alpha toggle, and each of those is written back the moment it moves — so runs
+            // were quietly rewriting the settings file beside the executable, and one left the asset
+            // tree filter switched off. Compared again at the end rather than trusted.
+            var theirSettings = PGAssetTool.Core.Settings.ToolSettings.PathIn(ModStore.DefaultHome());
+            var theirPreferences = File.Exists(theirSettings) ? File.ReadAllText(theirSettings) : null;
+            Console.WriteLine($"status   preferences for this run: {model.SettingsPath}");
+
+            if (ReaderReleasesItsBundles(model) is { } stillOpen) return Fail(stillOpen);
             Console.WriteLine($"weapons  {model.Weapons.Count}");
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
@@ -104,8 +152,7 @@ internal static class SelfTest
                 // Cleared first, or the wait below would pass instantly on the previous asset.
                 model.Preview.Clear();
                 detail.SelectedNode = node;
-                for (var waited = 0; model.Preview.Nothing is not null && waited < 30_000; waited += 50)
-                    Thread.Sleep(50);
+                WaitWhile(() => model.Preview.Nothing is not null, 30_000);
 
                 if (model.Preview.Nothing is { } why) return Fail($"{want} '{node.Label}': {why}");
                 Console.WriteLine($"preview  {model.Preview.Caption}");
@@ -156,8 +203,7 @@ internal static class SelfTest
             {
                 model.Preview.Clear();
                 detail.SelectedNode = icon;
-                for (var waited = 0; model.Preview.Nothing is not null && waited < 30_000; waited += 50)
-                    Thread.Sleep(50);
+                WaitWhile(() => model.Preview.Nothing is not null, 30_000);
 
                 if (model.Preview.Nothing is { } why) return Fail($"icon '{icon.Label}': {why}");
                 Console.WriteLine($"preview  {model.Preview.Caption}");
@@ -173,8 +219,7 @@ internal static class SelfTest
 
                 detail.SelectedNode = detail.Roots[0];
                 detail.SelectedNode = icon;
-                for (var waited = 0; model.Preview.Nothing is not null && waited < 30_000; waited += 50)
-                    Thread.Sleep(50);
+                WaitWhile(() => model.Preview.Nothing is not null, 30_000);
 
                 Console.WriteLine($"         after turning it off, the next picture kept it off: "
                     + $"{!model.Preview.ShowAlpha}");
@@ -250,7 +295,7 @@ internal static class SelfTest
             var before = model.Weapons.FirstOrDefault(w => w.Record.GameNumber == 16)?.Name;
             var clock = System.Diagnostics.Stopwatch.StartNew();
             model.Language = "l_ja";
-            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+            WaitWhile(() => model.Busy, 120_000);
             Console.WriteLine($"options  switching language took {clock.ElapsedMilliseconds}ms");
             if (clock.ElapsedMilliseconds > 3000)
                 return Fail($"switching language took {clock.ElapsedMilliseconds}ms, which is a reload");
@@ -260,7 +305,7 @@ internal static class SelfTest
             if (before == after) return Fail("switching language changed no names");
 
             model.Language = "l_en-gb";
-            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+            WaitWhile(() => model.Busy, 120_000);
 
             // Ctrl+R throws the reader away and starts over, which is the slowest thing the GUI
             // does on purpose. It used to take fifteen seconds, nearly all of it rebuilding the
@@ -268,8 +313,8 @@ internal static class SelfTest
             clock.Restart();
             // Blocking rather than awaiting: an await here would resume on a pool thread, and the
             // headless window can only be closed from the one that made it.
-            model.ReloadAsync().GetAwaiter().GetResult();
-            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+            Settle(model.ReloadAsync(), "reloading");
+            WaitWhile(() => model.Busy, 120_000);
             Console.WriteLine($"reload   {clock.ElapsedMilliseconds}ms for the whole game");
             if (clock.ElapsedMilliseconds > 8000)
                 return Fail($"reloading took {clock.ElapsedMilliseconds}ms");
@@ -308,7 +353,7 @@ internal static class SelfTest
                 return Fail("the workspace root has to be absolute; a window has no current directory");
 
             model.ExtractWeaponCommand.Execute(null);
-            for (var waited = 0; model.Busy && waited < 120_000; waited += 50) Thread.Sleep(50);
+            WaitWhile(() => model.Busy, 120_000);
             Console.WriteLine($"extract  {model.Status}");
 
             if (model.LastExport is not { } exported || !Directory.Exists(exported))
@@ -371,8 +416,7 @@ internal static class SelfTest
             if (texture is null) return Fail("no texture in the extracted workspace");
 
             model.Editor.SelectedFile = texture;
-            for (var waited = 0; model.Editor.Edited.Nothing is not null && waited < 60_000; waited += 50)
-                Thread.Sleep(50);
+            WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
             Console.WriteLine($"editor   original: {model.Editor.Original.Caption}");
             Console.WriteLine($"editor   edited:   {model.Editor.Edited.Caption}");
 
@@ -400,38 +444,56 @@ internal static class SelfTest
             var wasInstalled = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read()
                 .Select(m => m.Id).ToHashSet();
 
-            // Exactly one file was touched, so exactly one belongs in the pack. Printed because a
-            // pack that quietly grew to everything in the workspace is indistinguishable from a
-            // working one until it is applied and writes five bundles instead of one.
-            var willPack = PGAssetTool.Core.Pack.Workspace.Changed(written, PGAssetTool.Core.Pack.Workspace.Read(written));
-            Console.WriteLine($"pack     {willPack.Count} of {operations.Count} files differ: "
-                + string.Join(", ", willPack.Select(o => o.Source)));
-            if (willPack.Count != 1)
-                return Fail($"one file was edited and {willPack.Count} are about to be packed");
+            // A second workspace, so what gets tested is the batch. Building and applying six packs
+            // one at a time is six trips through the same controls, and — because applying is a
+            // whole-game reconcile — six rebuilds of the game with five half-finished states along
+            // the way. One pack proves nothing about any of that.
+            var secondary = SecondWorkspace(model, weapon: 2, PackFolderB, PackIdentityB, PackNameB);
+            if (secondary is null) return Fail("the second workspace could not be prepared");
 
-            // With something genuinely edited, the whole loop: build a pack and put it in the game.
-            // Only files that differ are packed, so this is also what says the edit was noticed.
+            model.Editor.Rescan(model.WorkspaceRoot);
+            foreach (var w in model.Editor.Workspaces) model.Editor.Selection.Add(w);
+
+            var chosen = model.Editor.Chosen;
+            Console.WriteLine($"batch    {chosen.Count} workspaces chosen: "
+                + string.Join(", ", chosen.Select(w => w.Name)));
+            if (chosen.Count != 2) return Fail($"two workspaces were selected and {chosen.Count} are being acted on");
+
+            // Exactly one file was touched in each, so exactly one belongs in each pack. Printed
+            // because a pack that quietly grew to everything in its workspace is indistinguishable
+            // from a working one until it is applied and writes five bundles instead of one.
+            foreach (var w in chosen)
+            {
+                var differ = PGAssetTool.Core.Pack.Workspace.Changed(
+                    w.Directory, PGAssetTool.Core.Pack.Workspace.Read(w.Directory));
+                Console.WriteLine($"batch    {w.Name}: {differ.Count} of {w.Files} files differ"
+                    + (differ.Count > 0 ? $" ({string.Join(", ", differ.Select(o => o.Source))})" : ""));
+                if (differ.Count != 1)
+                    return Fail($"one file was edited in '{w.Name}' and {differ.Count} are about to be packed");
+            }
+
+            // The whole loop, for both at once: build, install, and come back with the game read
+            // again. Only files that differ are packed, so this is also what says the edits landed.
             model.Editor.PackAndApplyCommand.Execute(null);
-            for (var waited = 0; model.Busy && waited < 300_000; waited += 50) Thread.Sleep(50);
-            Console.WriteLine($"pack     {model.Status}");
+            WaitWhile(() => model.Busy, 300_000);
+            Console.WriteLine($"batch    {model.Status}");
 
             if (model.Status.Contains("failed") && !model.Status.Contains("0 failed"))
                 return Fail($"applying reported failures: {model.Status}");
-            if (!model.Status.Contains("applied")) return Fail($"the pack was not applied: {model.Status}");
+            if (!model.Status.Contains("applied")) return Fail($"the packs were not applied: {model.Status}");
 
-            // Only what this run installed: someone else's mods are not this test's to touch. Read
-            // back from the pack rather than assumed, so a rename that failed to take is caught
-            // here instead of at the point where something gets removed under the wrong name.
-            var mine = PackId(model);
-            if (mine != PackIdentity)
-                return Fail($"the pack built is '{mine}', not this test's own — refusing to install it");
+            // Only what this run installed: someone else's mods are not this test's to touch.
+            var mine = new[] { PackIdentity, PackIdentityB };
             var installed = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
-            var strays = installed.Select(m => m.Id).Where(id => id != mine && !wasInstalled.Contains(id)).ToList();
+            var strays = installed.Select(m => m.Id)
+                .Where(id => !mine.Contains(id) && !wasInstalled.Contains(id)).ToList();
             if (strays.Count > 0)
                 return Fail($"this run installed {string.Join(", ", strays)} and has no plan to remove them");
-            if (installed.All(m => m.Id != mine)) return Fail($"'{mine}' is not in the ledger");
-            Console.WriteLine($"pack     installed: {string.Join(", ", installed.Select(m => m.Id))}");
-            if (installed.Count == 0) return Fail("nothing ended up in the ledger");
+
+            Console.WriteLine($"batch    installed: {string.Join(", ", installed.Select(m => m.Id))}");
+            var missing = mine.Where(id => installed.All(m => m.Id != id)).ToList();
+            if (missing.Count > 0)
+                return Fail($"{string.Join(", ", missing)} did not reach the ledger — a batch that installed some");
 
             // The manager reads the game rather than the ledger alone, so a bundle changed outside
             // this tool is visible before anyone installs over it.
@@ -445,10 +507,10 @@ internal static class SelfTest
                 return Fail("the bundle just written was not attributed to the mod that wrote it");
             if (model.Manager.GameIsRunning) return Fail("the game should not be running during a self-test");
 
-            // Turning one off restores its bundles; the confirmation is what stands between a click
-            // and the game being rewritten.
-            model.Manager.Selected = model.Manager.Mods.FirstOrDefault(m => m.Mod.Id == mine);
-            if (model.Manager.Selected is null) return Fail($"the manager does not list '{mine}'");
+            // One first. Turning it off restores its bundles; the confirmation is what stands
+            // between a click and the game being rewritten.
+            model.Manager.Selected = model.Manager.Mods.FirstOrDefault(m => m.Mod.Id == PackIdentity);
+            if (model.Manager.Selected is null) return Fail($"the manager does not list '{PackIdentity}'");
             model.Manager.DisableCommand.Execute(null);
             if (model.Manager.Asking is null) return Fail("turning a mod off asked for no confirmation");
 
@@ -464,23 +526,30 @@ internal static class SelfTest
                 .Where(b => b.Content is "Cancel" or "Go ahead")
                 .ToList();
 
+            // The lists themselves have to accept more than one row, or none of the above is
+            // reachable by anyone actually using the window.
+            var lists = dialog.GetVisualDescendants().OfType<Avalonia.Controls.ListBox>()
+                .Select(l => l.SelectionMode).ToList();
             Console.WriteLine($"manager  dialog buttons: {buttons.Count}, "
-                + $"enabled {buttons.Count(b => b.IsEffectivelyEnabled)}");
+                + $"enabled {buttons.Count(b => b.IsEffectivelyEnabled)}; "
+                + $"lists accepting several rows: {lists.Count(m => m.HasFlag(Avalonia.Controls.SelectionMode.Multiple))}");
 
             var usable = buttons.Count == 2 && buttons.All(b => b.IsEffectivelyEnabled);
+            var multi = lists.Count(m => m.HasFlag(Avalonia.Controls.SelectionMode.Multiple));
             dialog.Close();
             if (!usable) return Fail("the confirmation buttons are not usable");
+            if (multi < 1) return Fail("no list in the manager accepts more than one row");
             Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
 
             model.Manager.ProceedCommand.Execute(null);
             // The manager reports its own busy state; the shell is not involved in this one.
-            for (var waited = 0; (model.Manager.Busy || model.Manager.Asking is not null) && waited < 180_000;
-                 waited += 50)
-                Thread.Sleep(50);
+            WaitWhile(() => model.Manager.Busy || model.Manager.Asking is not null, 180_000);
             Console.WriteLine($"manager  {model.Manager.Status}");
 
-            var mineNow = model.Manager.Mods.First(m => m.Mod.Id == mine);
+            var mineNow = model.Manager.Mods.First(m => m.Mod.Id == PackIdentity);
             if (mineNow.Enabled) return Fail("the mod is still on after being turned off");
+            if (model.Manager.Mods.Single(m => m.Mod.Id == PackIdentityB).Enabled is false)
+                return Fail("turning one mod off also turned off the other");
 
             // Only this mod's own bundles. Anything else installed and still on is supposed to be
             // left written — asserting the whole game went vanilla passed only for as long as this
@@ -491,29 +560,38 @@ internal static class SelfTest
                     && b.State == PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
                 return Fail("turning it off left one of its own bundles changed");
 
-            // The pack is kept beside the tool, so deleting the workspace cannot strand it.
-            var kept = mineNow.Mod.PackPath;
-            Console.WriteLine($"manager  pack kept at {kept}");
-            if (!kept.Contains("PGAssetTool-data")) return Fail("the pack was not copied into the store");
+            // The packs are kept beside the tool, so deleting a workspace cannot strand one.
+            var kept = model.Manager.Mods.Where(m => mine.Contains(m.Mod.Id))
+                .Select(m => m.Mod.PackPath).ToList();
+            Console.WriteLine($"manager  packs kept at {string.Join(", ", kept.Select(Path.GetFileName))}");
+            if (kept.Any(p => !p.Contains("PGAssetTool-data")))
+                return Fail("a pack was not copied into the store");
 
-            // Removed through the manager rather than around it, so the path a person actually
-            // takes is the one under test. This also puts the game back: it is a test, not a
-            // change anyone asked for.
+            // Now both, in one gesture. Removed through the manager rather than around it, so the
+            // path a person actually takes is the one under test. This also puts the game back: it
+            // is a test, not a change anyone asked for.
+            foreach (var row in model.Manager.Mods.Where(m => mine.Contains(m.Mod.Id)))
+                model.Manager.Selection.Add(row);
+            if (model.Manager.Chosen.Count != 2)
+                return Fail($"two mods were selected and {model.Manager.Chosen.Count} are being acted on");
+
             model.Manager.RemoveCommand.Execute(null);
             if (model.Manager.Asking is null) return Fail("removing asked for no confirmation");
+            Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
+            if (!model.Manager.Asking.Title.Contains("2 mods"))
+                return Fail($"the confirmation does not say how many: {model.Manager.Asking.Title}");
 
             model.Manager.ProceedCommand.Execute(null);
-            for (var waited = 0; (model.Manager.Busy || model.Manager.Asking is not null) && waited < 180_000;
-                 waited += 50)
-                Thread.Sleep(50);
+            WaitWhile(() => model.Manager.Busy || model.Manager.Asking is not null, 180_000);
 
-            Console.WriteLine($"manager  after removing: {model.Manager.Status}");
-            if (model.Manager.Mods.Any(m => m.Mod.Id == mine)) return Fail("the mod is still installed");
+            Console.WriteLine($"manager  after removing both: {model.Manager.Status}");
+            if (model.Manager.Mods.Any(m => mine.Contains(m.Mod.Id)))
+                return Fail("a mod is still installed after both were removed");
 
             // Removing a mod deliberately leaves its kept pack, so reinstalling does not depend on
             // the workspace still existing. That is right for a person and wrong for a test that
-            // runs on every change: twenty copies of this one had piled up in the mods folder.
-            if (File.Exists(kept)) File.Delete(kept);
+            // runs on every change: twenty copies of one had piled up in the mods folder.
+            foreach (var path in kept) if (File.Exists(path)) File.Delete(path);
 
             var left = model.Manager.Mods.Select(m => m.Mod.Id).Where(id => !wasInstalled.Contains(id)).ToList();
             Console.WriteLine($"manager  installed before this run: {wasInstalled.Count}, left behind by it: {left.Count}");
@@ -521,10 +599,20 @@ internal static class SelfTest
             if (model.Status.Contains("Value cannot be null"))
                 return Fail($"the shell reported an error during removal: {model.Status}");
 
+            // Back to the workspace the edit was made in, which the batch moved off.
+            model.Editor.SelectedWorkspace = model.Editor.Workspaces
+                .FirstOrDefault(w => string.Equals(Path.GetFullPath(w.Directory), written,
+                    StringComparison.OrdinalIgnoreCase));
+
             File.WriteAllBytes(texture.FullPath, bytes);
             model.Editor.Refresh();
             if (model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath).Edited)
                 return Fail("putting the file back should clear the mark");
+
+            var nowPreferences = File.Exists(theirSettings) ? File.ReadAllText(theirSettings) : null;
+            Console.WriteLine("status   the author's settings file: "
+                + (theirPreferences == nowPreferences ? "untouched" : "REWRITTEN"));
+            if (theirPreferences != nowPreferences) return Fail($"this run rewrote {theirSettings}");
 
             return 0;
         }
@@ -537,6 +625,14 @@ internal static class SelfTest
             model.Dispose();
             try { Directory.Delete(scratch, recursive: true); }
             catch (IOException) { }
+
+            // Also on the way out of a failed run. A run that stops before the manager still leaves
+            // its pack in the store, and eighteen of them collected there while this test was being
+            // fixed. Only files under this test's own name, which nothing else can be called.
+            var store = Path.Combine(ModStore.DefaultHome(), "mods");
+            if (Directory.Exists(store))
+                foreach (var stale in Directory.GetFiles(store, PackIdentity + "*.pgmod"))
+                    try { File.Delete(stale); } catch (IOException) { }
         }
     }
 
@@ -601,22 +697,77 @@ internal static class SelfTest
         }
     }
 
-    /// The id of the pack this run built, taken from the manifest rather than guessed.
-    private static string PackId(MainViewModel model)
+    /// Reads a bundle, puts the reader down, and asks whether the file is free.
+    ///
+    /// The whole design of the window rests on this: bundles are held open for browsing, and every
+    /// write to the game closes the reader first and assumes that is enough. If disposing does not
+    /// actually release the handle, an install works only until somebody has looked at the bundle it
+    /// is about to write — which is intermittent, unattributable, and exactly what was happening.
+    private static string? ReaderReleasesItsBundles(MainViewModel model)
     {
-        var pack = Directory.GetFiles(model.Editor.SelectedWorkspace!.Directory, "*.pgmod").Single();
-        return PGAssetTool.Core.Pack.PackBuilder.ReadManifest(pack).Id;
+        foreach (var (what, pixels) in new[] { ("reading the objects", false), ("reading the pixels", true) })
+        {
+            const string name = "dw";
+            string path;
+
+            // Both halves, because they are different code. The pixels of a texture live in a
+            // sibling stream inside the bundle, reached through the bundle's own data reader rather
+            // than through the serialized file — which is the path a person takes by clicking a
+            // texture, and the one nothing had ever checked released.
+            using (var bundles = new BundleSet(model.Game!))
+            {
+                path = bundles.PathOf(name);
+                var file = bundles.Open(name);
+                var info = file.file.AssetInfos.First(i => i.TypeId == (int)AssetClassID.Texture2D);
+                var field = bundles.Context.Deserialize(file, info)!;
+                if (pixels && AssetPreview.Texture(bundles, name, field) is null)
+                    return $"a texture in '{name}' could not be decoded";
+            }
+
+            try
+            {
+                using var exclusive = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                Console.WriteLine($"status   '{name}' released after {what}: yes");
+            }
+            catch (IOException ex)
+            {
+                return $"'{name}' is still held open after {what} — {ex.Message}";
+            }
+        }
+        return null;
+    }
+
+    /// Extracts another weapon under this test's own name, with one file edited so there is
+    /// something to pack. Answers where it landed, or null when a step of that fell short.
+    private static string? SecondWorkspace(
+        MainViewModel model, int weapon, string folder, string id, string name)
+    {
+        if (!Select(model, weapon)) return null;
+
+        model.ExtractWeaponCommand.Execute(null);
+        WaitWhile(() => model.Busy, 120_000);
+        if (model.LastExport is not { } exported || !Directory.Exists(exported)) return null;
+
+        var directory = PGAssetTool.Core.Pack.Workspace.Rename(exported, folder);
+        var manifest = PGAssetTool.Core.Pack.Workspace.Read(directory) with { Id = id, Name = name };
+        PGAssetTool.Core.Pack.Workspace.Save(directory, manifest);
+
+        // Packing keeps only what differs from the export, so an untouched workspace packs nothing.
+        var texture = manifest.Operations.FirstOrDefault(o => o.Source.EndsWith(".png"));
+        if (texture is null) return null;
+
+        var path = Path.Combine(directory, texture.Source);
+        File.WriteAllBytes(path, [.. File.ReadAllBytes(path), .. new byte[16]]);
+
+        Console.WriteLine($"batch    a second workspace at {Path.GetFileName(directory)}, "
+            + $"editing {texture.Source}");
+        return directory;
     }
 
     private static bool Select(MainViewModel model, int number)
     {
         model.Selected = model.Weapons.First(w => w.Record.GameNumber == number);
-        for (var waited = 0; waited < 60_000; waited += 50)
-        {
-            if (model.Detail?.Tree.Record.GameNumber == number) return true;
-            Thread.Sleep(50);
-        }
-        return false;
+        return WaitWhile(() => model.Detail?.Tree.Record.GameNumber != number, 60_000);
     }
 
     private static int CountRows(IEnumerable<TreeNode> nodes)

@@ -32,10 +32,25 @@ public sealed class BundleSet : IDisposable
         => Game.Resolve(bundle, HashOf(bundle))?.Path
            ?? throw new FileNotFoundException($"No copy of '{bundle}' is present in any cache.");
 
+    /// Every bundle opened through here, so each is opened exactly once.
+    ///
+    /// Asking the manager for the same path twice does not reliably hand back the same instance,
+    /// and the second one is a second open file that disposing the manager did not close. Reading a
+    /// texture's pixels did exactly that — open for the object, open again for the stream the
+    /// pixels live in — and left the bundle locked after the reader was disposed. Every write to
+    /// the game closes the reader first and trusts that to be enough, so the effect was an install
+    /// that failed with the file in use whenever somebody had looked at that bundle first.
+    private readonly Dictionary<string, BundleFileInstance> _opened = new(StringComparer.OrdinalIgnoreCase);
+
+    private BundleFileInstance Bundle(string bundle)
+        => _opened.TryGetValue(bundle, out var already)
+            ? already
+            : _opened[bundle] = _context.OpenBundle(PathOf(bundle));
+
     /// The first serialized file in a bundle. Every content bundle here holds exactly one.
     public AssetsFileInstance Open(string bundle)
     {
-        var file = _context.OpenBundle(PathOf(bundle));
+        var file = Bundle(bundle);
         var entry = AssetsContext.SerializedEntries(file).First();
         return _context.OpenBundleEntry(file, entry.Index);
     }
@@ -61,7 +76,7 @@ public sealed class BundleSet : IDisposable
     public byte[] ReadResource(string bundle, string sourcePath, long offset, long size)
     {
         var wanted = Path.GetFileName(sourcePath);
-        var file = _context.OpenBundle(PathOf(bundle));
+        var file = Bundle(bundle);
         foreach (var entry in file.file.BlockAndDirInfo.DirectoryInfos)
         {
             if (!string.Equals(entry.Name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
@@ -72,5 +87,9 @@ public sealed class BundleSet : IDisposable
         throw new FileNotFoundException($"Bundle '{bundle}' has no stream entry '{wanted}'.");
     }
 
-    public void Dispose() => _context.Dispose();
+    public void Dispose()
+    {
+        _opened.Clear();
+        _context.Dispose();
+    }
 }

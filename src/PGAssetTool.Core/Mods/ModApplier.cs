@@ -29,9 +29,24 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     public bool Force { get; init; }
 
     public ReconcileResult Install(string packPath, string gameVersion)
+        => Install([packPath], gameVersion);
+
+    /// Installs several packs and rebuilds the game once, rather than once per pack.
+    ///
+    /// A reconcile restores every modified bundle and reapplies everything enabled, so running it
+    /// per pack does the same whole-game work as many times as there are packs — and leaves the
+    /// game briefly in a state that has some of them but not the rest.
+    public ReconcileResult Install(IReadOnlyList<string> packPaths, string gameVersion)
+    {
+        var mods = store.Read();
+        foreach (var packPath in packPaths) Enrol(mods, packPath, gameVersion);
+        store.Write(mods);
+        return Reconcile();
+    }
+
+    private void Enrol(List<InstalledMod> mods, string packPath, string gameVersion)
     {
         var manifest = PackBuilder.ReadManifest(packPath);
-        var mods = store.Read();
         mods.RemoveAll(m => m.Id == manifest.Id);
         mods.Add(new InstalledMod
         {
@@ -48,25 +63,31 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(c => c, _ => "", StringComparer.OrdinalIgnoreCase),
         });
+    }
+
+    public ReconcileResult SetEnabled(string id, bool enabled) => SetEnabled([id], enabled);
+
+    public ReconcileResult SetEnabled(IReadOnlyList<string> ids, bool enabled)
+    {
+        var mods = store.Read();
+        foreach (var id in ids)
+        {
+            var index = mods.FindIndex(m => m.Id == id);
+            if (index < 0) throw new KeyNotFoundException($"No mod with id '{id}' is installed.");
+            mods[index] = mods[index] with { Enabled = enabled };
+        }
         store.Write(mods);
         return Reconcile();
     }
 
-    public ReconcileResult SetEnabled(string id, bool enabled)
-    {
-        var mods = store.Read();
-        var index = mods.FindIndex(m => m.Id == id);
-        if (index < 0) throw new KeyNotFoundException($"No mod with id '{id}' is installed.");
-        mods[index] = mods[index] with { Enabled = enabled };
-        store.Write(mods);
-        return Reconcile();
-    }
+    public ReconcileResult Remove(string id) => Remove([id]);
 
-    public ReconcileResult Remove(string id)
+    public ReconcileResult Remove(IReadOnlyList<string> ids)
     {
         var mods = store.Read();
-        if (mods.RemoveAll(m => m.Id == id) == 0)
-            throw new KeyNotFoundException($"No mod with id '{id}' is installed.");
+        foreach (var id in ids)
+            if (mods.RemoveAll(m => m.Id == id) == 0)
+                throw new KeyNotFoundException($"No mod with id '{id}' is installed.");
         store.Write(mods);
         return Reconcile();
     }

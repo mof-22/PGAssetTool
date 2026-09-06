@@ -73,6 +73,8 @@ public sealed partial class ManagerViewModel : ObservableObject
         store.TidyKeptPackNames();
         var installed = store.Read();
 
+        // Rebuilt rows are new instances; anything held from the previous set is stale.
+        Selection.Clear();
         Mods.Clear();
         foreach (var mod in installed.OrderBy(m => m.InstalledAt)) Mods.Add(new InstalledRow(mod));
 
@@ -89,33 +91,54 @@ public sealed partial class ManagerViewModel : ObservableObject
             + (everything ? "" : " — only the bundles mods claim were checked");
     }
 
-    [RelayCommand]
-    private void Enable() => Ask("Turn on", m => new ModApplier(_game()!, new ModStore(_game()!)).SetEnabled(m.Id, true));
 
     [RelayCommand]
-    private void Disable() => Ask("Turn off", m => new ModApplier(_game()!, new ModStore(_game()!)).SetEnabled(m.Id, false));
+    private void Enable() => Ask("Turn on", ids => Applier().SetEnabled(ids, true));
 
     [RelayCommand]
-    private void Remove() => Ask("Remove", m => new ModApplier(_game()!, new ModStore(_game()!)).Remove(m.Id));
+    private void Disable() => Ask("Turn off", ids => Applier().SetEnabled(ids, false));
 
     [RelayCommand]
-    private void Reapply() => Ask("Reapply everything",
-        _ => new ModApplier(_game()!, new ModStore(_game()!)).Reconcile());
+    private void Remove() => Ask("Remove", ids => Applier().Remove(ids));
+
+    [RelayCommand]
+    private void Reapply() => Ask("Reapply everything", _ => Applier().Reconcile(), needsSelection: false);
+
+    private ModApplier Applier() => new(_game()!, new ModStore(_game()!));
+
+    /// The rows a command acts on: everything highlighted, or the one current row.
+    ///
+    /// Turning six mods off one at a time means six confirmations and six whole-game rebuilds, and
+    /// leaves the game in five intermediate states nobody asked for.
+    public IReadOnlyList<InstalledMod> Chosen =>
+        Selection.Count > 0 ? Selection.Select(r => r.Mod).ToList()
+        : Selected is { } row ? [row.Mod]
+        : [];
+
+    /// Bound to the list's own selection, which is where multiple rows live; Selected stays the
+    /// anchor the details pane follows.
+    public ObservableCollection<InstalledRow> Selection { get; } = [];
 
     /// Puts the request behind a confirmation, unless the setting says otherwise — and always
     /// behind the running-game check, which the setting does not cover.
-    private void Ask(string what, Func<InstalledMod, ReconcileResult> work)
+    private void Ask(string what, Func<IReadOnlyList<string>, ReconcileResult> work, bool needsSelection = true)
     {
         if (_game() is not { } game) { Status = "The game is not open."; return; }
-        if (Selected is not { } row && what != "Reapply everything") { Status = "Nothing selected."; return; }
 
-        var mod = Selected?.Mod;
-        var subject = mod is null ? "everything installed" : $"'{mod.Name}'";
+        var mods = needsSelection ? Chosen : [];
+        if (needsSelection && mods.Count == 0) { Status = "Nothing selected."; return; }
+
+        var subject = mods.Count switch
+        {
+            0 => "everything installed",
+            1 => $"'{mods[0].Name}'",
+            _ => $"{mods.Count} mods",
+        };
 
         var running = GameProcess.IsRunning(game);
         if (!running && !ConfirmChanges)
         {
-            _ = Run(what, mod, work);
+            _ = Run(what, mods, work);
             return;
         }
 
@@ -124,25 +147,23 @@ public sealed partial class ManagerViewModel : ObservableObject
             running
                 ? "The game is running. Its bundles are open, and rewriting them now can leave a "
                   + "half-written file behind. Close it first."
-                : "Every bundle these mods touch is restored from its backup and the enabled ones "
+                : (mods.Count > 1 ? string.Join(", ", mods.Select(m => m.Name)) + "\n\n" : "")
+                  + "Every bundle these mods touch is restored from its backup and the enabled ones "
                   + "are applied again, so the result is the same however this was reached.",
-            () => running ? Task.CompletedTask : Run(what, mod, work));
+            () => running ? Task.CompletedTask : Run(what, mods, work));
     }
 
-    private async Task Run(string what, InstalledMod? mod, Func<InstalledMod, ReconcileResult> work)
+    private async Task Run(
+        string what, IReadOnlyList<InstalledMod> mods, Func<IReadOnlyList<string>, ReconcileResult> work)
     {
         Asking = null;
         Busy = true;
 
-        var subject = mod ?? new InstalledMod
-        {
-            Id = "", Name = "", PackPath = "", InstalledAt = DateTimeOffset.Now,
-            GameVersion = "", TouchedBundles = new Dictionary<string, string>(),
-        };
+        var ids = mods.Select(m => m.Id).ToList();
 
         async Task Apply()
         {
-            var result = await Task.Run(() => work(subject));
+            var result = await Task.Run(() => work(ids));
             Status = $"{what}: {result.Applied.Count} applied, {result.Restored.Count} restored"
                 + (result.Failed.Count > 0
                     ? $", {result.Failed.Count} failed — {string.Join("; ", result.Failed)}"

@@ -230,7 +230,11 @@
               </StackPanel>
             </Expander>
 
-            <ListBox ItemsSource="{Binding Workspaces}" SelectedItem="{Binding SelectedWorkspace}">
+            <!-- Multiple, so a click still replaces the selection and Ctrl or Shift extends it:
+                 the ordinary list behaviour, which needs no explaining. Building six packs one at a
+                 time is six trips through the same three controls. -->
+            <ListBox ItemsSource="{Binding Workspaces}" SelectedItem="{Binding SelectedWorkspace}"
+                     SelectedItems="{Binding Selection}" SelectionMode="Multiple">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:WorkspaceItem">
                   <StackPanel Margin="0,2">
@@ -305,7 +309,8 @@
               <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="dim"
                          TextWrapping="Wrap" Margin="0,8,0,0" />
 
-              <ListBox ItemsSource="{Binding Mods}" SelectedItem="{Binding Selected}">
+              <ListBox ItemsSource="{Binding Mods}" SelectedItem="{Binding Selected}"
+                       SelectedItems="{Binding Selection}" SelectionMode="Multiple">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="vm:InstalledRow">
                     <Grid ColumnDefinitions="44,*" Margin="0,3">

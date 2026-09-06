@@ -60,9 +60,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Flip() => ShowingEdited = !ShowingEdited;
 
-    /// Asked to build a pack, and to install it as well when the caller wants the round trip.
+    /// Asked to build packs, and to install them as well when the caller wants the round trip.
     /// The shell owns the game, so the editor only says what it wants done.
-    public event Func<string, bool, Task>? PackRequested;
+    public event Func<IReadOnlyList<string>, bool, Task>? PackRequested;
 
     [RelayCommand]
     private Task Pack() => Build(install: false);
@@ -72,12 +72,23 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     private async Task Build(bool install)
     {
-        if (SelectedWorkspace is not { } workspace) { Status = "Nothing selected."; return; }
+        var chosen = Chosen;
+        if (chosen.Count == 0) { Status = "Nothing selected."; return; }
         if (PackRequested is null) return;
 
-        await PackRequested(workspace.Directory, install);
+        await PackRequested(chosen.Select(w => w.Directory).ToList(), install);
         Refresh();
     }
+
+    /// The workspaces a command acts on: everything highlighted, or the one current row.
+    public IReadOnlyList<WorkspaceItem> Chosen =>
+        Selection.Count > 0 ? Selection.ToList()
+        : SelectedWorkspace is { } one ? [one]
+        : [];
+
+    /// Bound to the list's own selection. SelectedWorkspace stays the anchor the file list and
+    /// the details form follow, because those only make sense for one workspace at a time.
+    public ObservableCollection<WorkspaceItem> Selection { get; } = [];
 
     public bool CanPack => SelectedWorkspace is not null;
 
@@ -166,6 +177,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         Root = root;
         var chosen = SelectedWorkspace?.Directory;
 
+        // The rows are about to be replaced by new instances, so anything held here refers to
+        // workspaces that no longer exist as far as the list is concerned.
+        Selection.Clear();
         Workspaces.Clear();
         foreach (var directory in WorkspaceView.Discover(root))
         {
