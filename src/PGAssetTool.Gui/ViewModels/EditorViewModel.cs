@@ -120,6 +120,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// second, separate install of the same mod, so it is shown and not edited.
     [ObservableProperty] private string _packId = "";
 
+    /// What the pack will be built as, so the name field can say so while it is being typed.
+    public string PackFileName => PackBuilder.FileNameFor(new PackManifest
+    {
+        Id = PackId, Name = PackName ?? "",
+    });
+
+    partial void OnPackNameChanged(string value) => OnPropertyChanged(nameof(PackFileName));
+
     /// The picture the pack shows itself with, and the images in the workspace to choose from.
     public ObservableCollection<string> IconChoices { get; } = [];
 

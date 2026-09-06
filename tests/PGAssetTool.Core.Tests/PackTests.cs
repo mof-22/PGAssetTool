@@ -187,4 +187,37 @@ public class PackTests : IDisposable
         Assert.Null(PackBuilder.ReadIcon(notAPack));
         Assert.Null(PackBuilder.ReadIcon(Path.Combine(_workspace, "nothing here.pgmod")));
     }
+
+    [Fact]
+    public void ThePackIsNamedAfterTheModRatherThanTheDirectory()
+    {
+        // Three names for one thing — the folder, the manifest's name, and the id — each
+        // authoritative somewhere different: the manager showed one and the file carried another.
+        var manifest = WriteWorkspace("textures/a.png");
+        Workspace.Save(_workspace, manifest with { Name = "Synthwave Beretta" });
+
+        Assert.Equal("Synthwave Beretta.pgmod", PackBuilder.FileNameFor(Workspace.Read(_workspace)));
+        Assert.Equal(
+            Path.Combine(_workspace, "Synthwave Beretta.pgmod"),
+            PackBuilder.OutputFor(_workspace, Workspace.Read(_workspace)));
+    }
+
+    [Theory]
+    [InlineData("Ultimatum", "Ultimatum.pgmod")]
+    [InlineData("what/now?", "what_now_.pgmod")]
+    [InlineData("  spaced  ", "spaced.pgmod")]
+    [InlineData("trailing.", "trailing.pgmod")]
+    public void AModNameThatWouldNotDoAsAFileNameIsMadeIntoOne(string name, string expected)
+    {
+        // Windows refuses a name ending in a dot, and a slash would put the pack somewhere else
+        // entirely — which is the kind of surprise a build should never spring on anyone.
+        Assert.Equal(expected, PackBuilder.FileNameFor(new PackManifest { Id = "x", Name = name }));
+    }
+
+    [Fact]
+    public void AModWithNoNameFallsBackToItsIdRatherThanToNothing()
+    {
+        Assert.Equal("beretta.pgmod", PackBuilder.FileNameFor(new PackManifest { Id = "beretta", Name = "" }));
+        Assert.Equal("mod.pgmod", PackBuilder.FileNameFor(new PackManifest { Id = "...", Name = "   " }));
+    }
 }

@@ -66,8 +66,8 @@ if (command is "-h" or "--help" or "help")
 if (command == "pack")
 {
     var workspace = positional.FirstOrDefault() ?? Directory.GetCurrentDirectory();
-    var output = Option("out")
-        ?? Path.Combine(workspace, Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace)) + PackBuilder.Extension);
+    // Named after the mod, not after the directory it was built in. See PackBuilder.FileNameFor.
+    var output = Option("out") ?? PackBuilder.OutputFor(workspace, Workspace.Read(workspace));
     try
     {
         var result = PackBuilder.Build(workspace, output);

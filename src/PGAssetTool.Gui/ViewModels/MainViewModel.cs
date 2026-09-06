@@ -350,8 +350,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             foreach (var workspace in workspaces)
             {
-                var output = Path.Combine(workspace,
-                    Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace)) + PackBuilder.Extension);
+                // Named after the mod, not after the directory it was built in: renaming a
+                // working folder should not rename what is about to be handed out.
+                var output = PackBuilder.OutputFor(workspace, Core.Pack.Workspace.Read(workspace));
                 try { built.Add(await Task.Run(() => PackBuilder.Build(workspace, output))); }
                 catch (Exception ex) when (ex is InvalidOperationException or IOException)
                 {

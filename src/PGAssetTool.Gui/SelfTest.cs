@@ -756,9 +756,12 @@ internal static class SelfTest
             // Also on the way out of a failed run. A run that stops before the manager still leaves
             // its pack in the store, and eighteen of them collected there while this test was being
             // fixed. Only files under this test's own name, which nothing else can be called.
+            // Both spellings: a pack is filed under the mod's name now and was filed under its id
+            // before, and a run that fails half way through either scheme still has to tidy up.
             var store = Path.Combine(ModStore.DefaultHome(), "mods");
             if (Directory.Exists(store))
-                foreach (var stale in Directory.GetFiles(store, PackIdentity + "*.pgmod"))
+                foreach (var pattern in new[] { PackName + "*.pgmod", PackIdentity + "*.pgmod" })
+                foreach (var stale in Directory.GetFiles(store, pattern))
                     try { File.Delete(stale); } catch (IOException) { }
         }
     }

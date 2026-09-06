@@ -9,6 +9,38 @@ public static class PackBuilder
 {
     public const string Extension = ".pgmod";
 
+    /// What the built file is called: the mod's name, and nothing else.
+    ///
+    /// It used to be the workspace directory's name, which made three names for one thing — the
+    /// folder, the manifest's name, and the id — each authoritative somewhere different. The
+    /// manager showed one, the file on disk carried another, and renaming a working directory
+    /// quietly renamed what an author was about to hand out.
+    ///
+    /// The folder is where somebody works. The name is what the mod is called, wherever it is
+    /// written down. The id is what the ledger matches an update by, and is nobody's business but
+    /// the tool's.
+    public static string FileNameFor(PackManifest manifest)
+    {
+        var name = Sanitise(manifest.Name);
+        if (name.Length == 0) name = Sanitise(manifest.Id);
+        if (name.Length == 0) name = "mod";
+        return name + Extension;
+    }
+
+    /// Where a pack built from this workspace lands by default: beside the files it came from.
+    public static string OutputFor(string workspace, PackManifest manifest)
+        => Path.Combine(workspace, FileNameFor(manifest));
+
+    private static string Sanitise(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var clean = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim();
+
+        // Windows will not have a name ending in a dot, and a name that is only dots and spaces
+        // leaves nothing behind at all.
+        return clean.TrimEnd('.', ' ');
+    }
+
     public static PackResult Build(string workspace, string outputPath)
     {
         var manifest = Workspace.Read(workspace);

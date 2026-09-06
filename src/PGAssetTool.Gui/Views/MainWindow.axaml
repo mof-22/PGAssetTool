@@ -237,11 +237,20 @@
             <Expander DockPanel.Dock="Bottom" Header="Pack details" Margin="0,8,0,0"
                       IsVisible="{Binding CanPack}">
               <StackPanel Spacing="6" Margin="0,6,0,0">
-                <TextBlock Text="Folder" Classes="dim" />
-                <TextBox Text="{Binding FolderName}" />
+                <!-- Three names looked like three settings. They are one setting, one working
+                     detail and one thing the tool keeps to itself, and saying which is which is
+                     most of the fix. -->
                 <TextBlock Text="Name" Classes="dim" />
                 <TextBox Text="{Binding PackName}" />
-                <TextBlock Text="Author" Classes="dim" />
+                <TextBlock Classes="dim" TextWrapping="Wrap"
+                           Text="{Binding PackFileName, StringFormat='What the mod is called: shown in the manager, and built as {0}'}" />
+
+                <TextBlock Text="Folder" Classes="dim" Margin="0,6,0,0" />
+                <TextBox Text="{Binding FolderName}" />
+                <TextBlock Text="Where you work on it. Nothing outside this list sees it."
+                           Classes="dim" TextWrapping="Wrap" />
+
+                <TextBlock Text="Author" Classes="dim" Margin="0,6,0,0" />
                 <TextBox Text="{Binding PackAuthor}" />
                 <TextBlock Text="Version" Classes="dim" />
                 <TextBox Text="{Binding PackVersion}" />
@@ -253,7 +262,9 @@
                           HorizontalAlignment="Stretch"
                           ToolTip.Tip="Shown beside the mod wherever it is listed. The weapon's own icon to begin with." />
                 <TextBlock Text="{Binding PackId, StringFormat='id: {0}'}" Classes="dim mono"
-                           ToolTip.Tip="The ledger keys an installed mod by this. It is fixed so that reinstalling replaces the mod rather than adding a second copy of it." />
+                           Margin="0,6,0,0" />
+                <TextBlock Classes="dim" TextWrapping="Wrap"
+                           Text="How the tool recognises this mod again. Installing a pack replaces whatever is already installed under the same id, so renaming the mod still updates it rather than leaving two." />
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button Content="Save" Command="{Binding ApplyDetailsCommand}" />
                   <Button Content="Revert" Command="{Binding RevertDetailsCommand}" />
