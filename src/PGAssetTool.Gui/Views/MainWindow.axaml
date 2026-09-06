@@ -248,6 +248,10 @@
                 <TextBlock Text="Description" Classes="dim" />
                 <TextBox Text="{Binding PackDescription}" AcceptsReturn="True" Height="60"
                          TextWrapping="Wrap" />
+                <TextBlock Text="Icon" Classes="dim" />
+                <ComboBox ItemsSource="{Binding IconChoices}" SelectedItem="{Binding PackIcon}"
+                          HorizontalAlignment="Stretch"
+                          ToolTip.Tip="Shown beside the mod wherever it is listed. The weapon's own icon to begin with." />
                 <TextBlock Text="{Binding PackId, StringFormat='id: {0}'}" Classes="dim mono"
                            ToolTip.Tip="The ledger keys an installed mod by this. It is fixed so that reinstalling replaces the mod rather than adding a second copy of it." />
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -340,12 +344,25 @@
                        SelectedItems="{Binding Selection}" SelectionMode="Multiple">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="vm:InstalledRow">
-                    <Grid ColumnDefinitions="44,*" Margin="0,3">
+                    <Grid ColumnDefinitions="44,48,*" Margin="0,3">
                       <TextBlock Grid.Column="0" Text="on" Classes="mono" IsVisible="{Binding Enabled}"
                                  VerticalAlignment="Center" />
                       <TextBlock Grid.Column="0" Text="off" Classes="dim mono" IsVisible="{Binding !Enabled}"
                                  VerticalAlignment="Center" />
-                      <StackPanel Grid.Column="1">
+
+                      <!-- The pack's own picture, which for an extracted weapon is that weapon's
+                           icon. Half a dozen installed re-skins are otherwise six lines of text. -->
+                      <Border Grid.Column="1" Width="40" Height="40" Margin="0,0,8,0"
+                              Background="#111113" CornerRadius="3">
+                        <Panel>
+                          <TextBlock Text="?" Classes="dim" IsVisible="{Binding !HasIcon}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          <Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}"
+                                 Stretch="Uniform" Margin="2" />
+                        </Panel>
+                      </Border>
+
+                      <StackPanel Grid.Column="2" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" />
                         <TextBlock Text="{Binding Detail}" Classes="dim mono" />
                       </StackPanel>

@@ -562,6 +562,29 @@ internal static class SelfTest
                 + string.Join(", ", model.Manager.Bundles.Select(b => $"{b.Bundle} ({b.Explanation})")));
 
             if (model.Manager.Mods.Count == 0) return Fail("the manager saw nothing installed");
+
+            // The pack's picture has to survive the whole way: chosen at extraction, written into
+            // the pack even though it is not one of the files being replaced, and read back out
+            // where the mod is listed. Every step of that is somewhere it could quietly go missing.
+            foreach (var row in model.Manager.Mods.Where(m => mine.Contains(m.Mod.Id)))
+            {
+                var named = PGAssetTool.Core.Pack.PackBuilder.ReadManifest(row.Mod.PackPath).Icon;
+                var picture = PGAssetTool.Core.Pack.PackBuilder.ReadIcon(row.Mod.PackPath);
+
+                // Measured from the bytes, not from the Bitmap: without a window there is nothing to
+                // decode an image into, so its size reads as one pixel however good the file is.
+                var size = picture is null
+                    ? null
+                    : StbImageSharp.ImageInfo.FromStream(new MemoryStream(picture));
+
+                Console.WriteLine($"manager  '{row.Name}' shows '{named}': "
+                    + $"{(size is { } s ? $"{s.Width}x{s.Height}, {picture!.Length:N0} bytes" : "nothing")}");
+
+                if (named.Length == 0) return Fail($"'{row.Name}' was built with no icon named");
+                if (!row.HasIcon) return Fail($"'{row.Name}' names '{named}' and the pack has no such picture");
+                if (size is not { Width: > 1, Height: > 1 })
+                    return Fail($"'{row.Name}' carries '{named}' and it is not a picture");
+            }
             if (model.Manager.Bundles.All(b => b.State != PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
                 return Fail("the bundle just written was not attributed to the mod that wrote it");
             if (model.Manager.GameIsRunning) return Fail("the game should not be running during a self-test");

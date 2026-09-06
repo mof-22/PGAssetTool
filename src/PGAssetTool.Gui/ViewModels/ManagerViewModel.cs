@@ -2,7 +2,9 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PGAssetTool.Core.Game;
+using Avalonia.Media.Imaging;
 using PGAssetTool.Core.Mods;
+using PGAssetTool.Core.Pack;
 
 namespace PGAssetTool.Gui.ViewModels;
 
@@ -15,6 +17,31 @@ public sealed record InstalledRow(InstalledMod Mod)
     public string Detail =>
         $"{Mod.Id}   {Mod.Version}   {Mod.TouchedBundles.Count} bundle(s)"
         + $"   installed {Mod.InstalledAt:yyyy-MM-dd} for {Mod.GameVersion}";
+
+    /// The picture the pack carries, read out of it once.
+    ///
+    /// A list of installed mods is a list of names, and a name is a poor way to tell one weapon
+    /// re-skin from another when several are installed. Read lazily because most of them are never
+    /// looked at, and held afterwards because the rows are rebuilt on every refresh.
+    public Bitmap? Icon => _icon ??= Load();
+
+    private Bitmap? _icon;
+
+    private Bitmap? Load()
+    {
+        try
+        {
+            if (Mod.PackPath.Length == 0 || !File.Exists(Mod.PackPath)) return null;
+            if (PackBuilder.ReadIcon(Mod.PackPath) is not { Length: > 0 } bytes) return null;
+            return new Bitmap(new MemoryStream(bytes));
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    public bool HasIcon => Icon is not null;
 }
 
 /// What a request needs confirming before it happens.

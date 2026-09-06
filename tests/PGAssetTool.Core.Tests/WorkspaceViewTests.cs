@@ -201,4 +201,35 @@ public class WorkspaceViewTests : IDisposable
             after.Operations.Select(o => (o.Source, o.BaselineSha256)));
         Assert.Empty(Workspace.Changed(directory, after));
     }
+
+    [Fact]
+    public void ExtractionPicksTheWeaponsOwnIconWithoutBeingAsked()
+    {
+        // A pack has a picture without anybody deciding to give it one. The icon folder holds the
+        // one image that stands for the whole weapon, and the largest of them is the one meant to
+        // be looked at — the others are chat and profile sizes.
+        var directory = MakeWorkspace("0016_Beretta",
+            ("icon/Beretta_icon1_big.png", new string('x', 400)),
+            ("related/WeaponChatIcons/Weapon25_chaticon.png", "small"),
+            ("textures/Map_Beretta_A.png", "a texture"));
+
+        Assert.Equal("icon/Beretta_icon1_big.png", Workspace.Read(directory).Icon);
+    }
+
+    [Fact]
+    public void AWeaponWithNoIconFolderSimplyHasNoPicture()
+    {
+        var directory = MakeWorkspace("0016_Beretta", ("textures/Map_Beretta_A.png", "a texture"));
+
+        Assert.Equal("", Workspace.Read(directory).Icon);
+    }
+
+    [Fact]
+    public void EveryImageInTheWorkspaceIsOfferedAsAnIcon()
+    {
+        var directory = MakeWorkspace("0016_Beretta",
+            ("icon/big.png", "one"), ("textures/map.png", "two"), ("meshes/gun.glb", "three"));
+
+        Assert.Equal(["icon/big.png", "textures/map.png"], Workspace.Pictures(directory));
+    }
 }

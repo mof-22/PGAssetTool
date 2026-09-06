@@ -39,10 +39,37 @@ public static class Workspace
             Name = name,
             Author = author,
             BuiltAgainstGameVersion = gameVersion,
+            Icon = IconIn(directory, assets),
             Operations = operations,
         };
         File.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
         return manifest;
+    }
+
+    /// The weapon's own icon, which the export has already written out.
+    ///
+    /// Guessed once, at extraction, and recorded — so it is a starting point an author can change
+    /// rather than a rule the rest of the tool has to keep agreeing with. The icon folder is where
+    /// the export puts the one picture that stands for the whole weapon; the largest of the images
+    /// there is the one meant to be looked at, the others being chat and profile sizes.
+    private static string IconIn(string directory, IEnumerable<ExportedAsset> assets)
+        => assets
+            .Where(a => a.Format == "png"
+                && Path.GetDirectoryName(Relative(directory, a.Path))?.Equals("icon",
+                    StringComparison.OrdinalIgnoreCase) == true)
+            .OrderByDescending(a => a.Bytes)
+            .Select(a => Relative(directory, a.Path))
+            .FirstOrDefault() ?? "";
+
+    /// Every image in a workspace, as paths relative to it — what an icon can be chosen from.
+    public static IReadOnlyList<string> Pictures(string directory)
+    {
+        if (!Directory.Exists(directory)) return [];
+
+        return Directory.EnumerateFiles(directory, "*.png", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(directory, p).Replace('\\', '/'))
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public static PackManifest Read(string directory)

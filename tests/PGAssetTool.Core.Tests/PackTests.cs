@@ -131,4 +131,60 @@ public class PackTests : IDisposable
         var error = Assert.Throws<InvalidDataException>(() => PackManifest.Parse(json));
         Assert.Contains("format version", error.Message);
     }
+
+    [Fact]
+    public void TheIconTravelsWithThePackEvenWhenItIsNotBeingReplaced()
+    {
+        // The icon is what the pack looks like, not part of what it does — so it goes in whether or
+        // not it is one of the files being written to the game.
+        var manifest = WriteWorkspace("textures/a.png", "icon/big.png");
+        Workspace.Save(_workspace, manifest with { Icon = "icon/big.png" });
+        Edit("textures/a.png");
+
+        var output = Path.Combine(_workspace, "out.pgmod");
+        var built = PackBuilder.Build(_workspace, output);
+
+        Assert.Equal(1, built.Operations);
+        Assert.Equal("icon/big.png", PackBuilder.ReadManifest(output).Icon);
+        Assert.Equal("original icon/big.png",
+            System.Text.Encoding.UTF8.GetString(PackBuilder.ReadIcon(output)!));
+    }
+
+    [Fact]
+    public void APackThatNamesAnIconItNoLongerHasSaysItHasNone()
+    {
+        // Claiming a picture that is not in the file would be a broken pack rather than one without
+        // a picture, and whatever opened it would have to guess which.
+        var manifest = WriteWorkspace("textures/a.png");
+        Workspace.Save(_workspace, manifest with { Icon = "icon/gone.png" });
+        Edit("textures/a.png");
+
+        var output = Path.Combine(_workspace, "out.pgmod");
+        PackBuilder.Build(_workspace, output);
+
+        Assert.Equal("", PackBuilder.ReadManifest(output).Icon);
+        Assert.Null(PackBuilder.ReadIcon(output));
+    }
+
+    [Fact]
+    public void APackWithNoIconAtAllReadsBackAsHavingNone()
+    {
+        WriteWorkspace("textures/a.png");
+        Edit("textures/a.png");
+
+        var output = Path.Combine(_workspace, "out.pgmod");
+        PackBuilder.Build(_workspace, output);
+
+        Assert.Null(PackBuilder.ReadIcon(output));
+    }
+
+    [Fact]
+    public void SomethingThatIsNotAPackDoesNotThrowWhenAskedForItsIcon()
+    {
+        var notAPack = Path.Combine(_workspace, "rubbish.pgmod");
+        File.WriteAllText(notAPack, "not a zip");
+
+        Assert.Null(PackBuilder.ReadIcon(notAPack));
+        Assert.Null(PackBuilder.ReadIcon(Path.Combine(_workspace, "nothing here.pgmod")));
+    }
 }

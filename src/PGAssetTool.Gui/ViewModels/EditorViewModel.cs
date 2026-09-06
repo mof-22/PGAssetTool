@@ -92,6 +92,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     public bool CanPack => SelectedWorkspace is not null;
 
+    /// What the icon list calls having no icon. A real path can never be this.
+    private const string None = "(none)";
+
     /// The manifest's descriptive half, as a form.
     ///
     /// Held apart from the manifest on disk rather than written through on every keystroke: a
@@ -107,9 +110,24 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// second, separate install of the same mod, so it is shown and not edited.
     [ObservableProperty] private string _packId = "";
 
+    /// The picture the pack shows itself with, and the images in the workspace to choose from.
+    public ObservableCollection<string> IconChoices { get; } = [];
+
+    [ObservableProperty] private string? _packIcon;
+
     private void ShowDetails(WorkspaceItem? workspace)
     {
         var manifest = workspace is null ? null : Details(workspace.Directory);
+
+        IconChoices.Clear();
+        IconChoices.Add(None);
+        if (workspace is not null)
+            foreach (var picture in Workspace.Pictures(workspace.Directory)) IconChoices.Add(picture);
+
+        // Whatever the manifest names, if it is still there. A pack that claims a picture it no
+        // longer carries is worse than one with none.
+        PackIcon = manifest?.Icon is { Length: > 0 } named && IconChoices.Contains(named) ? named : None;
+
         FolderName = workspace?.Name ?? "";
         PackId = manifest?.Id ?? "";
         PackName = manifest?.Name ?? "";
@@ -141,6 +159,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 Author = PackAuthor.Trim(),
                 Version = PackVersion.Trim(),
                 Description = PackDescription.Trim(),
+                Icon = PackIcon is null || PackIcon == None ? "" : PackIcon,
             };
             Workspace.Save(workspace.Directory, manifest);
 

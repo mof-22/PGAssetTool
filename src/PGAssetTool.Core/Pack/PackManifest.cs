@@ -34,6 +34,17 @@ public sealed record PackManifest
     public string Version { get; init; } = "1.0.0";
     public string Description { get; init; } = "";
 
+    /// A picture of the pack, as a path inside it. Empty means it has none.
+    ///
+    /// Whoever installs a pack sees a list of names, and a name is a poor way to tell one weapon
+    /// re-skin from another. Extraction points this at the weapon's own icon, which is already
+    /// being written out, so a pack has one without anybody deciding to give it one — and an author
+    /// who would rather show their own work can point it somewhere else.
+    ///
+    /// Packed even when it is not one of the files being replaced, which is the usual case: the
+    /// icon is what the pack looks like, not part of what it does.
+    public string Icon { get; init; } = "";
+
     /// Recorded, not enforced. Refusing to apply a pack built against an older version would break
     /// every pack on every update, which is the opposite of what the address design is for.
     public string? BuiltAgainstGameVersion { get; init; }
