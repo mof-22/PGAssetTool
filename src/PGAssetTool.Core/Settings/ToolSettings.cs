@@ -37,6 +37,13 @@ public sealed record ToolSettings
     /// Whether the asset tree starts filtered to what can be written back.
     public bool ReplaceableOnly { get; init; } = true;
 
+    /// Whether the editor shows the original and the edit at once rather than one at a time.
+    public bool SideBySide { get; init; }
+
+    /// Whether the manager asks before it rewrites the game. The warning about the game being open
+    /// is not covered by this and is never skipped.
+    public bool ConfirmChanges { get; init; } = true;
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

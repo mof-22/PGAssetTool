@@ -140,8 +140,6 @@ public sealed class ModStore
     ///
     /// A pack built into a workspace is one deletion away from leaving an installed mod that cannot
     /// be reapplied or removed cleanly — which happened, and cost an uninstall to recover from.
-    /// The name is kept, with a digest of the original path in front of it so two packs called the
-    /// same thing from different places do not collide.
     public string Keep(string packPath)
     {
         Directory.CreateDirectory(ModsDirectory);
@@ -152,13 +150,61 @@ public sealed class ModStore
                 StringComparison.OrdinalIgnoreCase))
             return full;
 
-        var digest = Convert.ToHexStringLower(
-            SHA256.HashData(Encoding.UTF8.GetBytes(full.ToLowerInvariant())))[..8];
-        var kept = Path.Combine(ModsDirectory, $"{digest}-{Path.GetFileName(packPath)}");
-
-
+        var kept = KeptPathFor(full);
         File.Copy(packPath, kept, overwrite: true);
         return kept;
+    }
+
+    /// The name a pack built at `sourcePath` is filed under.
+    ///
+    /// The digest goes after the name rather than in front of it: the folder is browsed by a person
+    /// looking for a mod they built, and eight hex characters at the start of every row means
+    /// sorting by name sorts by nothing and reading the list means reading past the same noise each
+    /// time. It still has to be there — two packs called the same thing from different directories
+    /// would otherwise be one file — but it belongs where a disambiguator belongs.
+    private string KeptPathFor(string sourcePath)
+    {
+        var digest = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(sourcePath.ToLowerInvariant())))[..8];
+        var name = Path.GetFileNameWithoutExtension(sourcePath);
+        return Path.Combine(ModsDirectory, $"{name}-{digest}{Path.GetExtension(sourcePath)}");
+    }
+
+    /// Moves packs filed under the old digest-first name, and points the ledger at where they went.
+    ///
+    /// Renaming without the second half would leave every installed mod naming a file that is no
+    /// longer there, and with it no way to reapply or cleanly remove one.
+    public IReadOnlyList<string> TidyKeptPackNames()
+    {
+        if (!Directory.Exists(ModsDirectory)) return [];
+
+        var moved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.GetFiles(ModsDirectory, "*" + Pack.PackBuilder.Extension))
+        {
+            var name = Path.GetFileNameWithoutExtension(path);
+            if (name.Length < 10 || name[8] != '-') continue;
+            var digest = name[..8];
+            if (!digest.All(char.IsAsciiHexDigitLower)) continue;
+
+            var renamed = Path.Combine(
+                ModsDirectory, $"{name[9..]}-{digest}{Path.GetExtension(path)}");
+            if (File.Exists(renamed)) continue;
+
+            File.Move(path, renamed);
+            moved[Path.GetFullPath(path)] = renamed;
+        }
+
+        if (moved.Count == 0) return [];
+
+        string? Where(string path) => path.Length == 0 ? null : Path.GetFullPath(path);
+
+        var installed = Read();
+        if (installed.Exists(m => Where(m.PackPath) is { } at && moved.ContainsKey(at)))
+            Write(installed.Select(m => Where(m.PackPath) is { } at && moved.TryGetValue(at, out var to)
+                ? m with { PackPath = to }
+                : m));
+
+        return moved.Values.Select(Path.GetFileName).ToList()!;
     }
 
     public bool HasBackup(CacheKind cache, string bundle, string hash) => File.Exists(BackupPathFor(cache, bundle, hash));

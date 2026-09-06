@@ -8,10 +8,26 @@ using PGAssetTool.Core.Preview;
 
 namespace PGAssetTool.Gui.ViewModels;
 
-/// What is shown beside the tree for whichever node is selected.
-public sealed partial class PreviewViewModel : ObservableObject
+/// Whether the alpha toggle follows the asset or follows the person looking at it.
+///
+/// Shared by every pane, so flipping it in the editor's left half does not leave the right half
+/// disagreeing, and moving between panes keeps the answer. Not saved between runs: the automatic
+/// default is the better starting point each time, and a deliberate choice is about the picture in
+/// front of you rather than a standing preference.
+public sealed class AlphaPreference
 {
+    /// Null until somebody works the toggle; after that, their answer for everything.
+    public bool? Chosen { get; set; }
+}
+
+/// What is shown beside the tree for whichever node is selected.
+public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : ObservableObject
+{
+    private readonly AlphaPreference _alpha = alpha ?? new AlphaPreference();
     private PreviewImage? _picture;
+
+    /// Set while Show is choosing the value, so the automatic default is not mistaken for a choice.
+    private bool _deciding;
 
     [ObservableProperty] private Bitmap? _image;
     [ObservableProperty] private UnityMesh? _mesh;
@@ -40,7 +56,11 @@ public sealed partial class PreviewViewModel : ObservableObject
     public bool HasMesh => Mesh is not null;
     public bool CanToggleAlpha => _picture is not null;
 
-    partial void OnShowAlphaChanged(bool value) => Redraw();
+    partial void OnShowAlphaChanged(bool value)
+    {
+        if (!_deciding) _alpha.Chosen = value;
+        Redraw();
+    }
 
     public void Clear(string? why = null)
     {
@@ -60,9 +80,16 @@ public sealed partial class PreviewViewModel : ObservableObject
         Caption = $"{caption}   {picture.Width}×{picture.Height}";
         Nothing = null;
 
+        // What the asset is, until somebody says otherwise — and then what they said, for every
+        // picture after it. Resetting to the automatic answer each time meant an icon came back with
+        // its alpha honoured however many times it had just been turned off.
+        var wanted = _alpha.Chosen ?? alphaIsCoverage;
+
         // Assigning the property redraws through its change handler, but only when the value moves.
-        var unchanged = ShowAlpha == alphaIsCoverage;
-        ShowAlpha = alphaIsCoverage;
+        _deciding = true;
+        var unchanged = ShowAlpha == wanted;
+        ShowAlpha = wanted;
+        _deciding = false;
         if (unchanged) Redraw();
     }
 

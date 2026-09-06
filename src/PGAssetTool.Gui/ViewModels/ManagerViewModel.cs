@@ -70,6 +70,7 @@ public sealed partial class ManagerViewModel : ObservableObject
         if (_game() is not { } game) { Status = "The game is not open."; return; }
 
         var store = new ModStore(game);
+        store.TidyKeptPackNames();
         var installed = store.Read();
 
         Mods.Clear();

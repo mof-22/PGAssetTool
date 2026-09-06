@@ -153,6 +153,24 @@ internal static class SelfTest
                 Console.WriteLine($"         alpha honoured: {model.Preview.ShowAlpha} (an icon sits on nothing)");
 
                 if (!model.Preview.ShowAlpha) return Fail("an icon was shown with its alpha ignored");
+
+                // Automatic until somebody disagrees, and then their answer for everything after.
+                // Re-deciding per asset meant an icon came back with its alpha honoured however
+                // many times in a row it had just been turned off.
+                model.ToggleAlphaCommand.Execute(null);
+                if (model.Preview.ShowAlpha) return Fail("the alpha toggle did not turn off");
+
+                detail.SelectedNode = detail.Roots[0];
+                detail.SelectedNode = icon;
+                for (var waited = 0; model.Preview.Nothing is not null && waited < 30_000; waited += 50)
+                    Thread.Sleep(50);
+
+                Console.WriteLine($"         after turning it off, the next picture kept it off: "
+                    + $"{!model.Preview.ShowAlpha}");
+                if (model.Preview.ShowAlpha)
+                    return Fail("the alpha choice was thrown away when the next picture loaded");
+
+                model.ToggleAlphaCommand.Execute(null);
             }
 
             // The filter is what the tree shows by default, and it has to come from the import
@@ -335,7 +353,13 @@ internal static class SelfTest
             // the original one, or turning that option on would flatten every mask in the game.
             if (RoundTripWithoutAlpha(model) is { } alphaProblem) return Fail(alphaProblem);
 
-            // With something genuinely edited, the whole loop: build a pack and put it in the game.
+            // What was installed before this run touched anything. A test that writes to the game
+            // has to leave it as it found it, and the only way to know that is to have looked
+            // first — an earlier version of this left a mod behind every time the workspace it
+            // happened to pick changed, and nothing noticed for days.
+            var wasInstalled = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read()
+                .Select(m => m.Id).ToHashSet();
+
             // With something genuinely edited, the whole loop: build a pack and put it in the game.
             // Only files that differ are packed, so this is also what says the edit was noticed.
             model.Editor.PackAndApplyCommand.Execute(null);
@@ -349,6 +373,9 @@ internal static class SelfTest
             // Only what this run installed: someone else's mods are not this test's to touch.
             var mine = PackId(model);
             var installed = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
+            var strays = installed.Select(m => m.Id).Where(id => id != mine && !wasInstalled.Contains(id)).ToList();
+            if (strays.Count > 0)
+                return Fail($"this run installed {string.Join(", ", strays)} and has no plan to remove them");
             if (installed.All(m => m.Id != mine)) return Fail($"'{mine}' is not in the ledger");
             Console.WriteLine($"pack     installed: {string.Join(", ", installed.Select(m => m.Id))}");
             if (installed.Count == 0) return Fail("nothing ended up in the ledger");
@@ -401,8 +428,15 @@ internal static class SelfTest
 
             var mineNow = model.Manager.Mods.First(m => m.Mod.Id == mine);
             if (mineNow.Enabled) return Fail("the mod is still on after being turned off");
-            if (model.Manager.Bundles.Any(b => b.State == PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
-                return Fail("turning it off left a bundle changed");
+
+            // Only this mod's own bundles. Anything else installed and still on is supposed to be
+            // left written — asserting the whole game went vanilla passed only for as long as this
+            // test happened to be the only thing installed.
+            var mineBundles = mineNow.Mod.TouchedBundles.Keys.ToHashSet();
+            if (model.Manager.Bundles.Any(b =>
+                    mineBundles.Contains(b.Bundle)
+                    && b.State == PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
+                return Fail("turning it off left one of its own bundles changed");
 
             // The pack is kept beside the tool, so deleting the workspace cannot strand it.
             var kept = mineNow.Mod.PackPath;
@@ -422,6 +456,10 @@ internal static class SelfTest
 
             Console.WriteLine($"manager  after removing: {model.Manager.Status}");
             if (model.Manager.Mods.Any(m => m.Mod.Id == mine)) return Fail("the mod is still installed");
+
+            var left = model.Manager.Mods.Select(m => m.Mod.Id).Where(id => !wasInstalled.Contains(id)).ToList();
+            Console.WriteLine($"manager  installed before this run: {wasInstalled.Count}, left behind by it: {left.Count}");
+            if (left.Count > 0) return Fail($"this run left {string.Join(", ", left)} in the game");
             if (model.Status.Contains("Value cannot be null"))
                 return Fail($"the shell reported an error during removal: {model.Status}");
 

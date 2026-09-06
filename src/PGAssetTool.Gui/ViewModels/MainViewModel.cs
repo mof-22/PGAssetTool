@@ -9,7 +9,6 @@ using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Mods;
 using PGAssetTool.Core.Settings;
-using PGAssetTool.Core.Mods;
 using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Preview;
 using PGAssetTool.Core.Weapons;
@@ -25,15 +24,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Guards the bundle reader, which is not safe to use from two threads at once.
     private readonly SemaphoreSlim _reading = new(1, 1);
 
+    /// One answer to the alpha question for the whole window; see AlphaPreference.
+    private readonly AlphaPreference _alpha = new();
+
     public MainViewModel()
     {
-        Preview = new PreviewViewModel();
+        Preview = new PreviewViewModel(_alpha);
         Preview.PropertyChanged += OnPreviewChanged;
-        Editor = new EditorViewModel(() => _bundles, _reading);
+        Editor = new EditorViewModel(() => _bundles, _reading, _alpha);
         Editor.PackRequested += BuildPack;
 
         Manager = new ManagerViewModel(() => _installation);
         Manager.Around = WithReaderClosed;
+
+        // These two live where they are used rather than in the options window — they are worked
+        // mid-task, and a round trip through a dialog for each would be worse. Being where they are
+        // used is no reason to forget them between runs, though, so the shell writes them out.
+        Editor.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(EditorViewModel.SideBySide)) Remember();
+        };
+        Manager.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ManagerViewModel.ConfirmChanges)) Remember();
+        };
     }
 
     [ObservableProperty] private string _status = "Looking for the game…";
@@ -103,6 +117,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Language = _settings.Language;
         ReplaceableOnly = _settings.ReplaceableOnly;
         OpaqueTextures = _settings.OpaqueTextures;
+        Editor.SideBySide = _settings.SideBySide;
+        Manager.ConfirmChanges = _settings.ConfirmChanges;
         _loading = false;
 
         try
@@ -435,6 +451,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _settings = _settings with
         {
             Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
+            SideBySide = Editor.SideBySide, ConfirmChanges = Manager.ConfirmChanges,
         };
         try { _settings.Save(); }
         catch (IOException) { }

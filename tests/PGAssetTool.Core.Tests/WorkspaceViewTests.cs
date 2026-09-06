@@ -110,4 +110,19 @@ public class WorkspaceViewTests : IDisposable
     }
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
+
+    [Theory]
+    [InlineData("icon/Beretta_icon1_big.png", true)]
+    [InlineData("related/WeaponChatIcons/Weapon25_chaticon.png", true)]
+    [InlineData("textures/Map_Beretta_A.png", false)]
+    [InlineData("meshes/Beretta_3_Mesh.glb", false)]
+    public void OnlyIconsMeanCoverageByTheirAlphaChannel(string relativePath, bool coverage)
+    {
+        // A model texture keeps emission there, so honouring it blanks the picture; an icon really
+        // is cut out. The folder is what the workspace records, so the folder is what decides.
+        var file = new WorkspaceFile(
+            relativePath, relativePath, new AssetAddress("", "", ""), "replaceTexture", false, 0);
+
+        Assert.Equal(coverage, file.AlphaIsCoverage);
+    }
 }

@@ -16,6 +16,14 @@ public sealed record WorkspaceFile(
     }
 
     public string Name => RelativePath[(RelativePath.LastIndexOf('/') + 1)..];
+
+    /// Whether this file's alpha channel means transparency rather than something else.
+    ///
+    /// Icons are the ones that mean it — every one of them sits on an empty background — and the
+    /// export puts them in folders that say so. A model texture keeps emission there instead, so
+    /// honouring it blanks the picture. Decided from the folder because that is what the workspace
+    /// actually records; the asset it came from is no longer at hand by the time anyone looks.
+    public bool AlphaIsCoverage => Folder.Contains("icon", StringComparison.OrdinalIgnoreCase);
 }
 
 /// A directory an author is working in, as it stands right now.

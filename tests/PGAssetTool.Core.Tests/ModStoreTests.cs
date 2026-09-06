@@ -253,4 +253,59 @@ public class ModStoreTests : IDisposable
     [Fact]
     public void ThePackStoreSitsBesideEverythingElseTheToolKeeps()
         => Assert.Equal(Path.Combine(_home, "mods"), _store.ModsDirectory);
+
+    [Fact]
+    public void TheDigestGoesAfterTheNameSoTheFolderSortsByWhatItHolds()
+    {
+        var built = Path.Combine(_root, "somewhere", "0016_Beretta.pgmod");
+        Directory.CreateDirectory(Path.GetDirectoryName(built)!);
+        File.WriteAllText(built, "a pack");
+
+        var kept = Path.GetFileName(_store.Keep(built));
+
+        Assert.StartsWith("0016_Beretta-", kept, StringComparison.Ordinal);
+        Assert.EndsWith(".pgmod", kept, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PacksFiledUnderTheOldNameAreMovedAndTheLedgerFollowsThem()
+    {
+        // Renaming without the second half would leave the mod naming a file that is not there,
+        // and with it no way to reapply or cleanly remove it.
+        Directory.CreateDirectory(_store.ModsDirectory);
+        var old = Path.Combine(_store.ModsDirectory, "085cc273-0016_Beretta.pgmod");
+        File.WriteAllText(old, "a pack");
+        _store.Write([Installed("beretta", old)]);
+
+        var moved = _store.TidyKeptPackNames();
+
+        Assert.Equal(["0016_Beretta-085cc273.pgmod"], moved);
+        Assert.False(File.Exists(old));
+        Assert.Equal(
+            Path.Combine(_store.ModsDirectory, "0016_Beretta-085cc273.pgmod"),
+            _store.Read().Single().PackPath);
+    }
+
+    [Fact]
+    public void APackAlreadyNamedTheNewWayIsNotTakenForAnOldOne()
+    {
+        // "0016_Ber" is eight characters followed by a dash, which is the shape being looked for —
+        // but not hex, so it is a name rather than a digest.
+        Directory.CreateDirectory(_store.ModsDirectory);
+        foreach (var name in new[] { "0016_Beretta-085cc273.pgmod", "0016_Ber-etta.pgmod" })
+            File.WriteAllText(Path.Combine(_store.ModsDirectory, name), "a pack");
+
+        Assert.Empty(_store.TidyKeptPackNames());
+        Assert.Equal(2, Directory.GetFiles(_store.ModsDirectory).Length);
+    }
+
+    private static InstalledMod Installed(string id, string packPath) => new()
+    {
+        Id = id,
+        Name = id,
+        PackPath = packPath,
+        InstalledAt = DateTimeOffset.UnixEpoch,
+        GameVersion = "1.0",
+        TouchedBundles = new Dictionary<string, string>(),
+    };
 }

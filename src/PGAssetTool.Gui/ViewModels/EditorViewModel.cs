@@ -27,8 +27,13 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private FileSystemWatcher? _watcher;
     private Timer? _settle;
 
-    public EditorViewModel(Func<BundleSet?> bundles, SemaphoreSlim reading)
-        => (_bundles, _reading) = (bundles, reading);
+    public EditorViewModel(Func<BundleSet?> bundles, SemaphoreSlim reading, AlphaPreference? alpha = null)
+    {
+        (_bundles, _reading) = (bundles, reading);
+        alpha ??= new AlphaPreference();
+        Original = new PreviewViewModel(alpha);
+        Edited = new PreviewViewModel(alpha);
+    }
 
     public ObservableCollection<WorkspaceItem> Workspaces { get; } = [];
     public ObservableCollection<WorkspaceFile> Files { get; } = [];
@@ -39,8 +44,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _status = "";
 
     /// The original as the game holds it, and the file as it stands now.
-    public PreviewViewModel Original { get; } = new();
-    public PreviewViewModel Edited { get; } = new();
+    public PreviewViewModel Original { get; }
+    public PreviewViewModel Edited { get; }
 
     [ObservableProperty] private bool _sideBySide;
 
@@ -136,8 +141,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                     Game: FromGame(bundles, file),
                     Disk: AssetPreview.FromFile(file.FullPath)));
 
-                ShowIn(Original, loaded.Game, $"{file.Name} in the game");
-                ShowIn(Edited, loaded.Disk, file.Edited ? $"{file.Name} as edited" : $"{file.Name} unchanged");
+                ShowIn(Original, loaded.Game, $"{file.Name} in the game", file.AlphaIsCoverage);
+                ShowIn(Edited, loaded.Disk,
+                    file.Edited ? $"{file.Name} as edited" : $"{file.Name} unchanged", file.AlphaIsCoverage);
             }
             finally
             {
@@ -167,11 +173,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         };
     }
 
-    private static void ShowIn(PreviewViewModel preview, object? loaded, string caption)
+    private static void ShowIn(PreviewViewModel preview, object? loaded, string caption, bool alphaIsCoverage)
     {
         switch (loaded)
         {
-            case PreviewImage picture: preview.Show(picture, caption, alphaIsCoverage: false); break;
+            case PreviewImage picture: preview.Show(picture, caption, alphaIsCoverage); break;
             case UnityMesh mesh: preview.Show(mesh, caption, null); break;
             default: preview.Clear("Nothing to show for this one."); break;
         }
