@@ -4,17 +4,38 @@ namespace PGAssetTool.Core.Preview;
 
 /// How the model is being looked at. Angles are radians; distance is a multiple of the model's own
 /// radius, so a pistol and a rocket launcher both start out filling the frame.
-/// <param name="PanX">
-/// Where the model sits in the frame, as a fraction of the half-frame: 0 is centred, 1 is a half
-/// frame to the right. Kept in those units rather than in pixels so a resized pane keeps the model
-/// where it was put, and so zooming in on the muzzle of a rocket launcher does not have to be
-/// redone after every drag.
+/// <param name="PivotX">
+/// The point of the model held at the middle of the frame, offset from the model's own centre and
+/// measured in model radii. Zero is the centre of the model, which is where a view starts.
+///
+/// This is what turning happens around, so panning something to the middle and then turning keeps
+/// it there — pan the muzzle of a rocket launcher into view, turn, and the muzzle stays in view.
+/// Holding the offset in the frame instead would have turned the model about its own centre and
+/// swung whatever was being looked at straight back out of the frame.
+///
+/// In radii rather than in model units so it means the same thing on a pistol and a launcher, and
+/// so a resized pane keeps the framing rather than throwing it away.
 /// </param>
 public sealed record Camera(
     float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1.5f, float Roll = 0f,
-    float PanX = 0f, float PanY = 0f)
+    float PivotX = 0f, float PivotY = 0f, float PivotZ = 0f)
 {
-    public Camera Panned(float dx, float dy) => this with { PanX = PanX + dx, PanY = PanY + dy };
+    /// <param name="dx">Rightwards, in half-frames: 1 moves the model a half-frame to the right.</param>
+    /// <param name="dy">Upwards, in the same units.</param>
+    public Camera Panned(float dx, float dy)
+    {
+        // The cursor drags the model, so the point being held moves the other way. A half-frame is
+        // Distance radii across, which is what turns the drag into the units the pivot is kept in.
+        var view = MeshRenderer.View(this);
+        var (right, up) = (-dx * Distance, -dy * Distance);
+
+        return this with
+        {
+            PivotX = PivotX + view.Rx * right + view.Ux * up,
+            PivotY = PivotY + view.Ry * right + view.Uy * up,
+            PivotZ = PivotZ + view.Rz * right + view.Uz * up,
+        };
+    }
 
     public Camera Turned(float dYaw, float dPitch) => this with
     {
@@ -98,11 +119,12 @@ public static class MeshRenderer
         // Distance is literally how many model radii the half-frame covers, so 1.5 leaves a margin.
         var scale = Math.Min(width, height) * 0.5f / (radius * camera.Distance);
 
-        // Panning moves where the middle of the model lands, in half-frames, so it survives a
-        // resize and does not have to be redone every time the pane changes size.
-        var half = Math.Min(width, height) * 0.5f;
-        var centreX = width * 0.5f + camera.PanX * half;
-        var centreY = height * 0.5f - camera.PanY * half;
+        // Whatever the pivot names is what sits in the middle of the frame, and so what turning
+        // happens around. Subtracted from the model rather than added to the drawing, which is the
+        // whole difference: the other way turns the model about its own centre and swings whatever
+        // was panned into view straight back out of it.
+        var (pivotX, pivotY, pivotZ) =
+            (camera.PivotX * radius, camera.PivotY * radius, camera.PivotZ * radius);
 
         var depth = target.Depth;
         Array.Fill(depth, float.NegativeInfinity);
@@ -138,10 +160,10 @@ public static class MeshRenderer
                         positions[vertex * 3] - centre.X,
                         positions[vertex * 3 + 1] - centre.Y,
                         positions[vertex * 3 + 2] - centre.Z);
-                    var (x, y, z) = view.Apply(mx, my, mz);
+                    var (x, y, z) = view.Apply(mx - pivotX, my - pivotY, mz - pivotZ);
 
-                    sx[corner] = centreX + x * scale;
-                    sy[corner] = centreY - y * scale;
+                    sx[corner] = width * 0.5f + x * scale;
+                    sy[corner] = height * 0.5f - y * scale;
                     sz[corner] = z;
 
                     shade[corner] = normals is null ? 1f : Lambert(view, upright, normals, vertex);
@@ -275,14 +297,14 @@ public static class MeshRenderer
     }
 
     /// The camera's axes, as three rows that turn a model-space vector into view space.
-    private readonly record struct Basis(
+    internal readonly record struct Basis(
         float Rx, float Ry, float Rz, float Ux, float Uy, float Uz, float Fx, float Fy, float Fz)
     {
         public (float X, float Y, float Z) Apply(float x, float y, float z)
             => (Rx * x + Ry * y + Rz * z, Ux * x + Uy * y + Uz * z, Fx * x + Fy * y + Fz * z);
     }
 
-    private static Basis View(Camera camera)
+    internal static Basis View(Camera camera)
     {
         var (cy, sy) = (MathF.Cos(camera.Yaw), MathF.Sin(camera.Yaw));
         var (cp, sp) = (MathF.Cos(camera.Pitch), MathF.Sin(camera.Pitch));

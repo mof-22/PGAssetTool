@@ -498,4 +498,40 @@ public class MeshRendererTests
             }
         return (low + high) / 2;
     }
+
+    [Fact]
+    public void WhatWasPannedToTheMiddleStaysThereWhenTheViewTurns()
+    {
+        // The whole point of the change: turning happens about whatever is in the middle of the
+        // frame, not about the model's own centre. Pan the right-hand end of a bar into the middle
+        // and turn; it has to still be there. Turning about the model centre instead would pull it
+        // away, and the middle of the frame would be empty.
+        var bar = Mesh([-1, -0.2f, 0, 1, -0.2f, 0, 1, 0.2f, 0, -1, 0.2f, 0], [0, 1, 2, 0, 2, 3]);
+        var straight = new Camera(Yaw: 0, Pitch: 0);
+
+        // A half-frame is Distance radii across and the bar is about a radius long each way, so
+        // this puts the middle of the frame just inside its right-hand end.
+        var panned = straight.Panned(-0.6f, 0);
+        Assert.NotNull(At(Draw(bar, panned), Size / 2, Size / 2));
+
+        var turned = Draw(bar, panned.Turned(1.2f, 0));
+        Assert.True(
+            Enumerable.Range(Size / 2 - 2, 5).Any(y => At(turned, Size / 2, y) is not null),
+            "turning moved the panned end out of the middle of the frame");
+    }
+
+    [Fact]
+    public void PanningBackTheWayItCameLeavesTheViewWhereItStarted()
+    {
+        var quad = Quad(scale: 0.3f);
+        var start = new Camera(Yaw: 0.4f, Pitch: 0.2f, Roll: 0.3f);
+
+        var there = start.Panned(0.4f, -0.25f);
+        var back = there.Panned(-0.4f, 0.25f);
+
+        Assert.Equal(start.PivotX, back.PivotX, 5);
+        Assert.Equal(start.PivotY, back.PivotY, 5);
+        Assert.Equal(start.PivotZ, back.PivotZ, 5);
+        Assert.Equal(Covered(Draw(quad, start)), Covered(Draw(quad, back)));
+    }
 }
