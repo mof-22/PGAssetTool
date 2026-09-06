@@ -272,6 +272,10 @@
                 <ComboBox ItemsSource="{Binding IconChoices}" SelectedItem="{Binding IconFile}"
                           HorizontalAlignment="Stretch"
                           ToolTip.Tip="Shown beside the mod wherever it is listed. The weapon's own icon to begin with." />
+                <CheckBox Content="Protect this pack" IsChecked="{Binding Protect}" Margin="0,6,0,0"
+                          IsThreeState="True"
+                          ToolTip.Tip="Signs it and keeps it from opening as a zip. Leave it indeterminate to follow the setting in Options." />
+
                 <TextBlock Text="{Binding PackId, StringFormat='id: {0}'}" Classes="dim mono"
                            Margin="0,6,0,0" />
                 <TextBlock Classes="dim" TextWrapping="Wrap"
@@ -456,6 +460,11 @@
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
                   </ScrollViewer>
+
+                  <TextBlock Text="{Binding Signature}" Classes="dim" Margin="0,6,0,0"
+                             TextWrapping="Wrap" />
+                  <TextBlock Text="Installing it is still allowed; it simply is not what its author built."
+                             Classes="dim" TextWrapping="Wrap" IsVisible="{Binding WasAltered}" />
 
                   <TextBlock Text="{Binding Id, StringFormat='id: {0}'}" Classes="dim mono" Margin="0,6,0,0" />
                   <TextBlock Text="{Binding Built}" Classes="dim" />

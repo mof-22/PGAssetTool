@@ -475,6 +475,12 @@ internal static class SelfTest
 
             if (PackIconIsTheModel(model, written) is { } iconProblem) return Fail(iconProblem);
 
+            // Built protected once, so the whole loop is exercised on a signed pack rather than on
+            // the plain one: what the manager reads, what the applier unpacks, and what the seal
+            // says about it are three different code paths through the same file.
+            model.ProtectPacks = true;
+            Core.Pack.Workspace.Save(written, Core.Pack.Workspace.Read(written) with { Protect = null });
+
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
 
@@ -583,6 +589,23 @@ internal static class SelfTest
 
                 Console.WriteLine($"manager  '{row.Name}' shows '{named}': "
                     + $"{(size is { } s ? $"{s.Width}x{s.Height}, {picture!.Length:N0} bytes" : "nothing")}");
+
+                // A protected pack has to stay openable by this tool and stay shut to everything
+                // else, and the manager has to say who built it. Checked on the pack the manager is
+                // actually pointing at, not on one made for the occasion.
+                var seal = Core.Pack.PackFile.Inspect(row.Mod.PackPath);
+                Console.WriteLine($"manager  '{row.Name}' is {seal.Describe}");
+
+                if (!seal.Protected) return Fail($"'{row.Name}' was built protected and is not");
+                if (seal.State != Core.Pack.SealState.Signed)
+                    return Fail($"'{row.Name}' does not verify against the key that signed it");
+
+                try
+                {
+                    System.IO.Compression.ZipFile.OpenRead(row.Mod.PackPath).Dispose();
+                    return Fail($"'{row.Name}' is protected and still opens as a zip");
+                }
+                catch (InvalidDataException) { }
 
                 if (named.Length == 0) return Fail($"'{row.Name}' was built with no icon named");
                 if (!row.HasIcon) return Fail($"'{row.Name}' names '{named}' and the pack has no such picture");

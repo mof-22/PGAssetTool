@@ -94,6 +94,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Recorded in the manifest of anything extracted from here on. Editable per pack afterwards.
     [ObservableProperty] private string _author = "";
 
+    /// Whether a built pack is signed and scrambled unless its own manifest says otherwise.
+    [ObservableProperty] private bool _protectPacks;
+
+    partial void OnProtectPacksChanged(bool value) => Remember();
+
+    /// The key packs are signed with, shown so an author can publish it: somebody who knows this
+    /// can tell a pack you built from one re-signed by whoever altered it.
+    public string AuthorFingerprint
+    {
+        get
+        {
+            try
+            {
+                using var mine = PackAuthor.Mine(SettingsHome);
+                return $"your key: {mine.Fingerprint}";
+            }
+            catch (Exception e) when (e is IOException or System.Security.Cryptography.CryptographicException)
+            {
+                return $"no key could be made: {e.Message}";
+            }
+        }
+    }
+
     public ObservableCollection<LanguageOption> Languages { get; } = [];
 
     /// Shown in the options window, because where a portable tool keeps its state is worth being
@@ -143,6 +166,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Editor.SideBySide = _settings.SideBySide;
         Manager.ConfirmChanges = _settings.ConfirmChanges;
         Manager.TileSize = _settings.TileSize;
+        ProtectPacks = _settings.ProtectPacks;
         _loading = false;
 
         try
@@ -361,17 +385,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var built = new List<PackResult>();
             var refused = new List<string>();
 
+            // Made once for the batch, and only if something in it asks to be signed. Reading the
+            // key is cheap; making one the first time is not something to do unasked.
+            PackAuthor? signer = null;
+
             foreach (var workspace in workspaces)
             {
                 // Named after the mod, not after the directory it was built in: renaming a
                 // working folder should not rename what is about to be handed out.
-                var output = PackBuilder.OutputFor(workspace, Core.Pack.Workspace.Read(workspace));
-                try { built.Add(await Task.Run(() => PackBuilder.Build(workspace, output))); }
+                var manifest = Core.Pack.Workspace.Read(workspace);
+                var output = PackBuilder.OutputFor(workspace, manifest);
+
+                var protect = manifest.Protect ?? ProtectPacks;
+                if (protect) signer ??= PackAuthor.Mine(SettingsHome);
+                var with = protect ? signer : null;
+                try { built.Add(await Task.Run(() => PackBuilder.Build(workspace, output, with))); }
                 catch (Exception ex) when (ex is InvalidOperationException or IOException)
                 {
                     refused.Add($"{Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace))}: {ex.Message}");
                 }
             }
+
+            signer?.Dispose();
 
             var trouble = refused.Count > 0 ? "  " + string.Join("  ", refused) : "";
             Status = $"{built.Count} pack(s), {built.Sum(b => b.Operations)} operation(s), "
@@ -542,7 +577,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
             Author = Author.Trim(),
             SideBySide = Editor.SideBySide, ConfirmChanges = Manager.ConfirmChanges,
-            TileSize = Manager.TileSize,
+            TileSize = Manager.TileSize, ProtectPacks = ProtectPacks,
         };
         try { _settings.Save(SettingsHome); }
         catch (IOException) { }

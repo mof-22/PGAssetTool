@@ -133,6 +133,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string? _iconFile;
 
+    /// Whether this pack is signed and scrambled when built. Null means whatever the setting says.
+    [ObservableProperty] private bool? _protect;
+
     private void ShowDetails(WorkspaceItem? workspace)
     {
         var manifest = workspace is null ? null : Details(workspace.Directory);
@@ -145,6 +148,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         // Whatever the manifest names, if it is still there. A pack that claims a picture it no
         // longer carries is worse than one with none.
         IconFile = manifest?.Icon is { Length: > 0 } named && IconChoices.Contains(named) ? named : None;
+        Protect = manifest?.Protect;
 
         FolderName = workspace?.Name ?? "";
         PackId = manifest?.Id ?? "";
@@ -178,6 +182,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 Version = PackVersion.Trim(),
                 Description = PackDescription.Trim(),
                 Icon = IconFile is null || IconFile == None ? "" : IconFile,
+                Protect = Protect,
             };
             Workspace.Save(workspace.Directory, manifest);
 

@@ -158,7 +158,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         List<AppliedOperation> applied, List<string> failed, List<SharedAsset> shared)
     {
         var manifest = PackBuilder.ReadManifest(mod.PackPath);
-        using var archive = ZipFile.OpenRead(mod.PackPath);
+        using var archive = PackFile.Open(mod.PackPath);
         var staging = Directory.CreateTempSubdirectory("pgassettool-apply");
         var touched = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 

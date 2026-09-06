@@ -30,6 +30,14 @@
     </StackPanel>
 
     <StackPanel Spacing="6">
+      <CheckBox Content="Protect new packs" IsChecked="{Binding ProtectPacks}" />
+      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                 Text="Signs a built pack with a key kept beside this tool, and keeps it from opening as a zip. Anyone who alters one afterwards shows up as having done so. It stops a casual look inside and nothing more — this tool's own source says how the scrambling works — and each pack can override this in the editor." />
+      <TextBlock Text="{Binding AuthorFingerprint}" Opacity="0.55" FontSize="11"
+                 FontFamily="Consolas, Menlo, monospace" TextWrapping="Wrap" />
+    </StackPanel>
+
+    <StackPanel Spacing="6">
       <CheckBox Content="Show only what can be replaced" IsChecked="{Binding ReplaceableOnly}" />
       <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
                  Text="Hides the transforms, scripts and animation an asset tree is mostly made of. What counts as replaceable follows what the tool can actually write back." />

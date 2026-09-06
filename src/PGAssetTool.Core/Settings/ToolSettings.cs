@@ -48,6 +48,10 @@ public sealed record ToolSettings
     /// once and meant to stay set.
     public int TileSize { get; init; } = 112;
 
+    /// Whether a newly extracted workspace builds a signed, scrambled pack by default. Off, because
+    /// a plain zip is easier to look inside and most packs never leave the machine that made them.
+    public bool ProtectPacks { get; init; }
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

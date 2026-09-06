@@ -41,7 +41,11 @@ public static class PackBuilder
         return clean.TrimEnd('.', ' ');
     }
 
-    public static PackResult Build(string workspace, string outputPath)
+    /// <param name="signer">
+    /// Signs and scrambles the pack when given. Null leaves it a plain zip, which is what every
+    /// pack was before this and what a pack built with protection off still is.
+    /// </param>
+    public static PackResult Build(string workspace, string outputPath, PackAuthor? signer = null)
     {
         var manifest = Workspace.Read(workspace);
         var changed = Workspace.Changed(workspace, manifest);
@@ -68,7 +72,11 @@ public static class PackBuilder
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
         if (File.Exists(outputPath)) File.Delete(outputPath);
 
-        using (var archive = ZipFile.Open(outputPath, ZipArchiveMode.Create))
+        // Built in memory rather than straight to the file: a protected pack is this zip with a
+        // header in front of it and a keystream over it, and it has to be signed as a whole before
+        // any of it reaches disk.
+        var bytes = new MemoryStream();
+        using (var archive = new ZipArchive(bytes, ZipArchiveMode.Create, leaveOpen: true))
         {
             using (var writer = new StreamWriter(archive.CreateEntry(PackManifest.FileName).Open()))
                 writer.Write(packed.ToJson());
@@ -79,6 +87,8 @@ public static class PackBuilder
             foreach (var source in files.Distinct(StringComparer.OrdinalIgnoreCase))
                 archive.CreateEntryFromFile(Path.Combine(workspace, source), source);
         }
+
+        PackFile.Write(outputPath, bytes.ToArray(), signer, packed.Author);
 
         return new PackResult(outputPath, packed.Operations.Count, new FileInfo(outputPath).Length, unchanged);
     }
@@ -92,7 +102,7 @@ public static class PackBuilder
     {
         try
         {
-            using var archive = ZipFile.OpenRead(packPath);
+            using var archive = PackFile.Open(packPath);
             var manifest = ReadManifest(archive);
             if (manifest.Icon.Length == 0) return null;
 
@@ -118,7 +128,7 @@ public static class PackBuilder
 
     public static PackManifest ReadManifest(string packPath)
     {
-        using var archive = ZipFile.OpenRead(packPath);
+        using var archive = PackFile.Open(packPath);
         var entry = archive.GetEntry(PackManifest.FileName)
             ?? throw new InvalidDataException($"'{packPath}' has no {PackManifest.FileName}.");
         using var reader = new StreamReader(entry.Open());

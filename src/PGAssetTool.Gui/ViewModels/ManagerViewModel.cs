@@ -51,8 +51,15 @@ public sealed record InstalledRow(InstalledMod Mod)
 /// the pack, and is worth showing to whoever is deciding whether to keep it.
 public sealed record ModDetails(
     string Name, string Id, string Author, string Version, string Description,
-    string BuiltAgainst, string Pack, IReadOnlyList<string> Replaces)
+    string BuiltAgainst, string Pack, IReadOnlyList<string> Replaces, PackSeal Seal)
 {
+    /// Said plainly and left at that. A pack somebody altered still installs — running a mod you
+    /// changed yourself is nobody else's business — but it no longer passes for the one its author
+    /// built, and the person about to install it is the one who should know.
+    public string Signature => Seal.Describe;
+
+    public bool WasAltered => Seal.State == SealState.Altered;
+
     public bool HasDescription => Description.Length > 0;
     public string Summary => $"{Version}   by {(Author.Length > 0 ? Author : "nobody in particular")}";
 
@@ -72,7 +79,8 @@ public sealed record ModDetails(
                 manifest.BuiltAgainstGameVersion ?? "", mod.PackPath,
                 manifest.Operations
                     .Select(o => $"{Verb(o.Op)}  {o.Target.Name}  ({o.Target.Class} in {o.Target.Container})")
-                    .ToList());
+                    .ToList(),
+                PackFile.Inspect(mod.PackPath));
         }
         catch (Exception e) when (e is IOException or InvalidDataException)
         {

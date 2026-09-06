@@ -64,6 +64,9 @@ if (command is "-h" or "--help" or "help")
                                because a weapon carries up to a dozen and writing all of them would
                                multiply the workspace for the sake of the one being worked on.
                                `show` lists what a weapon has.
+          --protect            Sign the built pack with a key kept beside the tool, and keep it from
+                               opening as a zip. Whoever alters one afterwards shows up as having
+                               done so. It stops a casual look inside and nothing more.
         """);
     return 0;
 }
@@ -75,7 +78,12 @@ if (command == "pack")
     var output = Option("out") ?? PackBuilder.OutputFor(workspace, Workspace.Read(workspace));
     try
     {
-        var result = PackBuilder.Build(workspace, output);
+        // Signed when the workspace asks for it. The CLI has no settings of its own, so a pack that
+        // says nothing is built plain — --protect is how to ask from here.
+        var manifest = Workspace.Read(workspace);
+        using var signer = (manifest.Protect ?? args.Contains("--protect")) ? PackAuthor.Mine() : null;
+
+        var result = PackBuilder.Build(workspace, output, signer);
         Console.WriteLine($"{result.Path}");
         Console.WriteLine($"  {result.Operations} operations, {result.Bytes:N0} bytes");
         foreach (var operation in PackBuilder.ReadManifest(result.Path).Operations)

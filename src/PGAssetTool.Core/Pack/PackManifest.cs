@@ -34,6 +34,10 @@ public sealed record PackManifest
     public string Version { get; init; } = "1.0.0";
     public string Description { get; init; } = "";
 
+    /// Whether the built pack is signed and scrambled. Null follows the setting, so a workspace
+    /// made before anybody chose does whatever the tool is set to now.
+    public bool? Protect { get; init; }
+
     /// A picture of the pack, as a path inside it. Empty means it has none.
     ///
     /// Whoever installs a pack sees a list of names, and a name is a poor way to tell one weapon
