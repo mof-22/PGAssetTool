@@ -9,7 +9,16 @@ namespace PGAssetTool.Core.Weapons;
 /// materials use. Resolved here rather than in the tree so both the exporter and the GUI see the
 /// same thing.
 public sealed record WeaponSkinView(
-    SkinRecord Record, string? DisplayName, IReadOnlyList<SkinMaterial> Materials);
+    SkinRecord Record, string? DisplayName, IReadOnlyList<SkinMaterial> Materials, SkinModel? Model);
+
+/// A skin that replaces the weapon rather than repainting it.
+///
+/// Most skins are a set of materials over the same geometry. Some bring their own model, filed
+/// under CustomModels by the skin's own id — and for those, the materials the skin names do not
+/// resolve against the usual roots at all, because the model carries what it needs. Recorded as a
+/// place rather than as its contents: reading the closure of every skin would cost a bundle walk
+/// per skin every time a weapon is selected, and it is wanted only when one is being exported.
+public sealed record SkinModel(string AssetPath, string Bundle);
 
 public sealed record SkinMaterial(string Path, string Bundle, string Name, IReadOnlyList<AssetNode> Textures);
 
@@ -39,7 +48,9 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     private readonly BundleGraph _graph = new(bundles);
 
     /// Reached by weapons, but not part of one: shared engine assets that cannot be replaced here.
-    private static readonly HashSet<AssetClassID> Opaque = [AssetClassID.Shader];
+    /// Not worth walking into. A shader is neither replaceable nor readable, and dumping the
+    /// closure of one produces tens of megabytes of JSON for something nobody can act on.
+    public static readonly IReadOnlySet<AssetClassID> Opaque = new HashSet<AssetClassID> { AssetClassID.Shader };
 
     public WeaponTree Resolve(WeaponRecord record)
     {
@@ -69,7 +80,8 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         }
 
         var skins = catalogs.Skins.ForWeapon(record.Index)
-            .Select(s => new WeaponSkinView(s, catalogs.Localization.Translate(s.LocalizationKey), Materials(s)))
+            .Select(s => new WeaponSkinView(
+                s, catalogs.Localization.Translate(s.LocalizationKey), Materials(s), CustomModel(s)))
             .ToList();
 
         // The skin materials are already listed under each skin, so they are left out here.
@@ -197,6 +209,15 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     /// A skin records its materials as paths relative to one of the skin roots rather than as
     /// pointers, so they have to be looked up rather than followed. Anything that does not resolve
     /// is left out: the tree shows what can be acted on, not what is missing.
+    /// The model a skin brings with it, if it brings one. Filed under the skin's own id.
+    private SkinModel? CustomModel(SkinRecord skin)
+    {
+        var path = CustomModelRoot + skin.Id;
+        return catalogs.Lookup.BundleFor(path) is { } bundle ? new SkinModel(path, bundle) : null;
+    }
+
+    public const string CustomModelRoot = "WeaponSkinsV2/CustomModels/";
+
     private IReadOnlyList<SkinMaterial> Materials(SkinRecord skin)
     {
         var materials = new List<SkinMaterial>();

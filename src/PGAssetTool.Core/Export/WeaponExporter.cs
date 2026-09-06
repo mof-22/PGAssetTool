@@ -19,6 +19,10 @@ public sealed class WeaponExporter(BundleSet bundles)
 {
     private AssetExporter? _writer;
 
+    /// Resolves references that leave the bundle they were written in, which a skin's model does
+    /// as readily as the weapon's own prefab.
+    private readonly BundleGraph _graph = new(bundles);
+
     /// Write textures with no alpha channel; see AssetExporter for why.
     public bool Opaque { get; init; }
 
@@ -35,10 +39,19 @@ public sealed class WeaponExporter(BundleSet bundles)
         [AssetClassID.AnimationClip] = "animations",
     };
 
+    /// One of the weapon's skins to write out as well as the default look, by id or display name.
+    ///
+    /// Off by default. A weapon carries up to a dozen skins and each brings its own materials,
+    /// textures and sometimes a whole model; writing all of them would multiply a workspace several
+    /// times over for the sake of the one an author is actually working on.
+    public string? Skin { get; init; }
+
     public WeaponExport Export(WeaponTree tree, string outputRoot)
     {
+        var chosen = Chosen(tree);
         var directory = Path.Combine(outputRoot,
-            $"{tree.Record.GameNumber:D4}_{AssetExporter.Sanitize(tree.Record.Slug)}");
+            $"{tree.Record.GameNumber:D4}_{AssetExporter.Sanitize(tree.Record.Slug)}"
+            + (chosen is null ? "" : $"_{AssetExporter.Sanitize(Suffix(tree, chosen))}"));
         Directory.CreateDirectory(directory);
 
         var assets = new List<ExportedAsset>();
@@ -100,9 +113,93 @@ public sealed class WeaponExporter(BundleSet bundles)
                 Path.Combine(directory, "related", AssetExporter.Sanitize(related.Namespace)), assets, skipped);
         }
 
+        if (chosen is not null) ExportSkin(chosen, directory, assets, skipped);
+        else if (Skin is { Length: > 0 } asked)
+            skipped.Add($"'{asked}': this weapon has no such skin");
+
         DrawPackIcon(tree, directory, skipped);
 
         return new WeaponExport(directory, assets, skipped);
+    }
+
+    /// The skin that was asked for, matched on its id or on the name a player would see.
+    private WeaponSkinView? Chosen(WeaponTree tree)
+        => Skin is not { Length: > 0 } asked
+            ? null
+            : tree.Skins.FirstOrDefault(s =>
+                string.Equals(s.Record.Id, asked, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s.DisplayName, asked, StringComparison.OrdinalIgnoreCase));
+
+    /// What the workspace directory is called after the weapon's own name.
+    ///
+    /// The skin's id already begins with the prefab name — Weapon834_christmas — so the whole of it
+    /// would read as the weapon twice. What is left is what tells the skins apart.
+    private static string Suffix(WeaponTree tree, WeaponSkinView skin)
+        => skin.Record.Id.StartsWith(tree.Record.PrefabName + "_", StringComparison.OrdinalIgnoreCase)
+            ? skin.Record.Id[(tree.Record.PrefabName.Length + 1)..]
+            : skin.Record.Id;
+
+    /// Writes a skin's own materials and textures, and the model it brings if it brings one.
+    ///
+    /// Kept apart from the weapon's own files. The two overlap — a skin repaints the same geometry
+    /// — and mixing them would leave an author unable to tell which texture belonged to the skin
+    /// they meant to change.
+    private void ExportSkin(
+        WeaponSkinView skin, string directory, List<ExportedAsset> assets, List<string> skipped)
+    {
+        var into = Path.Combine(directory, "skin");
+
+        foreach (var material in skin.Materials)
+        {
+            ExportByName(material.Bundle, material.Name, Path.Combine(into, "materials"),
+                assets, skipped, AssetClassID.Material);
+
+            foreach (var texture in material.Textures)
+                ExportByName(
+                    texture.Bundle.Length > 0 ? texture.Bundle : material.Bundle,
+                    texture.Name, Path.Combine(into, "textures"), assets, skipped, AssetClassID.Texture2D);
+        }
+
+        if (skin.Model is not { } model) return;
+
+        // The model is a prefab like the weapon's own, so it is walked the same way: everything it
+        // reaches, written into the folders its types belong in.
+        var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
+        AssetsFileInstance file;
+        try { file = bundles.Open(model.Bundle); }
+        catch (Exception ex) when (ex is IOException or FileNotFoundException)
+        {
+            skipped.Add($"{name}: {ex.Message}");
+            return;
+        }
+
+        var root = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.GameObject, name);
+        if (root is null) { skipped.Add($"{name}: no such model in '{model.Bundle}'"); return; }
+
+        var closure = new List<AssetTypeValueField>();
+        foreach (var node in ReferenceWalker.Closure(
+                     bundles.Context, file, root.PathId, _graph.Resolve, skip: WeaponResolver.Opaque))
+        {
+            var bundle = node.Bundle.Length > 0 ? node.Bundle : model.Bundle;
+            AssetsFileInstance holder;
+            try { holder = bundles.Open(bundle); }
+            catch (Exception ex) when (ex is IOException or FileNotFoundException) { continue; }
+
+            var info = holder.file.GetAssetInfo(node.PathId);
+            if (info is null) continue;
+
+            if (Folders.TryGetValue(node.Class, out var folder))
+                assets.AddRange(_exporter.Export(bundle, holder, info, Path.Combine(into, folder)));
+            else if (bundles.Context.Deserialize(holder, info) is { } field)
+                closure.Add(field);
+        }
+
+        if (closure.Count == 0) return;
+
+        var path = Path.Combine(into, "model.json");
+        File.WriteAllText(path, FieldDump.ToJson(closure));
+        assets.Add(new ExportedAsset(path, AssetClassID.GameObject, name,
+            "json", new FileInfo(path).Length, new AssetAddress("", "", "")));
     }
 
     /// Draws the weapon and leaves the picture in the workspace, for the pack to show itself with.
@@ -186,14 +283,21 @@ public sealed class WeaponExporter(BundleSet bundles)
         return export;
     }
 
+    /// <param name="only">
+    /// Which class to take, when the name alone is not enough. A skin's material and the texture it
+    /// paints with are routinely called the same thing, and without this the material was written
+    /// into the textures folder as well as its own.
+    /// </param>
     private void ExportByName(
-        string bundle, string name, string directory, List<ExportedAsset> into, List<string> skipped)
+        string bundle, string name, string directory, List<ExportedAsset> into, List<string> skipped,
+        AssetClassID? only = null)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
         catch (Exception ex) { skipped.Add($"{name}: {ex.Message}"); return; }
 
         var matches = file.file.AssetInfos
+            .Where(i => only is null || i.TypeId == (int)only)
             .Where(i => NameOf(file, i) is { } n && string.Equals(n, name, StringComparison.OrdinalIgnoreCase))
             .ToList();
 

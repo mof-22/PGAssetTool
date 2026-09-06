@@ -112,6 +112,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<WeaponListItem> Weapons { get; } = [];
 
+    /// The skins of the selected weapon, and which of them extraction should also write out.
+    ///
+    /// One at a time rather than all of them: a weapon carries up to a dozen, each with its own
+    /// materials and textures and sometimes a whole model, and an author works on one.
+    public ObservableCollection<SkinChoice> SkinChoices { get; } = [];
+
+    [ObservableProperty] private SkinChoice? _chosenSkin;
+
+    /// Whether this weapon has any, so the picker stays out of the way of the ones that do not.
+    public bool HasSkins => SkinChoices.Count > 1;
+
     public string Title => _catalogs is null
         ? "PGAssetTool"
         : $"PGAssetTool — {Weapons.Count} of {_catalogs.Items.Count} weapons";
@@ -258,8 +269,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 ? GameVersion.Read(_bundles.Context, _bundles.Game)
                 : null;
 
-            var export = await Task.Run(() => new WeaponExporter(_bundles) { Opaque = _settings.OpaqueTextures }
-                .ExportAsWorkspace(tree, WorkspaceRoot, _settings.Author, version));
+            var skin = ChosenSkin?.Id;
+            var export = await Task.Run(() =>
+                new WeaponExporter(_bundles) { Opaque = _settings.OpaqueTextures, Skin = skin }
+                    .ExportAsWorkspace(tree, WorkspaceRoot, _settings.Author, version));
 
             LastExport = export.Directory;
             Editor.Rescan(WorkspaceRoot);
@@ -562,7 +575,26 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }).ToList();
     }
 
-    partial void OnDetailChanged(WeaponDetailViewModel? value) => OfferTextures();
+    partial void OnDetailChanged(WeaponDetailViewModel? value)
+    {
+        OfferTextures();
+        OfferSkins(value?.Tree);
+    }
+
+    /// The skins this weapon has, offered so one of them can be extracted alongside its own files.
+    private void OfferSkins(PGAssetTool.Core.Weapons.WeaponTree? tree)
+    {
+        SkinChoices.Clear();
+        SkinChoices.Add(SkinChoice.None);
+        foreach (var skin in tree?.Skins ?? [])
+            SkinChoices.Add(new SkinChoice(
+                skin.Record.Id, skin.DisplayName ?? skin.Record.Id, skin.Model is not null));
+
+        // Deliberately not remembered across weapons: "the Christmas one" is not a thing another
+        // weapon has, and silently extracting a skin nobody asked for is worse than asking again.
+        ChosenSkin = SkinChoices[0];
+        OnPropertyChanged(nameof(HasSkins));
+    }
 
     /// A chosen texture is loaded when it is first picked, not when the list is built: a weapon
     /// offers a dozen or more and almost none of them will be looked at.
@@ -699,4 +731,12 @@ public sealed record WeaponListItem(WeaponRecord Record, string? Translated)
 public sealed record LanguageOption(string Bundle, string Name)
 {
     public override string ToString() => Name;
+}
+
+/// A skin offered for extraction. The null id means the weapon on its own.
+public sealed record SkinChoice(string? Id, string Name, bool HasModel)
+{
+    public static SkinChoice None { get; } = new(null, "(no skin)", false);
+
+    public override string ToString() => HasModel ? $"{Name}  — its own model" : Name;
 }

@@ -386,6 +386,8 @@ internal static class SelfTest
             // A skin is worth a row only if what it changes can be reached from it.
             if (!Select(model, 416)) return Fail("selecting #416 resolved nothing");
 
+            if (SkinsAreOffered(model, scratch) is { } skinProblem) return Fail(skinProblem);
+
             var skins = model.Detail?.Roots.FirstOrDefault(r => r.Label == "Skins");
             if (skins is null) return Fail("#416 has skins and the tree showed none");
 
@@ -902,6 +904,62 @@ internal static class SelfTest
         => window.GetVisualDescendants().OfType<Avalonia.Controls.Image>()
             .Select(i => i.FindAncestorOfType<Avalonia.Controls.Border>()?.Width)
             .FirstOrDefault(w => w is > 0);
+
+    /// A skin can be written out alongside the weapon, models and all.
+    ///
+    /// Skin assets were left out of every export until now: the tree resolved them and the exporter
+    /// was never taught to walk them, so the one thing most weapon mods change could not be reached.
+    /// Both kinds are checked, because they are found by different means — most skins repaint the
+    /// same geometry, and a few bring a model of their own filed under the skin's id.
+    private static string? SkinsAreOffered(MainViewModel model, string scratch)
+    {
+        var offered = model.SkinChoices.Where(s => s.Id is not null).ToList();
+        Console.WriteLine($"skins    {offered.Count} offered, "
+            + $"{offered.Count(s => s.HasModel)} of them with a model of their own");
+
+        if (offered.Count == 0) return "#416 has skins and none was offered for extraction";
+        if (!model.HasSkins) return "skins were offered and the picker is hidden";
+        if (model.ChosenSkin?.Id is not null) return "a skin was chosen before anybody asked for one";
+
+        var withModel = offered.FirstOrDefault(s => s.HasModel);
+        if (withModel is null) return "#416 has a skin with its own model and none was marked as having one";
+
+        // Through the shell's own command, so the picker, the exporter and the folder naming are
+        // all under test rather than only the last of them.
+        var written = new List<string>();
+        foreach (var skin in new[] { offered.First(s => !s.HasModel), withModel })
+        {
+            model.ChosenSkin = skin;
+            model.ExtractWeaponCommand.Execute(null);
+            WaitWhile(() => model.Busy, 300_000);
+
+            if (model.LastExport is not { } directory || !Directory.Exists(directory))
+                return $"extracting '{skin.Name}' wrote nothing: {model.Status}";
+            written.Add(directory);
+
+            var mine = Path.Combine(directory, "skin");
+            if (!Directory.Exists(mine)) return $"'{skin.Name}' was asked for and nothing of it was written";
+
+            var files = Directory.GetFiles(mine, "*", SearchOption.AllDirectories);
+            Console.WriteLine($"skins    '{skin.Name}' -> {Path.GetFileName(directory)}, "
+                + $"{files.Length} files of its own ("
+                + string.Join(", ", files.GroupBy(f => Path.GetExtension(f))
+                    .Select(g => $"{g.Count()}{g.Key}")) + ")");
+
+            if (!files.Any(f => f.EndsWith(".png")))
+                return $"'{skin.Name}' wrote no texture, which is the whole of what a skin is";
+            if (skin.HasModel && !files.Any(f => f.EndsWith(".glb")))
+                return $"'{skin.Name}' brings its own model and no mesh was written";
+            if (!skin.HasModel && files.Any(f => f.EndsWith(".glb")))
+                return $"'{skin.Name}' only repaints and a mesh was written for it";
+        }
+
+        // Put it back, or extracting the next weapon would carry this one's skin along with it.
+        model.ChosenSkin = SkinChoice.None;
+        foreach (var directory in written) Directory.Delete(directory, recursive: true);
+        model.Editor.Rescan(model.WorkspaceRoot);
+        return null;
+    }
 
     /// The pack shows a drawing of the model, and can be given another one from a different angle.
     ///

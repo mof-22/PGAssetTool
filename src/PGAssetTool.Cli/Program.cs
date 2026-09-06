@@ -59,6 +59,11 @@ if (command is "-h" or "--help" or "help")
                                rather than transparency there, and an editor opens those as almost
                                invisible. An image brought back without an alpha channel keeps the
                                original one.
+          --skin <id or name>  Also write out one of the weapon's skins: its own materials and
+                               textures, and the model it brings if it brings one. Off by default,
+                               because a weapon carries up to a dozen and writing all of them would
+                               multiply the workspace for the sake of the one being worked on.
+                               `show` lists what a weapon has.
         """);
     return 0;
 }
@@ -373,7 +378,11 @@ var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 if (command == "extract")
 {
     var outputRoot = Option("out") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace");
-    var exporter = new WeaponExporter(bundles) { Opaque = args.Contains("--opaque") };
+    var exporter = new WeaponExporter(bundles)
+    {
+        Opaque = args.Contains("--opaque"),
+        Skin = Option("skin"),
+    };
     var asWorkspace = args.Contains("--workspace");
     var export = asWorkspace
         ? exporter.ExportAsWorkspace(tree, outputRoot,

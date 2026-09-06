@@ -194,9 +194,20 @@
               <ContentControl.ContentTemplate>
                 <DataTemplate x:DataType="vm:WeaponDetailViewModel">
                   <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10" Spacing="4">
                       <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="SemiBold" />
                       <TextBlock Text="{Binding Subtitle}" Classes="dim mono" />
+
+                      <!-- Which skin extraction should write out as well as the weapon's own files.
+                           One at a time: a weapon carries up to a dozen, each with its own
+                           materials and textures and sometimes a whole model. -->
+                      <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0"
+                                  IsVisible="{Binding $parent[TabItem].((vm:MainViewModel)DataContext).HasSkins}">
+                        <TextBlock Text="Extract with skin" Classes="dim" VerticalAlignment="Center" />
+                        <ComboBox MinWidth="240"
+                                  ItemsSource="{Binding $parent[TabItem].((vm:MainViewModel)DataContext).SkinChoices}"
+                                  SelectedItem="{Binding $parent[TabItem].((vm:MainViewModel)DataContext).ChosenSkin}" />
+                      </StackPanel>
                     </StackPanel>
 
                     <TreeView ItemsSource="{Binding Roots}" SelectedItem="{Binding SelectedNode}">
@@ -240,7 +251,7 @@
                 <!-- Three names looked like three settings. They are one setting, one working
                      detail and one thing the tool keeps to itself, and saying which is which is
                      most of the fix. -->
-                <TextBlock Text="Name" Classes="dim" />
+                <TextBlock Text="Mod name" Classes="dim" />
                 <TextBox Text="{Binding PackName}" />
                 <TextBlock Classes="dim" TextWrapping="Wrap"
                            Text="{Binding PackFileName, StringFormat='What the mod is called: shown in the manager, and built as {0}'}" />
