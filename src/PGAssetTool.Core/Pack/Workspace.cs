@@ -46,13 +46,21 @@ public static class Workspace
         return manifest;
     }
 
-    /// The weapon's own icon, which the export has already written out.
+    /// The drawing of the model if the export made one, and the game's own icon otherwise.
     ///
-    /// Guessed once, at extraction, and recorded — so it is a starting point an author can change
-    /// rather than a rule the rest of the tool has to keep agreeing with. The icon folder is where
-    /// the export puts the one picture that stands for the whole weapon; the largest of the images
-    /// there is the one meant to be looked at, the others being chat and profile sizes.
+    /// The drawing wins because these are texture and mesh mods: the game's icon says which weapon
+    /// a pack is for and nothing about what the pack does to it. Guessed once, at extraction, and
+    /// recorded — so it is a starting point an author can change rather than a rule the rest of the
+    /// tool has to keep agreeing with.
     private static string IconIn(string directory, IEnumerable<ExportedAsset> assets)
+        => File.Exists(Path.Combine(directory, Preview.PackIcon.FileName))
+            ? Preview.PackIcon.FileName
+            : GameIconIn(directory, assets);
+
+    /// The icon folder is where the export puts the one picture that stands for the whole weapon;
+    /// the largest of the images there is the one meant to be looked at, the others being chat and
+    /// profile sizes.
+    private static string GameIconIn(string directory, IEnumerable<ExportedAsset> assets)
         => assets
             .Where(a => a.Format == "png"
                 && Path.GetDirectoryName(Relative(directory, a.Path))?.Equals("icon",

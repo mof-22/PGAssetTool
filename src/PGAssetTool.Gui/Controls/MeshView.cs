@@ -56,6 +56,14 @@ public sealed class MeshView : Control
     /// Set while the middle button is down, which pans instead of turning.
     private bool _panning;
 
+    /// Draws what is on screen into a square picture, at whatever angle it is being looked at.
+    ///
+    /// Its own target rather than the one on screen: an icon is square and a fixed size, and the
+    /// pane is neither. The camera is the one the person turned to, which is the whole point —
+    /// they have already decided what shows the model best.
+    public PreviewImage? Snapshot(int size)
+        => Mesh is { } mesh ? PackIcon.Render(mesh, Textures, _camera, size) : null;
+
     /// Puts the view back to square. A tilt or a pan is easy to lose track of, and hunting the way
     /// back by hand is worse than either was useful.
     public void Recentre()

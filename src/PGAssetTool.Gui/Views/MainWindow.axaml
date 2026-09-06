@@ -249,7 +249,7 @@
                 <TextBox Text="{Binding PackDescription}" AcceptsReturn="True" Height="60"
                          TextWrapping="Wrap" />
                 <TextBlock Text="Icon" Classes="dim" />
-                <ComboBox ItemsSource="{Binding IconChoices}" SelectedItem="{Binding PackIcon}"
+                <ComboBox ItemsSource="{Binding IconChoices}" SelectedItem="{Binding IconFile}"
                           HorizontalAlignment="Stretch"
                           ToolTip.Tip="Shown beside the mod wherever it is listed. The weapon's own icon to begin with." />
                 <TextBlock Text="{Binding PackId, StringFormat='id: {0}'}" Classes="dim mono"
@@ -310,6 +310,10 @@
                         VerticalAlignment="Center" />
               <Button Content="Flip" Command="{Binding FlipCommand}"
                       IsVisible="{Binding !SideBySide}" />
+              <!-- The icon the export draws is of the vanilla weapon; this one is the mod, from
+                   whatever angle the model has been turned to. -->
+              <Button Content="Use this view as the icon" Click="OnCaptureIcon"
+                      IsVisible="{Binding Shown.HasMesh}" />
             </StackPanel>
 
             <!-- Stacked, not side by side: textures here are square far more often than not, and

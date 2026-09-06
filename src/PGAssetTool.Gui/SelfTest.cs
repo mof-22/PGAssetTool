@@ -471,6 +471,8 @@ internal static class SelfTest
             if (PGAssetTool.Core.Pack.Workspace.Changed(written, saved).Count != 0)
                 return Fail("saving the details made untouched files look edited");
 
+            if (PackIconIsTheModel(model, written) is { } iconProblem) return Fail(iconProblem);
+
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
 
@@ -847,6 +849,53 @@ internal static class SelfTest
         PGAssetTool.Core.Pack.Workspace.Save(
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
+    }
+
+    /// The pack shows a drawing of the model, and can be given another one from a different angle.
+    ///
+    /// The game's own weapon icon says which weapon a pack is for and nothing about what the pack
+    /// does to it, which for a texture or mesh mod is the only interesting part. Both halves are
+    /// checked: the one the export draws, and the one the editor's button takes from whatever the
+    /// preview is showing.
+    private static string? PackIconIsTheModel(MainViewModel model, string workspace)
+    {
+        var drawn = Path.Combine(workspace, PGAssetTool.Core.Preview.PackIcon.FileName);
+        var manifest = PGAssetTool.Core.Pack.Workspace.Read(workspace);
+
+        if (manifest.Icon != PGAssetTool.Core.Preview.PackIcon.FileName)
+            return $"the pack shows '{manifest.Icon}' rather than a drawing of the model";
+        if (!File.Exists(drawn)) return "the manifest names a drawing that was never made";
+
+        // Disposed: leaving it open made the capture below fail to write over it, which is the file
+        // being locked by the test rather than anything wrong with the tool.
+        StbImageSharp.ImageInfo? size;
+        using (var reading = File.OpenRead(drawn)) size = StbImageSharp.ImageInfo.FromStream(reading);
+        Console.WriteLine($"editor   the export drew the model as {size?.Width}x{size?.Height}, "
+            + $"{new FileInfo(drawn).Length:N0} bytes");
+        if (size is not { Width: PGAssetTool.Core.Preview.PackIcon.Size })
+            return "the drawing is not the size an icon is meant to be";
+
+        // Drawn again from somewhere else, the way the button does it. A mesh read back off disk,
+        // because that is what the editor is showing when somebody presses it.
+        var glb = Directory.EnumerateFiles(workspace, "*.glb", SearchOption.AllDirectories).FirstOrDefault();
+        if (glb is null) return null;
+
+        if (AssetPreview.FromFile(glb) is not PGAssetTool.Core.Export.Meshes.UnityMesh mesh) return $"'{Path.GetFileName(glb)}' would not read back";
+
+        var turned = PGAssetTool.Core.Preview.PackIcon.Render(
+            mesh, null, new PGAssetTool.Core.Preview.Camera(Yaw: 2.1f, Pitch: -0.4f));
+        if (PGAssetTool.Core.Preview.PackIcon.IsBlank(turned)) return "drawing it from another angle came out empty";
+
+        var before = File.ReadAllBytes(drawn);
+        model.Editor.CaptureIcon(turned);
+        Console.WriteLine($"editor   {model.Editor.Status}");
+
+        if (PGAssetTool.Core.Pack.Workspace.Read(workspace).Icon != PGAssetTool.Core.Preview.PackIcon.FileName)
+            return $"capturing a view did not become the pack's icon: {model.Editor.Status}";
+        if (File.ReadAllBytes(drawn).SequenceEqual(before))
+            return "capturing a different angle left the old picture in place";
+
+        return null;
     }
 
     /// Extracts another weapon under this test's own name, with one file edited so there is

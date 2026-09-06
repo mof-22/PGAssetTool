@@ -2,6 +2,7 @@ using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
+using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Weapons;
 
 namespace PGAssetTool.Core.Export;
@@ -99,7 +100,75 @@ public sealed class WeaponExporter(BundleSet bundles)
                 Path.Combine(directory, "related", AssetExporter.Sanitize(related.Namespace)), assets, skipped);
         }
 
+        DrawPackIcon(tree, directory, skipped);
+
         return new WeaponExport(directory, assets, skipped);
+    }
+
+    /// Draws the weapon and leaves the picture in the workspace, for the pack to show itself with.
+    ///
+    /// The game's own icon says which weapon a pack is for and nothing about what the pack does to
+    /// it, which for a texture or mesh mod is the only interesting part. This is the vanilla model,
+    /// since nothing has been edited yet at this point — the editor can draw it again from whatever
+    /// angle the author likes once it has.
+    private void DrawPackIcon(WeaponTree tree, string directory, List<string> skipped)
+    {
+        try
+        {
+            // The biggest mesh that has textures: a weapon carries arms and muzzle-flash geometry
+            // as well, and neither of those is what anybody means by the weapon.
+            var subject = tree.MeshTextures
+                .Select(slots => (Slots: slots, Mesh: ReadMesh(tree, slots.MeshPathId)))
+                .Where(m => m.Mesh is not null)
+                .MaxBy(m => m.Mesh!.VertexCount);
+
+            if (subject.Mesh is null) return;
+
+            var textures = subject.Slots.BySubMesh.Select(TextureFor).ToList();
+            var picture = Preview.PackIcon.Render(subject.Mesh, textures);
+            if (Preview.PackIcon.IsBlank(picture)) return;
+
+            Preview.PackIcon.Write(picture, Path.Combine(directory, Preview.PackIcon.FileName));
+        }
+        catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidDataException)
+        {
+            // A pack without a picture is a small loss; an export that failed over one is not.
+            skipped.Add($"{Preview.PackIcon.FileName}: {ex.Message}");
+        }
+    }
+
+    private UnityMesh? ReadMesh(WeaponTree tree, long pathId)
+    {
+        var node = tree.PrefabAssets.FirstOrDefault(a => a.PathId == pathId);
+        if (node is null) return null;
+
+        var bundle = node.Bundle.Length > 0 ? node.Bundle : tree.PrefabBundle;
+        if (bundle is null) return null;
+
+        var file = bundles.Open(bundle);
+        var info = file.file.AssetInfos.FirstOrDefault(i => i.PathId == pathId);
+        if (info is null) return null;
+
+        var field = bundles.Context.Deserialize(file, info);
+        return field is null ? null : Preview.AssetPreview.Mesh(field);
+    }
+
+    private Preview.PreviewImage? TextureFor(Assets.AssetNode? node)
+    {
+        if (node is null || node.Bundle.Length == 0) return null;
+
+        try
+        {
+            if (Preview.AssetPreview.Locate(bundles, node.Bundle, AssetClassID.Texture2D, node.PathId, node.Name)
+                is not var (file, info)) return null;
+
+            var field = bundles.Context.Deserialize(file, info);
+            return field is null ? null : Preview.AssetPreview.Texture(bundles, node.Bundle, field);
+        }
+        catch (Exception e) when (e is IOException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     /// Exports, then writes a pack manifest naming every replaceable file. Editing a file and

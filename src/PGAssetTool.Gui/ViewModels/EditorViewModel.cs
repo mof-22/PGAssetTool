@@ -33,6 +33,16 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         alpha ??= new AlphaPreference();
         Original = new PreviewViewModel(alpha);
         Edited = new PreviewViewModel(alpha);
+
+        foreach (var preview in new[] { Original, Edited })
+        {
+            var pane = preview;
+            pane.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName != nameof(PreviewViewModel.ChosenTexture)) return;
+                if (pane.ChosenTexture is { PathId: -1 } choice) WearFromDisk(pane, choice);
+            };
+        }
     }
 
     public ObservableCollection<WorkspaceItem> Workspaces { get; } = [];
@@ -113,7 +123,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// The picture the pack shows itself with, and the images in the workspace to choose from.
     public ObservableCollection<string> IconChoices { get; } = [];
 
-    [ObservableProperty] private string? _packIcon;
+    [ObservableProperty] private string? _iconFile;
 
     private void ShowDetails(WorkspaceItem? workspace)
     {
@@ -126,7 +136,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
         // Whatever the manifest names, if it is still there. A pack that claims a picture it no
         // longer carries is worse than one with none.
-        PackIcon = manifest?.Icon is { Length: > 0 } named && IconChoices.Contains(named) ? named : None;
+        IconFile = manifest?.Icon is { Length: > 0 } named && IconChoices.Contains(named) ? named : None;
 
         FolderName = workspace?.Name ?? "";
         PackId = manifest?.Id ?? "";
@@ -159,7 +169,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 Author = PackAuthor.Trim(),
                 Version = PackVersion.Trim(),
                 Description = PackDescription.Trim(),
-                Icon = PackIcon is null || PackIcon == None ? "" : PackIcon,
+                Icon = IconFile is null || IconFile == None ? "" : IconFile,
             };
             Workspace.Save(workspace.Directory, manifest);
 
@@ -190,6 +200,37 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// Puts the form back to what is on disk, for after a change nobody wants to keep.
     [RelayCommand]
     private void RevertDetails() => ShowDetails(SelectedWorkspace);
+
+    /// Writes a drawing of the model, as the preview is showing it, and makes it the pack's picture.
+    ///
+    /// The one the export draws is of the vanilla weapon, since nothing has been edited at that
+    /// point. This is the mod — the author's own mesh wearing their own texture, from the angle
+    /// they turned it to.
+    public void CaptureIcon(PreviewImage picture)
+    {
+        if (SelectedWorkspace is not { } workspace) { Status = "Nothing selected."; return; }
+
+        if (Core.Preview.PackIcon.IsBlank(picture))
+        {
+            Status = "There is nothing in the frame to make an icon out of.";
+            return;
+        }
+
+        try
+        {
+            Core.Preview.PackIcon.Write(picture, Path.Combine(workspace.Directory, Core.Preview.PackIcon.FileName));
+
+            var manifest = Workspace.Read(workspace.Directory) with { Icon = Core.Preview.PackIcon.FileName };
+            Workspace.Save(workspace.Directory, manifest);
+
+            ShowDetails(workspace);
+            Status = $"The pack now shows this view of the model, {picture.Width}×{picture.Height}.";
+        }
+        catch (Exception ex)
+        {
+            Status = $"{ex.Message}  (while saving the icon)";
+        }
+    }
 
     public void Rescan(string root)
     {
@@ -292,14 +333,48 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         };
     }
 
-    private static void ShowIn(PreviewViewModel preview, object? loaded, string caption, bool alphaIsCoverage)
+    private void ShowIn(PreviewViewModel preview, object? loaded, string caption, bool alphaIsCoverage)
     {
         switch (loaded)
         {
             case PreviewImage picture: preview.Show(picture, caption, alphaIsCoverage); break;
-            case UnityMesh mesh: preview.Show(mesh, caption, null); break;
+            case UnityMesh mesh: preview.Show(mesh, caption, null); Offer(preview); break;
             case PreviewSound sound: preview.Show(sound, caption); break;
             default: preview.Clear("Nothing to show for this one."); break;
+        }
+    }
+
+    /// Offers the workspace's own images to put on a mesh.
+    ///
+    /// Which texture belongs on which part is decided by the renderer in the game's prefab, which
+    /// the editor never resolves — so a mesh here draws grey unless somebody says what to put on
+    /// it. Offering the author's own files is both the useful answer and the honest one: what they
+    /// want to see is their mesh wearing their texture, which is what the mod is.
+    private void Offer(PreviewViewModel preview)
+    {
+        preview.TextureChoices.Clear();
+        if (SelectedWorkspace is not { } workspace) return;
+
+        preview.TextureChoices.Add(new TextureChoice("(none)", "", 0));
+        foreach (var picture in Workspace.Pictures(workspace.Directory))
+            preview.TextureChoices.Add(new TextureChoice(picture, workspace.Directory, -1));
+    }
+
+    /// Reads one of those images off disk and puts it on the model.
+    ///
+    /// A path id of -1 marks a choice that lives in the workspace rather than in the game, which is
+    /// the only kind the editor offers.
+    private void WearFromDisk(PreviewViewModel preview, TextureChoice choice)
+    {
+        try
+        {
+            var path = Path.Combine(choice.Bundle, choice.Name);
+            if (AssetPreview.FromFile(path) is PreviewImage picture) preview.Wear(picture);
+            else Status = $"'{choice.Name}' could not be read as an image.";
+        }
+        catch (Exception ex)
+        {
+            Status = $"{ex.Message}  (while putting a texture on the model)";
         }
     }
 

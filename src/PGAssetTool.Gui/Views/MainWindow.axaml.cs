@@ -3,6 +3,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.VisualTree;
+using PGAssetTool.Core.Preview;
 using PGAssetTool.Gui.ViewModels;
 
 namespace PGAssetTool.Gui.Views;
@@ -103,13 +104,30 @@ public partial class MainWindow : Window
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
     }
 
+    /// Turns whichever model pane the editor is showing into the pack's icon.
+    ///
+    /// The camera lives in the control, because a view angle is a property of looking rather than
+    /// of the model — so the picture is taken here and handed to the editor, which knows where it
+    /// belongs. The visible pane, not the first one: side by side puts two on the page and the one
+    /// under the pointer is not necessarily the one in front.
+    private void OnCaptureIcon(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel model) return;
+
+        var pane = this.GetVisualDescendants().OfType<Controls.MeshView>()
+            .FirstOrDefault(v => v.IsEffectivelyVisible && v.Mesh is not null);
+
+        if (pane?.Snapshot(PackIcon.Size) is not { } picture)
+        {
+            model.Editor.Status = "There is no model on show to make an icon out of.";
+            return;
+        }
+
+        model.Editor.CaptureIcon(picture);
+    }
+
     private void OnOptions(object? sender, RoutedEventArgs e)
         => new OptionsWindow { DataContext = DataContext }.ShowDialog(this);
-
-    private void OnRescan(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel model) model.Editor.Rescan(model.WorkspaceRoot);
-    }
 
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
 }
