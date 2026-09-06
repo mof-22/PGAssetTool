@@ -18,8 +18,9 @@ public static class Workspace
         string directory, string id, string name, string author, string? gameVersion,
         IEnumerable<ExportedAsset> assets, bool alreadyModified = false)
     {
+        var kept = assets as IReadOnlyCollection<ExportedAsset> ?? assets.ToList();
         var operations = new List<PackOperation>();
-        foreach (var asset in assets)
+        foreach (var asset in kept)
         {
             if (Replaceable.OperationForFormat(asset.Format) is not { } op) continue;
             if (asset.Address.Container.Length == 0) continue;
@@ -33,14 +34,27 @@ public static class Workspace
             });
         }
 
+        return Create(directory, id, name, author, gameVersion, operations, IconIn(directory, kept));
+    }
+
+    /// Writes a workspace whose operations the caller has already worked out.
+    ///
+    /// Converting somebody's existing mod is the case that needs this: an added asset and the
+    /// pointers repointed at it are not things an exported file can be read off, so the converter
+    /// builds the list and this only has to write it down.
+    public static PackManifest Create(
+        string directory, string id, string name, string author, string? gameVersion,
+        IReadOnlyList<PackOperation> operations, string icon)
+    {
         var manifest = new PackManifest
         {
+            FormatVersion = PackManifest.VersionFor(operations),
             Id = id,
             Name = name,
             Author = author,
             BuiltAgainstGameVersion = gameVersion,
-            Icon = IconIn(directory, assets),
-            Operations = operations,
+            Icon = icon,
+            Operations = operations.ToList(),
         };
         File.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
         return manifest;

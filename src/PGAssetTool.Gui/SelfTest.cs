@@ -520,6 +520,12 @@ internal static class SelfTest
             var secondary = SecondWorkspace(model, weapon: 2, PackFolderB, PackIdentityB, PackNameB);
             if (secondary is null) return Fail("the second workspace could not be prepared");
 
+            // Adding an asset is the one operation with nothing on disk to notice, so it is written
+            // into the manifest rather than made by editing a file. It goes in after the second
+            // workspace is prepared and before anything is packed, so it travels the same road as
+            // everything else: built, signed, installed, reconciled and removed.
+            if (AddAnAsset(model, written, out var added) is { } addProblem) return Fail(addProblem);
+
             model.Editor.Rescan(model.WorkspaceRoot);
             foreach (var w in model.Editor.Workspaces) model.Editor.Selection.Add(w);
 
@@ -533,12 +539,18 @@ internal static class SelfTest
             // from a working one until it is applied and writes five bundles instead of one.
             foreach (var w in chosen)
             {
+                // One edited file each, and in the first workspace the two operations the addition
+                // put there as well — those carry no baseline, because a file that is the change
+                // has no earlier state to differ from.
+                var packing = string.Equals(Path.GetFullPath(w.Directory), written,
+                    StringComparison.OrdinalIgnoreCase) ? 3 : 1;
+
                 var differ = PGAssetTool.Core.Pack.Workspace.Changed(
                     w.Directory, PGAssetTool.Core.Pack.Workspace.Read(w.Directory));
                 Console.WriteLine($"batch    {w.Name}: {differ.Count} of {w.Files} files differ"
                     + (differ.Count > 0 ? $" ({string.Join(", ", differ.Select(o => o.Source))})" : ""));
-                if (differ.Count != 1)
-                    return Fail($"one file was edited in '{w.Name}' and {differ.Count} are about to be packed");
+                if (differ.Count != packing)
+                    return Fail($"'{w.Name}' should be packing {packing} and is packing {differ.Count}");
             }
 
             // The whole loop, for both at once: build, install, and come back with the game read
@@ -560,6 +572,9 @@ internal static class SelfTest
                 return Fail($"this run installed {string.Join(", ", strays)} and has no plan to remove them");
 
             Console.WriteLine($"batch    installed: {string.Join(", ", installed.Select(m => m.Id))}");
+
+            // Read out of the bundle the game will load, not out of what the applier said it did.
+            if (AddedAssetIs(model, added!, installed: true) is { } addProblem2) return Fail(addProblem2);
             var missing = mine.Where(id => installed.All(m => m.Id != id)).ToList();
             if (missing.Count > 0)
                 return Fail($"{string.Join(", ", missing)} did not reach the ledger — a batch that installed some");
@@ -742,6 +757,10 @@ internal static class SelfTest
             if (model.Manager.Mods.Any(m => mine.Contains(m.Mod.Id)))
                 return Fail("a mod is still installed after both were removed");
 
+            // An added asset is only ever undone by the bundle being put back, so this is also the
+            // check that removal really does restore rather than reverse each operation.
+            if (AddedAssetIs(model, added!, installed: false) is { } addProblem3) return Fail(addProblem3);
+
             // Removing a mod deliberately leaves its kept pack, so reinstalling does not depend on
             // the workspace still existing. That is right for a person and wrong for a test that
             // runs on every change: twenty copies of one had piled up in the mods folder.
@@ -791,6 +810,135 @@ internal static class SelfTest
                 foreach (var stale in Directory.GetFiles(store, pattern))
                     try { File.Delete(stale); } catch (IOException) { }
         }
+    }
+
+    /// What the addition check put into the pack, and what it has to find afterwards.
+    private sealed record Added(string Bundle, string ShaderName, long Material, long Shader);
+
+    /// Puts an asset the bundle does not have into the pack, and points one it does have at it.
+    ///
+    /// Built here rather than committed, because a fixture for this would be an asset out of the
+    /// player's own game and those are not this repository's to carry. It is also the only way to
+    /// get one that matches the installation being written to.
+    ///
+    /// The added shader is a copy of the one the material already uses, renamed. That makes the
+    /// whole mod a no-op by construction — the material ends up drawn by the same shader it was
+    /// drawn by — while still exercising every part that is new: an addition, a name that would
+    /// otherwise collide, a path id that is already taken, and an existing asset repointed at
+    /// something that did not exist when the pack was built.
+    private static string? AddAnAsset(MainViewModel model, string workspace, out Added? added)
+    {
+        added = null;
+        var manifest = Core.Pack.Workspace.Read(workspace);
+        if (manifest.Operations.Count == 0) return "the workspace names nothing to work from";
+
+        using var bundles = new Core.Assets.BundleSet(model.Game!);
+        var bundle = manifest.Operations[0].Target.Container;
+        var file = bundles.Open(bundle);
+
+        // A material pointing at a shader in its own file. Everything else about which one is
+        // arbitrary, so the first is as good as any.
+        foreach (var info in file.file.AssetInfos)
+        {
+            if (info.TypeId != (int)AssetsTools.NET.Extra.AssetClassID.Material) continue;
+
+            var material = bundles.Context.Deserialize(file, info);
+            if (material?["m_Shader"] is not { IsDummy: false } pointer) continue;
+            if (pointer["m_FileID"].AsInt != 0) continue;
+
+            var shaderId = pointer["m_PathID"].AsLong;
+            if (file.file.GetAssetInfo(shaderId) is not { } shaderInfo) continue;
+            if (shaderInfo.TypeId != (int)AssetsTools.NET.Extra.AssetClassID.Shader) continue;
+
+            var name = PackIdentity + "-shader";
+            var shaderFile = Path.Combine(workspace, "selftest-added-shader.dat");
+            var materialFile = Path.Combine(workspace, "selftest-material.dat");
+            File.WriteAllBytes(shaderFile, Core.Export.AssetExporter.ReadRaw(file, shaderInfo));
+            File.WriteAllBytes(materialFile, Core.Export.AssetExporter.ReadRaw(file, info));
+
+            var index = new Core.Assets.ContainerIndex(bundles.Context);
+            var target = index.AddressOf(bundle, file, info, material["m_Name"].AsString);
+
+            Core.Pack.Workspace.Save(workspace, manifest with
+            {
+                Operations =
+                [
+                    .. manifest.Operations,
+                    new Core.Pack.PackOperation
+                    {
+                        Op = Core.Pack.PackOperations.AddAsset,
+                        // Deliberately the id the copied shader already occupies, so the applier has
+                        // to notice it is taken and hand out another.
+                        Target = new Core.Assets.AssetAddress(
+                            bundle, nameof(AssetsTools.NET.Extra.AssetClassID.Shader), name,
+                            PathId: shaderId),
+                        Source = Path.GetFileName(shaderFile),
+                        NewId = name,
+                    },
+                    new Core.Pack.PackOperation
+                    {
+                        Op = Core.Pack.PackOperations.ReplaceRaw,
+                        Target = target,
+                        Source = Path.GetFileName(materialFile),
+                        Pointers = [new Core.Pack.PointerFixup { Path = "m_Shader", NewId = name }],
+                    },
+                ],
+            });
+
+            added = new Added(bundle, name, info.PathId, shaderId);
+            Console.WriteLine($"add      '{name}' into {bundle}, and "
+                + $"{target} repointed at it (its own id {shaderId} is taken)");
+            return null;
+        }
+
+        return $"no material in '{bundle}' points at a shader beside it";
+    }
+
+    /// What the added asset has to look like in the game once the pack is applied, and once it is
+    /// removed again. `installed` says which of the two is being checked.
+    private static string? AddedAssetIs(MainViewModel model, Added added, bool installed)
+    {
+        using var bundles = new Core.Assets.BundleSet(model.Game!);
+        var file = bundles.Open(added.Bundle);
+
+        var found = file.file.AssetInfos
+            .Where(a => a.TypeId == (int)AssetsTools.NET.Extra.AssetClassID.Shader)
+            .Where(a => Core.Assets.AssetNaming.NameOf(
+                bundles.Context.Deserialize(file, a), AssetsTools.NET.Extra.AssetClassID.Shader)
+                    == added.ShaderName)
+            .ToList();
+
+        if (!installed)
+        {
+            if (found.Count > 0)
+                return $"'{added.ShaderName}' is still in {added.Bundle} after the mod was removed";
+            Console.WriteLine($"add      removed: '{added.ShaderName}' is gone from {added.Bundle}");
+        }
+        else
+        {
+            if (found.Count != 1)
+                return $"{found.Count} shaders in {added.Bundle} are called '{added.ShaderName}', not one";
+        }
+
+        var material = bundles.Context.Deserialize(file, file.file.GetAssetInfo(added.Material)!)!;
+        var points = material["m_Shader"]["m_PathID"].AsLong;
+
+        if (installed)
+        {
+            if (points != found[0].PathId)
+                return $"the material points at {points}, not at the added shader {found[0].PathId}";
+            if (points == added.Shader)
+                return "the added shader got the id it asked for, which was already taken";
+
+            Console.WriteLine($"add      installed: '{added.ShaderName}' is {found[0].PathId} "
+                + $"(asked for {added.Shader}), and the material points at it");
+        }
+        else if (points != added.Shader)
+        {
+            return $"the material points at {points} rather than back at {added.Shader}";
+        }
+
+        return null;
     }
 
     /// Selecting resolves off the UI thread, and Detail holds the previous weapon while it does —

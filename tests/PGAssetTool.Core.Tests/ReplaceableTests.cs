@@ -20,10 +20,19 @@ public class ReplaceableTests
     [Fact]
     public void AFormatWithNoImportPathIsNotOfferedAtAll()
     {
-        // A workspace listing one of these would produce a pack that fails when applied.
+        // A workspace listing one of these would produce a pack that fails when applied. A field
+        // dump is readable and nothing more: there is no path from an edited one back into a bundle.
         Assert.Null(Replaceable.OperationForFormat("json"));
-        Assert.Null(Replaceable.OperationForFormat("dat"));
         Assert.Null(Replaceable.OperationForFormat(""));
+    }
+
+    [Fact]
+    public void RawBytesAreTheirOwnOperation()
+    {
+        // Not an interchange format, and deliberately not one of the Kinds: it is how a class with
+        // no editor gets written back, which is a different claim from being editable.
+        Assert.Equal(PackOperations.ReplaceRaw, Replaceable.OperationForFormat(Replaceable.RawFormat));
+        Assert.Equal(PackOperations.ReplaceRaw, Replaceable.OperationForFormat("DAT"));
     }
 
     [Fact]
@@ -33,7 +42,8 @@ public class ReplaceableTests
         Assert.True(Replaceable.Supports(AssetClassID.Mesh));
         Assert.True(Replaceable.Supports(AssetClassID.AudioClip));
 
-        // Shaders and behaviours are read and shown, never written.
+        // These have no format an author can edit them in. Their bytes can still be written back
+        // wholesale — that is what replaceRaw is for — and Supports says nothing about that.
         Assert.False(Replaceable.Supports(AssetClassID.Shader));
         Assert.False(Replaceable.Supports(AssetClassID.MonoBehaviour));
         Assert.False(Replaceable.Supports(AssetClassID.Material));

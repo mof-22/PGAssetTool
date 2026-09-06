@@ -36,7 +36,7 @@ public sealed class AssetExporter(BundleSet bundles)
         Directory.CreateDirectory(directory);
         var field = bundles.Context.Deserialize(file, info);
         var cls = (AssetClassID)info.TypeId;
-        var named = field?["m_Name"] is { IsDummy: false } n && n.AsString.Length > 0 ? n.AsString : null;
+        var named = AssetNaming.NameOf(field, cls) is { Length: > 0 } n ? n : null;
         var name = named ?? $"{cls}_{info.PathId}";
         var address = Index.AddressOf(bundle, file, info, named ?? "");
         var stem = Path.Combine(directory, Sanitize(fileNameOverride ?? name));
@@ -200,7 +200,8 @@ public sealed class AssetExporter(BundleSet bundles)
             bundle, source, streamData["offset"].AsLong, streamData["size"].AsLong);
     }
 
-    private static byte[] ReadRaw(AssetsFileInstance file, AssetFileInfo info)
+    /// The bytes an asset is stored as, which is what a raw replacement is written from.
+    public static byte[] ReadRaw(AssetsFileInstance file, AssetFileInfo info)
     {
         var reader = file.file.Reader;
         reader.Position = info.GetAbsoluteByteOffset(file.file);

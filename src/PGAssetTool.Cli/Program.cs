@@ -191,10 +191,21 @@ if (command == "convert")
     foreach (var result in results)
         foreach (var asset in result.Written)
             Console.WriteLine($"  {TextColumn.Pad(result.Source.Name, 34)} {result.Class,-12} "
-                + $"@ {TextColumn.Pad(result.Bundle, 12)} -> {Path.GetFileName(asset.Path)}");
+                + $"@ {TextColumn.Pad(result.Bundle, 12)} -> {Path.GetFileName(asset.Path)}"
+                + (result.IsAddition && asset.Path == result.RawPath ? "   (added, not replaced)" : ""));
 
     Console.WriteLine($"\n{results.Count} of {sources.Count} converted into {destination}");
-    Console.WriteLine($"{PackManifest.FileName} has {manifest.Operations.Count} operation(s).");
+    Console.WriteLine($"{PackManifest.FileName} has {manifest.Operations.Count} operation(s), "
+        + $"{manifest.Operations.Count(o => o.Op == PackOperations.AddAsset)} of them additions.");
+
+    foreach (var operation in manifest.Operations.Where(o => o.Pointers.Count > 0))
+        foreach (var pointer in operation.Pointers)
+            Console.WriteLine($"  {operation.Target} {pointer.Path} -> '{pointer.NewId}'");
+
+    // An addition whose class had to be guessed, and the guess was not the only one that fits.
+    foreach (var result in results.Where(r => r.AlsoFits.Count > 0))
+        Console.WriteLine($"\n  '{result.Source.Name}' reads as {result.Class}, but also as "
+            + $"{string.Join(" and ", result.AlsoFits)}. Check pgmod.json before packing.");
 
     var unusable = results.SelectMany(r => r.Written)
         .Where(a => !manifest.Operations.Any(o => o.Source == Path.GetFileName(a.Path)))
@@ -202,7 +213,8 @@ if (command == "convert")
         .ToList();
     if (unusable.Count > 0)
     {
-        Console.WriteLine($"\nLeft out, because nothing can write these back yet:");
+        Console.WriteLine($"\nKept for reading, but not packed — the .dat beside each is what gets "
+            + "written back:");
         foreach (var name in unusable.Take(8)) Console.WriteLine($"  {name}");
         if (unusable.Count > 8) Console.WriteLine($"  and {unusable.Count - 8} more");
     }

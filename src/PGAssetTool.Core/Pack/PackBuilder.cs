@@ -59,7 +59,16 @@ public static class PackBuilder
                 $"Nothing in '{workspace}' differs from what was exported, so there is no change to pack.");
 
         // The baseline hash is a working-directory concern; it says nothing to whoever applies the pack.
-        var packed = manifest with { Operations = changed.Select(o => o with { BaselineSha256 = null }).ToList() };
+        var kept = changed.Select(o => o with { BaselineSha256 = null }).ToList();
+
+        // Claimed from what was actually packed, not from what the workspace could have held: a
+        // workspace that offers an addition an author left alone builds a pack that does not need
+        // the newer format, and should not ask for it.
+        var packed = manifest with
+        {
+            FormatVersion = PackManifest.VersionFor(kept),
+            Operations = kept,
+        };
 
         // The icon goes in whether or not it is one of the files being replaced, and drops out of
         // the manifest if it is not there to go in — a pack claiming a picture it does not carry

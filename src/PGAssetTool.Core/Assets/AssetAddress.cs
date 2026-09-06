@@ -31,8 +31,7 @@ public sealed class ContainerIndex(AssetsContext context)
         var index = new Dictionary<(int, string), List<long>>();
         foreach (var info in file.file.AssetInfos)
         {
-            var name = context.Deserialize(file, info)?["m_Name"];
-            var key = (info.TypeId, name is null || name.IsDummy ? "" : name.AsString);
+            var key = (info.TypeId, NameOf(file, info));
             if (!index.TryGetValue(key, out var ids)) index[key] = ids = [];
             ids.Add(info.PathId);
         }
@@ -68,8 +67,5 @@ public sealed class ContainerIndex(AssetsContext context)
     }
 
     private string NameOf(AssetsFileInstance file, AssetFileInfo info)
-    {
-        var name = context.Deserialize(file, info)?["m_Name"];
-        return name is null || name.IsDummy ? "" : name.AsString;
-    }
+        => AssetNaming.NameOf(context.Deserialize(file, info), (AssetClassID)info.TypeId);
 }
