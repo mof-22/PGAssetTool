@@ -57,7 +57,18 @@ public sealed class WeaponExporter(BundleSet bundles)
         var assets = new List<ExportedAsset>();
         var skipped = new List<string>();
 
-        if (tree.PrefabBundle is not null)
+        // What the weapon itself contributes when a skin was asked for.
+        //
+        // Nothing, if the skin brings its own model: it replaces the weapon rather than repainting
+        // it, and every one of the weapon's own textures, sounds and animations is then a file the
+        // author has no reason to touch. Its geometry and nothing else, if the skin only repaints:
+        // that is the thing being repainted, and the paint is the skin's own.
+        var wanted = chosen is null ? Folders
+            : chosen.Model is null
+                ? Folders.Where(f => f.Key == AssetClassID.Mesh).ToDictionary(f => f.Key, f => f.Value)
+                : [];
+
+        if (tree.PrefabBundle is not null && wanted.Count > 0)
         {
             var closure = new List<AssetTypeValueField>();
 
@@ -82,10 +93,10 @@ public sealed class WeaponExporter(BundleSet bundles)
                     var info = file.file.GetAssetInfo(node.PathId);
                     if (info is null) continue;
 
-                    if (Folders.TryGetValue(node.Class, out var folder))
-                        assets.AddRange(_exporter.Export(
+                    if (wanted.TryGetValue(node.Class, out var folder))
+                        Once(assets, _exporter.Export(
                             group.Key, file, info, Path.Combine(directory, folder)));
-                    else if (bundles.Context.Deserialize(file, info) is { } field)
+                    else if (chosen is null && bundles.Context.Deserialize(file, info) is { } field)
                         closure.Add(field);
                 }
             }
@@ -100,13 +111,19 @@ public sealed class WeaponExporter(BundleSet bundles)
             }
         }
 
-        if (tree.Icon is { AssetPath: not null } icon)
-            ExportByName(icon.Container, icon.TextureName, Path.Combine(directory, "icon"), assets, skipped);
-        else if (tree.Icon is not null)
-            skipped.Add($"{tree.Icon.TextureName}: lives in {tree.Icon.Container}, outside the bundle cache");
+        // The weapon's own shop icon, and only when the weapon is what was asked for. A skin has one
+        // of its own among the related assets, and the weapon's says nothing about the skin.
+        if (chosen is null)
+        {
+            if (tree.Icon is { AssetPath: not null } icon)
+                ExportByName(icon.Container, icon.TextureName, Path.Combine(directory, "icon"), assets, skipped);
+            else if (tree.Icon is not null)
+                skipped.Add($"{tree.Icon.TextureName}: lives in {tree.Icon.Container}, outside the bundle cache");
+        }
 
         foreach (var related in tree.Related)
         {
+            if (!Wanted(tree, related, chosen)) continue;
             if (related.Bundle is null) { skipped.Add($"{related.Path}: bundle unknown"); continue; }
             var leaf = related.Path[(related.Path.LastIndexOf('/') + 1)..];
             ExportByName(related.Bundle, leaf,
@@ -121,6 +138,60 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         return new WeaponExport(directory, assets, skipped);
     }
+
+    /// Records what was written, without listing the same file twice.
+    ///
+    /// One asset is reached by several routes — a texture four materials name, a mesh that both the
+    /// weapon and a skin's model use — and following each route wrote the same file to the same
+    /// path and added another row for it. What came out was right; what was listed was the same
+    /// picture four times over, in the editor and in the manifest behind it.
+    private static void Once(List<ExportedAsset> into, IEnumerable<ExportedAsset> written)
+    {
+        foreach (var asset in written)
+            if (!into.Any(a => string.Equals(a.Path, asset.Path, StringComparison.OrdinalIgnoreCase)))
+                into.Add(asset);
+    }
+
+    /// Whether a related asset belongs to what is being written out.
+    ///
+    /// Everything the lookup table names for this weapon lands in Related, and most of it belongs
+    /// to one skin: an offer icon, a profile animation and an info record per skin, plus each
+    /// skin's own definition. Writing the lot meant that extracting one weapon produced eight
+    /// offer icons and that asking for one skin produced the other seven as well — files an author
+    /// has no business changing to change the thing they asked for.
+    ///
+    /// Ownership is read off the name. A skin's assets are named after the skin's own id, so an
+    /// asset whose name begins with one is that skin's and an asset whose name begins with none of
+    /// them is the weapon's.
+    private static bool Wanted(WeaponTree tree, RelatedAsset related, WeaponSkinView? chosen)
+    {
+        // A skin's own model, which the skin export walks properly — everything it reaches, in the
+        // folders its types belong in. Taken by name here instead it came out as whatever else in
+        // that bundle happened to share the name, which for these was the skin's texture.
+        if (related.Path.StartsWith("WeaponSkinsV2/CustomModels/", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var leaf = related.Path[(related.Path.LastIndexOf('/') + 1)..];
+        var owner = tree.Skins
+            .Select(s => s.Record.Id)
+            .Where(id => Named(leaf, id))
+            .OrderByDescending(id => id.Length)   // Weapon834_snow_night over Weapon834_snow
+            .FirstOrDefault();
+
+        // The default skin is the weapon as it comes, so what is filed under it is the weapon's.
+        var weaponsOwn = owner is null
+            || owner.EndsWith("_default", StringComparison.OrdinalIgnoreCase);
+
+        return chosen is null
+            ? weaponsOwn
+            : Named(leaf, chosen.Record.Id);
+    }
+
+    /// Whether `leaf` is `id` itself or something filed under it, rather than a longer name that
+    /// merely starts with the same letters.
+    private static bool Named(string leaf, string id)
+        => leaf.StartsWith(id, StringComparison.OrdinalIgnoreCase)
+            && (leaf.Length == id.Length || leaf[id.Length] == '_');
 
     /// The skin that was asked for, matched on its id or on the name a player would see.
     private WeaponSkinView? Chosen(WeaponTree tree)
@@ -189,7 +260,7 @@ public sealed class WeaponExporter(BundleSet bundles)
             if (info is null) continue;
 
             if (Folders.TryGetValue(node.Class, out var folder))
-                assets.AddRange(_exporter.Export(bundle, holder, info, Path.Combine(into, folder)));
+                Once(assets, _exporter.Export(bundle, holder, info, Path.Combine(into, folder)));
             else if (bundles.Context.Deserialize(holder, info) is { } field)
                 closure.Add(field);
         }
@@ -302,7 +373,7 @@ public sealed class WeaponExporter(BundleSet bundles)
             .ToList();
 
         if (matches.Count == 0) { skipped.Add($"{name}: not found in '{bundle}'"); return; }
-        foreach (var info in matches) into.AddRange(_exporter.Export(bundle, file, info, directory));
+        foreach (var info in matches) Once(into, _exporter.Export(bundle, file, info, directory));
     }
 
     private string? NameOf(AssetsFileInstance file, AssetFileInfo info)

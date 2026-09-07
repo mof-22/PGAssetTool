@@ -95,7 +95,21 @@ public static class Workspace
     }
 
     public static PackManifest Read(string directory)
-        => PackManifest.Parse(File.ReadAllText(Path.Combine(directory, PackManifest.FileName)));
+        => Once(PackManifest.Parse(File.ReadAllText(Path.Combine(directory, PackManifest.FileName))));
+
+    /// The same operation written down more than once is one operation.
+    ///
+    /// One asset is reached by several routes — a texture four materials name, a mesh that both the
+    /// weapon and a skin's model use — and an export that follows each route added a row for each.
+    /// The file written was right, and the same file every time; what was wrong was the list. Here
+    /// as well as at the export, because the manifests already on disk have it written into them.
+    private static PackManifest Once(PackManifest manifest)
+    {
+        var seen = new HashSet<(string Op, string Source, Assets.AssetAddress Target)>();
+        var kept = manifest.Operations.Where(o => seen.Add((o.Op, o.Source, o.Target))).ToList();
+
+        return kept.Count == manifest.Operations.Count ? manifest : manifest with { Operations = kept };
+    }
 
     /// Writes the manifest back, keeping the operations exactly as they were.
     ///

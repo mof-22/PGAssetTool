@@ -1168,6 +1168,27 @@ internal static class SelfTest
                 return $"'{skin.Name}' brings its own model and no mesh was written";
             if (!skin.HasModel && files.Any(f => f.EndsWith(".glb")))
                 return $"'{skin.Name}' only repaints and a mesh was written for it";
+
+            // Nothing of the other skins. Every skin's offer icon, profile and definition is filed
+            // against the same weapon, so all of them used to come out whichever one was asked for
+            // — seven sets of files an author has no reason to touch to change the eighth.
+            var alongside = Path.Combine(directory, "related");
+            var others = (Directory.Exists(alongside)
+                    ? Directory.GetFiles(alongside, "*", SearchOption.AllDirectories)
+                    : [])
+                .Where(f => !Path.GetFileName(f).StartsWith(skin.Id!, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (others.Count > 0)
+                return $"'{skin.Name}' brought {others.Count} file(s) belonging to other skins: "
+                    + string.Join(", ", others.Select(Path.GetFileName));
+
+            // A skin with its own model replaces the weapon rather than repainting it, so the
+            // weapon's own geometry is not what is being changed and has no business being here.
+            var weaponsOwn = Path.Combine(directory, "meshes");
+            if (skin.HasModel && Directory.Exists(weaponsOwn))
+                return $"'{skin.Name}' has a model of its own and the weapon's was written too";
+            if (!skin.HasModel && !Directory.Exists(weaponsOwn))
+                return $"'{skin.Name}' only repaints and the model it repaints was not written";
         }
 
         // Put it back, or extracting the next weapon would carry this one's skin along with it.
