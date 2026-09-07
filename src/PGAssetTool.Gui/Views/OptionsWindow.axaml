@@ -9,6 +9,18 @@
   <StackPanel Margin="20" Spacing="16">
 
     <StackPanel Spacing="6">
+      <TextBlock Text="The game" FontWeight="SemiBold" />
+      <DockPanel>
+        <Button DockPanel.Dock="Right" Content="Choose…" Click="OnChooseGame" Margin="6,0,0,0" />
+        <TextBox Text="{Binding GameDirectory}" Watermark="Left blank to find it through Steam" />
+      </DockPanel>
+      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                 Text="The folder holding the game's own *_Data directory. Only Steam can be asked where it put the game, so an installation from anywhere else is named here — as is a copy of the game data, which is the safe way to work on this without touching what you play. Changing it opens that installation instead." />
+      <TextBlock Text="{Binding GameDescribed}" Opacity="0.55" FontSize="11"
+                 FontFamily="Consolas, Menlo, monospace" TextWrapping="Wrap" />
+    </StackPanel>
+
+    <StackPanel Spacing="6">
       <TextBlock Text="Weapon names" FontWeight="SemiBold" />
       <ComboBox ItemsSource="{Binding Languages}" SelectedValue="{Binding Language}"
                 SelectedValueBinding="{Binding Bundle}" HorizontalAlignment="Stretch" />

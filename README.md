@@ -28,7 +28,8 @@ dotnet publish src/PGAssetTool.Gui -c Release -o dist
 `dist/PGAssetTool.exe` is then a single file that runs anywhere and keeps everything it writes beside
 itself — no registry, no `%APPDATA%`.
 
-Start it. It locates the game through Steam on its own.
+Start it. It locates the game through Steam on its own; if yours is from another shop, or you would
+rather work on a copy, name the folder in **File → Options**.
 
 ---
 
@@ -142,9 +143,10 @@ what they hold. Publish yours and people can tell a genuine pack from a re-signe
 
 ## When something is wrong
 
-**The game was not found.** The window says so on startup. It is located through Steam; an
-installation somewhere Steam does not know about has to be named on the command line, with
-`--game <folder>`. The GUI has no setting for it yet.
+**The game was not found.** It is located through Steam, which is not the only place it is sold.
+Name it yourself in **File → Options** — the folder holding the game's own `*_Data` directory. A
+copy of the game data works there too, which is the safe way to try things without touching what you
+play.
 
 **"The game is running."** Close it. Nothing is written to the game's files while it is open, because
 rewriting a bundle out from under it leaves a half-written file.
@@ -238,8 +240,6 @@ what a thing *does*, and this is a tool for how things look and sound.
   missing is a format to edit them *in*.
 - **Editing the JSON field dump.** It is written to be read; nothing reads it back. Changing one
   field of a material still means going through the raw bytes.
-- **Previewing a skin's own model.** Extraction handles it; the preview's picker offers only
-  textures.
 
 ---
 

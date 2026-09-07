@@ -395,6 +395,25 @@ internal static class SelfTest
             // Ctrl+R throws the reader away and starts over, which is the slowest thing the GUI
             // does on purpose. It used to take fifteen seconds, nearly all of it rebuilding the
             // CAB index through a class database loaded once per bundle.
+            // The game can be named instead of found. Only Steam can be asked where it put the
+            // game and it is not the only shop selling it, so a path that was given is taken as
+            // given — pointed here at the very installation that was just detected, which is the
+            // one thing that can be checked without a second copy of the game to hand.
+            var found = model.Game!.RootDirectory;
+            model.GameDirectory = found;
+            WaitWhile(() => model.Busy, 120_000);
+
+            Console.WriteLine($"game     named instead of found: {model.GameDescribed}");
+            if (model.Game is not { } asNamed
+                || !string.Equals(Path.GetFullPath(asNamed.RootDirectory), Path.GetFullPath(found),
+                    StringComparison.OrdinalIgnoreCase))
+                return Fail($"naming the game opened '{model.Game?.RootDirectory}' instead");
+            if (model.Weapons.Count == 0) return Fail("naming the game left no weapons");
+
+            model.GameDirectory = "";
+            WaitWhile(() => model.Busy, 120_000);
+            if (model.Weapons.Count == 0) return Fail("going back to finding it left no weapons");
+
             // Searched, so the reload has something to put back wrongly. A reload happens under
             // somebody in the middle of something — building a pack causes one — and it used to
             // hand back the whole list while the search box still said what they had typed.

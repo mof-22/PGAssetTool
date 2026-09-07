@@ -24,6 +24,14 @@ public sealed record ToolSettings
     /// from — the CLI can default to the current one because a shell has a meaningful one.
     public string WorkspaceRoot { get; init; } = "";
 
+    /// The game to work on, when it is not the one Steam knows about.
+    ///
+    /// Empty means find it, which is what it is for most people. It is here because the game is
+    /// sold in more than one store and only one of them can be asked where it put things — and
+    /// because a copy of the game data is a perfectly good thing to point at, which is how anyone
+    /// would work on this without risking the installation they play.
+    public string GameDirectory { get; init; } = "";
+
     /// Recorded in the manifest of anything extracted as a workspace.
     public string Author { get; init; } = "";
 

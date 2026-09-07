@@ -95,6 +95,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Recorded in the manifest of anything extracted from here on. Editable per pack afterwards.
     [ObservableProperty] private string _author = "";
 
+    /// Which installation to work on. Empty finds the one Steam knows about.
+    [ObservableProperty] private string _gameDirectory = "";
+
+    /// Reopening the game is the whole of what this changes, and everything downstream — the
+    /// weapons, the workspaces, what is installed — is read from whatever it lands on.
+    partial void OnGameDirectoryChanged(string value)
+    {
+        Remember();
+        OnPropertyChanged(nameof(GameDescribed));
+        if (!_loading) _ = ReloadAsync();
+    }
+
+    /// What the setting is doing right now, said where it is set. A path that is not a game is the
+    /// one mistake this invites, and it is worth hearing about before the tree comes up empty.
+    public string GameDescribed => GameDirectory.Length == 0
+        ? "Found through Steam."
+        : Game is { } open && string.Equals(
+              Path.GetFullPath(open.RootDirectory), Path.GetFullPath(GameDirectory),
+              StringComparison.OrdinalIgnoreCase)
+            ? $"Open: {open.BundlesDirectory}"
+            : "Not open. It has to be the folder holding the game's own *_Data directory.";
+
     /// Whether a built pack is signed and scrambled unless its own manifest says otherwise.
     [ObservableProperty] private bool _protectPacks;
 
@@ -164,6 +186,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ReplaceableOnly = _settings.ReplaceableOnly;
         OpaqueTextures = _settings.OpaqueTextures;
         Author = _settings.Author;
+        GameDirectory = _settings.GameDirectory;
         Editor.SideBySide = _settings.SideBySide;
         Editor.Linked = _settings.LinkedPreviews;
         Manager.ConfirmChanges = _settings.ConfirmChanges;
@@ -175,7 +198,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             await Task.Run(() =>
             {
-                _installation = GameInstallation.OpenDetected();
+                // Named, or found. Only one store can be asked where it put the game, and it is not
+                // the only one selling it — so a path that was given is taken as given.
+                _installation = GameDirectory is { Length: > 0 } chosen
+                    ? GameInstallation.Open(chosen)
+                    : GameInstallation.OpenDetected();
+
                 var game = _installation;
                 _bundles = new BundleSet(game);
                 _catalogs = GameCatalogs.Load(_bundles, Language);
@@ -205,6 +233,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             Manager.Refresh();
             Status = $"{_catalogs.Items.Count} weapons";
+            OnPropertyChanged(nameof(GameDescribed));
         }
         catch (Exception ex)
         {
@@ -648,7 +677,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _settings = _settings with
         {
             Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
-            Author = Author.Trim(),
+            Author = Author.Trim(), GameDirectory = GameDirectory.Trim(),
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ProtectPacks = ProtectPacks,
