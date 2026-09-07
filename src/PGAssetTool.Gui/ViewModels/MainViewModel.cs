@@ -776,6 +776,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 if (node.Children.Count == 0)
                     Status = $"'{node.Label}' brings a model and nothing in it could be read.";
+
+                // The picker is built from the tree, and the tree has just grown. Without this a
+                // skin's own model arrived with its own textures nowhere to be found, which is the
+                // one thing somebody opening that row is going to want to put on it.
+                OfferTextures();
             }
             finally
             {
@@ -833,8 +838,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// Every texture the weapon reaches, offered so a skin can be tried on a mesh by hand.
+    ///
+    /// Built from the tree as it stands, so it is built again when the tree grows: a skin's own
+    /// model is read when its row is opened, and its textures are exactly the ones somebody wants
+    /// on the mesh they have just been given.
     private void OfferTextures()
     {
+        // Emptying the list empties the box bound to it, which writes a null back through the
+        // selection. What was on the mesh goes back on it.
+        var wearing = Preview.ChosenTexture;
+
         Preview.TextureChoices.Clear();
         Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0));
 
@@ -847,6 +860,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (!seen.Add((node.Bundle, node.PathId))) continue;
             Preview.TextureChoices.Add(new TextureChoice(node.Label, node.Bundle, node.PathId));
         }
+
+        if (wearing is not null && Preview.TextureChoices.Contains(wearing))
+            Preview.ChosenTexture = wearing;
     }
 
     private static IEnumerable<TreeNode> AllNodes(IEnumerable<TreeNode> nodes)

@@ -478,6 +478,20 @@ internal static class SelfTest
             if (inside.All(c => c.Class != AssetsTools.NET.Extra.AssetClassID.Mesh))
                 return Fail($"'{withModel.Label}' brings its own model and no mesh came back");
 
+            // The mesh is no use without something to put on it, and what somebody wants on a skin's
+            // own model is that skin's own texture. The picker is built from the tree, so it has to
+            // be built again now the tree has grown.
+            var offered = model.Preview.TextureChoices.Select(t => t.Name).ToHashSet();
+            var unoffered = inside
+                .Where(c => c.Class == AssetsTools.NET.Extra.AssetClassID.Texture2D)
+                .Select(c => c.Label)
+                .Where(n => !offered.Contains(n))
+                .ToList();
+
+            Console.WriteLine($"skins    {model.Preview.TextureChoices.Count} textures offered for it");
+            if (unoffered.Count > 0)
+                return Fail($"the model's own textures are not offered for it: {string.Join(", ", unoffered)}");
+
             // Read once. Opening and closing the row again must not pile the same rows up under it.
             var read = withModel.Children.Count;
             withModel.IsExpanded = false;
