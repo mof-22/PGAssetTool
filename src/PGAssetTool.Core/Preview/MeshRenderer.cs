@@ -200,6 +200,47 @@ public static class MeshRenderer
         }
     }
 
+    /// Where the model lands on screen for a given view, in half-frames from the middle: -1 is the
+    /// left or top edge of a square frame, +1 the right or bottom.
+    ///
+    /// Measured from the vertices rather than from what was drawn, because a drawing is clipped.
+    /// A model three times too wide for the frame covers it edge to edge, and everything read off
+    /// that says the framing is already perfect — which is why an icon of a long weapon, zoomed in,
+    /// came out with both ends cut off however many times the framing was corrected.
+    public static (float Left, float Top, float Right, float Bottom)? Extent(UnityMesh mesh, Camera camera)
+    {
+        var positions = mesh.Get(VertexAttribute.Position);
+        if (positions is null || mesh.VertexCount == 0) return null;
+
+        var (centre, size, radius) = Bounds(mesh, positions);
+        if (radius <= 0) radius = 1;
+
+        var upright = Upright.For(size);
+        var view = View(camera);
+        var (pivotX, pivotY, pivotZ) =
+            (camera.PivotX * radius, camera.PivotY * radius, camera.PivotZ * radius);
+
+        // The same projection the rasterizer does, with the frame's own size divided back out: a
+        // half-frame is `radius * Distance` of model, whatever the target happens to be.
+        var span = radius * camera.Distance;
+        float left = float.MaxValue, top = float.MaxValue, right = float.MinValue, bottom = float.MinValue;
+
+        for (var v = 0; v < mesh.VertexCount; v++)
+        {
+            var (mx, my, mz) = upright.Apply(
+                positions[v * 3] - centre.X, positions[v * 3 + 1] - centre.Y, positions[v * 3 + 2] - centre.Z);
+            var (x, y, _) = view.Apply(mx - pivotX, my - pivotY, mz - pivotZ);
+
+            var (sx, sy) = (x / span, -y / span);
+            if (sx < left) left = sx;
+            if (sx > right) right = sx;
+            if (sy < top) top = sy;
+            if (sy > bottom) bottom = sy;
+        }
+
+        return right < left ? null : (left, top, right, bottom);
+    }
+
     /// A single light over the viewer's shoulder, with enough ambient that faces turned away stay
     /// readable instead of going black.
     private static float Lambert(Basis view, Upright upright, float[] normals, int vertex)

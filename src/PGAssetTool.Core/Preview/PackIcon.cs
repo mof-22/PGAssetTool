@@ -26,69 +26,50 @@ public static class PackIcon
     /// a crop of something larger.
     private const float Fill = 0.94f;
 
-    /// Draws the model as large as it will go, at the angle it was asked for.
+    /// Draws the whole model as large as it will go, at the angle it was asked for.
     ///
     /// The distance the preview starts at is a multiple of the model's bounding sphere, which for
     /// a rifle is most of a metre of empty air in every direction that is not along the barrel — so
-    /// a fixed distance drew a small object in a large empty square. Where it actually lands is
-    /// measured from the drawing and the framing corrected, which needs no knowledge of the shape
-    /// and holds at any angle.
+    /// a fixed distance drew a small object in a large empty square. Where the model actually lands
+    /// is worked out first and the framing set from it, which needs no knowledge of the shape and
+    /// holds at any angle.
+    ///
+    /// The whole of it, whatever the view being copied was showing. The pane a snapshot is taken
+    /// from is usually much wider than it is tall, and a square picture of the same view cuts both
+    /// ends off a long weapon — so what the icon keeps is the angle, and it finds its own distance.
     public static PreviewImage Render(
         UnityMesh mesh, IReadOnlyList<PreviewImage?>? textures, Camera? camera = null, int size = Size)
     {
         var target = new RenderTarget();
         target.Resize(size, size);
-        var view = camera ?? Angle;
 
+        var view = Frame(mesh, camera ?? Angle);
         MeshRenderer.Render(mesh, view, target, textures);
-
-        // Twice: the first correction is computed from a drawing that was not framed yet, and a
-        // long model swinging into the corners moves further than a linear guess allows for.
-        for (var pass = 0; pass < 2 && Drawn(target) is { } bounds; pass++)
-        {
-            view = Frame(view, bounds, size);
-            MeshRenderer.Render(mesh, view, target, textures);
-        }
 
         // The rasterizer writes an opaque pixel where it draws and leaves the rest at zero, so what
         // it produces is already straight alpha and needs no unpicking.
         return new PreviewImage(size, size, target.Bgra);
     }
 
-    /// Moves the drawing to the middle of the frame and scales it to fill.
-    private static Camera Frame(Camera camera, (int Left, int Top, int Right, int Bottom) drawn, int size)
+    /// Puts the model in the middle of a square frame and scales it to fill.
+    ///
+    /// Exact rather than iterative, because it is measured from the model and not from a picture of
+    /// it: a drawing is clipped at the frame, so a model that overflows reads as one that fits, and
+    /// correcting from that could only ever creep towards the answer a few percent at a time.
+    private static Camera Frame(UnityMesh mesh, Camera camera)
     {
-        var half = size * 0.5f;
-        var middleX = (drawn.Left + drawn.Right + 1) * 0.5f;
-        var middleY = (drawn.Top + drawn.Bottom + 1) * 0.5f;
+        if (MeshRenderer.Extent(mesh, camera) is not { } at) return camera;
 
-        // Panned takes half-frames, rightwards and upwards; the screen counts rows downwards.
-        var centred = camera.Panned((half - middleX) / half, (middleY - half) / half);
+        // Panned takes half-frames rightwards and upwards; the extent counts downwards.
+        var centred = camera.Panned(
+            -(at.Left + at.Right) * 0.5f, (at.Top + at.Bottom) * 0.5f);
 
-        // The wider of the two extents decides, or a long model would be scaled to fit its height
-        // and hang off both sides.
-        var extent = Math.Max(drawn.Right - drawn.Left + 1, drawn.Bottom - drawn.Top + 1) / (float)size;
-        if (extent <= 0) return centred;
+        // The longer of the two decides, or a long model would be scaled to fit its height and
+        // hang off both sides.
+        var half = Math.Max(at.Right - at.Left, at.Bottom - at.Top) * 0.5f;
+        if (half <= 0) return centred;
 
-        return centred with { Distance = Math.Clamp(camera.Distance * extent / Fill, 0.05f, 20f) };
-    }
-
-    /// The box the drawing occupies, or null when nothing was drawn.
-    private static (int Left, int Top, int Right, int Bottom)? Drawn(RenderTarget target)
-    {
-        int left = target.Width, top = target.Height, right = -1, bottom = -1;
-
-        for (var y = 0; y < target.Height; y++)
-            for (var x = 0; x < target.Width; x++)
-            {
-                if (target.Bgra[(y * target.Width + x) * 4 + 3] == 0) continue;
-                if (x < left) left = x;
-                if (x > right) right = x;
-                if (y < top) top = y;
-                if (y > bottom) bottom = y;
-            }
-
-        return right < left ? null : (left, top, right, bottom);
+        return centred with { Distance = Math.Clamp(camera.Distance * half / Fill, 0.05f, 40f) };
     }
 
     /// True when anything was actually drawn. A model that missed the frame entirely would write a

@@ -35,13 +35,66 @@ public class PackIconTests : IDisposable
     }
 
     [Fact]
-    public void AModelOutOfFrameIsRecognisedAsNoPictureAtAll()
+    public void AViewPannedRightOutOfTheFrameIsBroughtBackRatherThanDrawnEmpty()
+    {
+        // The icon keeps the angle a view was turned to and finds its own distance and centre, so
+        // a snapshot taken while zoomed into one end of a weapon still shows the weapon. It used to
+        // measure the framing off the drawing, which says nothing at all when there is no drawing.
+        var picture = PackIcon.Render(Quad(), null, new Camera(Distance: 0.4f).Panned(40, 0), size: 64);
+
+        Assert.False(PackIcon.IsBlank(picture));
+    }
+
+    [Fact]
+    public void AModelWithNothingInItIsRecognisedAsNoPictureAtAll()
     {
         // A file that is transparent from corner to corner looks exactly like a missing icon, so
         // writing one is worse than not writing anything.
-        var picture = PackIcon.Render(Quad(), null, new Camera(Distance: 0.4f).Panned(40, 0), size: 64);
+        var nothing = new UnityMesh
+        {
+            Name = "empty",
+            VertexCount = 0,
+            Attributes = new Dictionary<VertexAttribute, float[]>(),
+            Dimensions = new Dictionary<VertexAttribute, int>(),
+            Indices = [],
+            SubMeshes = [],
+            BindPoses = [],
+            BoneNameHashes = [],
+        };
 
-        Assert.True(PackIcon.IsBlank(picture));
+        Assert.True(PackIcon.IsBlank(PackIcon.Render(nothing, null, size: 64)));
+    }
+
+    [Fact]
+    public void AWideModelZoomedIntoIsNotCutOffAtTheSides()
+    {
+        // The pane a snapshot is copied from is far wider than it is tall, so a square picture of
+        // the same view lost both ends of anything long. What the icon keeps is the angle.
+        var bar = new UnityMesh
+        {
+            Name = "bar",
+            VertexCount = 4,
+            Attributes = new Dictionary<VertexAttribute, float[]>
+            {
+                [VertexAttribute.Position] = [-4, -0.2f, 0, 4, -0.2f, 0, 4, 0.2f, 0, -4, 0.2f, 0],
+            },
+            Dimensions = new Dictionary<VertexAttribute, int> { [VertexAttribute.Position] = 3 },
+            Indices = [0, 1, 2, 0, 2, 3],
+            SubMeshes = [new SubMesh(0, 6, 0, 0)],
+            BindPoses = [],
+            BoneNameHashes = [],
+        };
+
+        var picture = PackIcon.Render(bar, null, new Camera(Yaw: 0, Pitch: 0, Distance: 0.4f), size: 64);
+
+        // Nothing may touch the left or right edge: what does is a model running off the side.
+        for (var y = 0; y < 64; y++)
+        {
+            Assert.Equal(0, picture.Bgra[(y * 64) * 4 + 3]);
+            Assert.Equal(0, picture.Bgra[(y * 64 + 63) * 4 + 3]);
+        }
+
+        Assert.False(PackIcon.IsBlank(picture));
     }
 
     [Fact]
