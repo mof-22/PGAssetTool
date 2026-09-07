@@ -757,6 +757,8 @@ internal static class SelfTest
             if (kept.Any(p => !p.Contains("PGAssetTool-data")))
                 return Fail("a pack was not copied into the store");
 
+            if (ModsAreFiledByWeaponAndLook(model) is { } filingProblem) return Fail(filingProblem);
+
             // Now both, in one gesture. Removed through the manager rather than around it, so the
             // path a person actually takes is the one under test. This also puts the game back: it
             // is a test, not a change anyone asked for.
@@ -1038,6 +1040,99 @@ internal static class SelfTest
         Console.WriteLine("editor   the view survives a reading, and the halves move together");
         model.Editor.SelectedFile = back;
         WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+        return null;
+    }
+
+    /// A kept pack goes in the folder its weapon and its look name, and the manager shows the same
+    /// arrangement.
+    ///
+    /// Two views of one thing that disagree are worse than either, so the check is that they do
+    /// not: the folder the file is in, and the folder the tree opens, are the same two names.
+    /// The folder standing at a path, wherever in the shelf it ended up.
+    private static ModFolder? Folder(MainViewModel model, IReadOnlyList<string> at)
+    {
+        var found = new List<ModFolder>();
+        void Walk(ModFolder node)
+        {
+            found.Add(node);
+            foreach (var child in node.Children) Walk(child);
+        }
+
+        foreach (var root in model.Manager.Folders) Walk(root);
+
+        return found.FirstOrDefault(f => f.At.SequenceEqual(at, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string? ModsAreFiledByWeaponAndLook(MainViewModel model)
+    {
+        if (model.Manager.Mods.FirstOrDefault(m => m.Mod.Id == PackIdentity) is not { } row)
+            return $"the manager does not list '{PackIdentity}'";
+        if (row.Mod.Subject is not { } subject)
+            return "the ledger did not record what the mod is for";
+
+        var under = Path.Combine([.. subject.Path]);
+        Console.WriteLine($"manager  '{row.Name}' is filed under {under.Replace('\\', '/')}");
+
+        if (!row.Mod.PackPath.Contains(under, StringComparison.OrdinalIgnoreCase))
+            return $"it is kept at {row.Mod.PackPath}, which is not under {under}";
+        if (!File.Exists(row.Mod.PackPath))
+            return "the ledger names a kept pack that is not there";
+
+        // Found by the path rather than by depth. The kind is the top level of the arrangement and
+        // the shelf leaves it out while everything installed is the same kind, so how deep any of
+        // these sit depends on what else is installed.
+        if (Folder(model, subject.Path.Take(2).ToList()) is not { } weapon)
+            return "the manager's shelf has no folder for the weapon this mod is for";
+        if (Folder(model, subject.Path) is not { } look)
+            return $"'{weapon.Label}' has no folder for the look this mod changes";
+
+        // Opening a folder narrows the tiles to what it holds, and to nothing else.
+        model.Manager.Folder = look;
+        Console.WriteLine($"manager  {weapon.Label} / {look.Label} shows {model.Manager.Shown.Count} "
+            + $"of {model.Manager.Mods.Count} installed");
+
+        if (model.Manager.Shown.All(r => r.Mod.Id != PackIdentity))
+            return "opening the folder hid the mod filed in it";
+        if (model.Manager.Shown.Any(r => r.Mod.Id == PackIdentityB))
+            return "the folder shows a mod filed under another weapon";
+
+        // Searched the way the weapon list is searched, which is what makes a weapon findable by
+        // any of its names — the number is the plainest proof that it is the same search.
+        model.Manager.FolderSearch = subject.Number.ToString();
+        if (model.Manager.Shown.All(r => r.Mod.Id != PackIdentity))
+            return $"searching for #{subject.Number} hid the mod that is for it";
+        if (model.Manager.Shown.Any(r => r.Mod.Id == PackIdentityB))
+            return $"searching for #{subject.Number} showed a mod for another weapon";
+
+        model.Manager.FolderSearch = "nothing-installed-is-called-this";
+        if (model.Manager.Shown.Count > 0)
+            return "a search that matches nothing still showed something";
+
+        model.Manager.FolderSearch = "";
+
+        // Back to everything, which is what the rest of this run acts on.
+        model.Manager.Folder = model.Manager.Folders.FirstOrDefault();
+        if (model.Manager.Shown.Count != model.Manager.Mods.Count)
+            return "the top of the shelf does not hold everything installed";
+
+        // The headings say what the game calls these things now, not what they were called when
+        // the pack was built. A pack made in English must not go on reading as English to somebody
+        // working in Japanese — and a pack made before any of this existed carries no name to
+        // translate at all, so the lookup is by number and by skin id.
+        string? Heading() => Folder(model, subject.Path.Take(2).ToList())?.Label;
+
+        var english = Heading();
+        var was = model.Language;
+        model.Language = "l_ja";
+        var japanese = Heading();
+        model.Language = was;
+
+        Console.WriteLine($"manager  the heading reads '{english}' and '{japanese}' in Japanese");
+        if (japanese is null) return "the shelf lost the weapon when the language changed";
+        if (japanese == english)
+            return $"the heading stayed '{english}' when the language changed";
+        if (Heading() != english) return "the heading did not come back when the language did";
+
         return null;
     }
 
@@ -1419,6 +1514,35 @@ internal static class SelfTest
             if (!skin.HasModel && !Directory.Exists(weaponsOwn))
                 return $"'{skin.Name}' only repaints and the model it repaints was not written";
         }
+
+        // Two looks of one weapon are two mods.
+        //
+        // The id used to be the weapon's slug and nothing else, so every mod of a weapon was the
+        // same mod as far as the ledger went: installing a skin replaced the plain one, and
+        // installing somebody else's replaced yours — quietly, since replacing by id is how a mod
+        // is updated. Each extraction mints its own now, and says what it was made from.
+        var manifests = written.Select(Core.Pack.Workspace.Read).ToList();
+        Console.WriteLine($"skins    filed as {string.Join(" and ", manifests.Select(m => m.Id))}");
+
+        if (manifests[0].Id == manifests[1].Id)
+            return $"two skins of one weapon were both called '{manifests[0].Id}'";
+
+        foreach (var manifest in manifests)
+        {
+            if (manifest.Subject is not { } subject)
+                return $"'{manifest.Id}' does not say which weapon it is for";
+            if (subject.Number != 416)
+                return $"'{manifest.Id}' says it is for #{subject.Number}, not the weapon it came from";
+            if (subject.Variant.Length == 0)
+                return $"'{manifest.Id}' was extracted with a skin and records none";
+        }
+
+        // Same kind, same weapon, different look: the first two levels of the path agree and the
+        // last one does not.
+        if (!manifests[0].Subject!.Path.Take(2).SequenceEqual(manifests[1].Subject!.Path.Take(2)))
+            return "two skins of one weapon are filed under two different weapons";
+        if (manifests[0].Subject!.Path[2] == manifests[1].Subject!.Path[2])
+            return "two different skins are filed under the same look";
 
         // Put it back, or extracting the next weapon would carry this one's skin along with it.
         model.ChosenSkin = SkinChoice.None;

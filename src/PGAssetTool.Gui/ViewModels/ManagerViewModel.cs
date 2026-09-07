@@ -102,6 +102,24 @@ public sealed record ModDetails(
 /// What a request needs confirming before it happens.
 public sealed record Confirmation(string Title, string Body, Func<Task> Proceed);
 
+/// One level of the shelf the installed mods are arranged on: a weapon, or one of its looks.
+///
+/// The arrangement is the one on disk — a folder per weapon, a folder per skin inside it — because
+/// two views of the same thing that disagree are worse than either. What it holds is ids rather
+/// than rows: the rows are rebuilt on every refresh and an id is what survives that.
+public sealed class ModFolder(string label, string detail, IReadOnlyCollection<string> holds)
+{
+    public string Label => label;
+    public string Detail => detail;
+    public ObservableCollection<ModFolder> Children { get; } = [];
+
+    /// Where this sits, as folder names from the top. What a selection is remembered by, since the
+    /// nodes themselves are made anew each time the list is read.
+    public IReadOnlyList<string> At { get; init; } = [];
+
+    public bool Holds(InstalledMod mod) => holds.Contains(mod.Id);
+}
+
 /// The game side: what is installed, what state the bundles are in, and turning things on and off.
 ///
 /// Everything here writes to the game, which is the one thing the rest of the tool never does. So
@@ -114,7 +132,183 @@ public sealed partial class ManagerViewModel : ObservableObject
 
     public ManagerViewModel(Func<GameInstallation?> game) => _game = game;
 
+    /// Everything installed, whatever folder it is filed in.
     public ObservableCollection<InstalledRow> Mods { get; } = [];
+
+    /// The tiles on show: everything, or what the selected folder holds.
+    public ObservableCollection<InstalledRow> Shown { get; } = [];
+
+    /// The shelf itself, as one root that holds the lot.
+    public ObservableCollection<ModFolder> Folders { get; } = [];
+
+    [ObservableProperty] private ModFolder? _folder;
+
+    partial void OnFolderChanged(ModFolder? value) => Show();
+
+    /// Narrows the shelf to what is being looked for. Empty shows everything.
+    [ObservableProperty] private string _folderSearch = "";
+
+    partial void OnFolderSearchChanged(string value) => Arrange();
+
+    /// Which weapons a search hits, answered by the same code the weapon list searches with.
+    ///
+    /// Handed in rather than worked out here: a player knows one weapon by one name and it is not
+    /// necessarily the one on screen, so searching properly means every language's table — which
+    /// the shell has open and this does not. Null when the game is not open, and then only what a
+    /// mod says about itself is searched.
+    public Func<string, IReadOnlySet<int>?>? FindWeapons { get; set; }
+
+    /// What the game calls this weapon and this skin now, in the language the tool is set to.
+    ///
+    /// Asked of the catalogues rather than read off the pack. A pack records the names it was built
+    /// with, which is what it needs to be able to say for itself when it is handed to somebody —
+    /// but on this screen the question is what these things are called *here*, and the answer moves
+    /// when the language does. Looking them up by number and by skin id also reaches packs built
+    /// before any of this existed, which carry no key to translate.
+    public Func<Core.Pack.PackSubject, (string? Name, string? Variant)>? Names { get; set; }
+
+    /// Redraws the headings for a language that has just changed, without going back to the game.
+    public void Relabel() => Arrange();
+
+    /// The mods a search leaves. Everything, when nothing is being searched for.
+    private List<InstalledRow> Searched()
+    {
+        var text = FolderSearch.Trim();
+        if (text.Length == 0) return Mods.ToList();
+
+        var weapons = FindWeapons?.Invoke(text);
+        return Mods.Where(row => Hit(row.Mod, text, weapons)).ToList();
+    }
+
+    private bool Hit(InstalledMod mod, string text, IReadOnlySet<int>? weapons)
+    {
+        if (mod.Subject is { IsKnown: true } subject)
+        {
+            if (subject.Number > 0 && weapons?.Contains(subject.Number) == true) return true;
+            if (subject.Id.Contains(text, StringComparison.OrdinalIgnoreCase)) return true;
+            if (subject.Variant.Contains(text, StringComparison.OrdinalIgnoreCase)) return true;
+            if (subject.VariantName.Contains(text, StringComparison.OrdinalIgnoreCase)) return true;
+            if (Varied(subject)?.Contains(text, StringComparison.OrdinalIgnoreCase) == true) return true;
+            if (Named(subject)?.Contains(text, StringComparison.OrdinalIgnoreCase) == true) return true;
+        }
+
+        // What the mod says about itself, which is all there is to go on for one that was not made
+        // by extracting a weapon.
+        return mod.Name.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || mod.Author.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || mod.Id.Contains(text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// Fills the tiles from whichever folder is open.
+    ///
+    /// The selection goes with the folder rather than surviving it: a mod that is no longer on
+    /// screen is not something a person means to be acting on, and Remove acting on a tile nobody
+    /// can see is the kind of surprise this tab must not have.
+    private void Show()
+    {
+        var was = Selected?.Mod.Id;
+
+        Selection.Clear();
+        Shown.Clear();
+        foreach (var row in Mods.Where(r => Folder is null || Folder.Holds(r.Mod))) Shown.Add(row);
+
+        // Followed by id rather than by row. Every refresh builds new rows around new records — a
+        // mod that has just been turned off is a different value from the one that was selected —
+        // so holding the row itself emptied the details pane under whoever was reading it.
+        Selected = was is null ? null : Shown.FirstOrDefault(r => r.Mod.Id == was);
+    }
+
+    /// Builds the shelf from what is installed, and reopens the folder that was open before.
+    private void Arrange()
+    {
+        var was = Folder?.At ?? [];
+        Folders.Clear();
+
+        var searched = Searched();
+        var all = new ModFolder(
+            FolderSearch.Trim().Length == 0 ? "All mods" : "Matching",
+            $"{searched.Count}", searched.Select(r => r.Mod.Id).ToHashSet());
+        Folders.Add(all);
+
+        // The folders on disk, level for level.
+        //
+        // The top level is the kind of thing, and it is skipped while everything installed is the
+        // same kind: a row saying "weapon" over nothing but weapons is a click that tells nobody
+        // anything. It appears of its own accord the first time something that is not a weapon is
+        // installed beside one.
+        var filed = searched.Where(r => r.Mod.Subject is { IsKnown: true }).ToList();
+        var kinds = filed.Select(r => r.Mod.Subject!.Path[0])
+            .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+
+        Build(all, filed, kinds > 1 ? 0 : 1);
+
+        // Anything that does not say what it is for. Its own folder rather than mixed in, because
+        // "we do not know" is a different answer from "the plain weapon".
+        var unfiled = searched.Where(r => r.Mod.Subject is not { IsKnown: true }).ToList();
+        if (unfiled.Count > 0)
+            all.Children.Add(new ModFolder(
+                "Unfiled", $"{unfiled.Count}", unfiled.Select(r => r.Mod.Id).ToHashSet())
+            {
+                At = [Core.Mods.ModStore.Unfiled],
+            });
+
+        Folder = Find(all, was) ?? all;
+        Show();
+    }
+
+    /// Adds a folder per distinct name at this level of the path, and recurses.
+    ///
+    /// Grouped on the folder name rather than on the heading, so what is on screen is in the order
+    /// the folders on disk are in — the same names, sorted the same way, whatever language the
+    /// headings are being read in.
+    private void Build(ModFolder into, IReadOnlyList<InstalledRow> rows, int level)
+    {
+        if (rows.Count == 0 || level >= rows[0].Mod.Subject!.Path.Count) return;
+
+        foreach (var group in rows
+                     .GroupBy(r => r.Mod.Subject!.Path[level], StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var subject = group.First().Mod.Subject!;
+            var node = new ModFolder(
+                Heading(subject, level), $"{group.Count()}", group.Select(r => r.Mod.Id).ToHashSet())
+            {
+                At = [.. subject.Path.Take(level + 1)],
+            };
+
+            into.Children.Add(node);
+            Build(node, group.ToList(), level + 1);
+        }
+    }
+
+    /// What a folder at this level is called, in the language the tool is set to.
+    private string Heading(Core.Pack.PackSubject subject, int level) => level switch
+    {
+        0 => subject.Kind,
+        1 => Named(subject) is { } name
+            ? (subject.Number > 0 ? $"#{subject.Number} {name}" : name)
+            : subject.Describe,
+        _ => Varied(subject) ?? subject.DescribeVariant,
+    };
+
+    private string? Named(Core.Pack.PackSubject subject)
+        => Names?.Invoke(subject).Name is { Length: > 0 } name ? name : null;
+
+    private string? Varied(Core.Pack.PackSubject subject)
+        => subject.Variant.Length == 0
+            ? null
+            : Names?.Invoke(subject).Variant is { Length: > 0 } name ? name : null;
+
+    private static ModFolder? Find(ModFolder among, IReadOnlyList<string> at)
+    {
+        if (at.Count == 0) return among;
+
+        foreach (var child in among.Children)
+            if (child.At.SequenceEqual(at, StringComparer.OrdinalIgnoreCase)) return child;
+            else if (Find(child, at) is { } deeper) return deeper;
+
+        return null;
+    }
     public ObservableCollection<BundleReport> Bundles { get; } = [];
 
     [ObservableProperty] private InstalledRow? _selected;
@@ -185,6 +379,7 @@ public sealed partial class ManagerViewModel : ObservableObject
         Selection.Clear();
         Mods.Clear();
         foreach (var mod in installed.OrderBy(m => m.InstalledAt)) Mods.Add(new InstalledRow(mod));
+        Arrange();
 
         Bundles.Clear();
         foreach (var report in InstallationReport.Read(game, store, everything)) Bundles.Add(report);

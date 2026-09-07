@@ -400,9 +400,36 @@
 
       <TabItem Header="Manager">
         <Panel DataContext="{Binding Manager}" x:DataType="vm:ManagerViewModel">
-          <Grid ColumnDefinitions="*,4,420" Margin="10">
+          <Grid ColumnDefinitions="210,4,*,4,420" Margin="10">
 
+            <!-- The shelf the packs are filed on, which is the arrangement they are in on disk:
+                 a folder per weapon, one per look inside it. Picking one narrows the tiles rather
+                 than moving anything, so what a command acts on is always what is on screen. -->
             <DockPanel Grid.Column="0">
+              <TextBlock DockPanel.Dock="Top" Text="Filed under" FontWeight="SemiBold"
+                         Margin="0,0,0,6" />
+              <!-- The same search the weapon list does, so a weapon is found by any of its names
+                   in any language — and by what a mod says about itself, for one that was not made
+                   from a weapon at all. -->
+              <TextBox DockPanel.Dock="Top" Text="{Binding FolderSearch}" Margin="0,0,0,6"
+                       Watermark="Search installed" />
+              <TreeView ItemsSource="{Binding Folders}" SelectedItem="{Binding Folder}">
+                <TreeView.ItemTemplate>
+                  <TreeDataTemplate x:DataType="vm:ModFolder" ItemsSource="{Binding Children}">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                      <TextBlock Grid.Column="0" Text="{Binding Label}"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Grid.Column="1" Text="{Binding Detail}" Classes="dim mono"
+                                 Margin="8,0,0,0" />
+                    </Grid>
+                  </TreeDataTemplate>
+                </TreeView.ItemTemplate>
+              </TreeView>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Background="#27272a" />
+
+            <DockPanel Grid.Column="2">
               <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
                 <Button Content="Turn on" Command="{Binding EnableCommand}" />
                 <Button Content="Turn off" Command="{Binding DisableCommand}" />
@@ -420,7 +447,7 @@
                    of the weapon says which one at a glance where a line of text does not. The
                    detail moves to the tooltip: it is what somebody checks once, not what they scan
                    the list for. -->
-              <ListBox Name="Installed" ItemsSource="{Binding Mods}" SelectedItem="{Binding Selected}"
+              <ListBox Name="Installed" ItemsSource="{Binding Shown}" SelectedItem="{Binding Selected}"
                        SelectedItems="{Binding Selection}" SelectionMode="Multiple">
                 <ListBox.ItemsPanel>
                   <ItemsPanelTemplate>
@@ -465,9 +492,9 @@
               </ListBox>
             </DockPanel>
 
-            <GridSplitter Grid.Column="1" Background="#27272a" />
+            <GridSplitter Grid.Column="3" Background="#27272a" />
 
-            <DockPanel Grid.Column="2">
+            <DockPanel Grid.Column="4">
               <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                 <TextBlock Text="The game" FontWeight="SemiBold" Margin="0,0,0,6" />
                 <StackPanel Orientation="Horizontal" Spacing="8">

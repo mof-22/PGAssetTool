@@ -188,6 +188,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             Show(_catalogs!.Items.Weapons);
             Editor.Rescan(WorkspaceRoot);
+
+            // The manager files mods by weapon and by skin, and both are things only the catalogues
+            // can name — and name differently in each language. Searching goes the same way: the
+            // weapon list's own search, so the manager finds a weapon by any of its names too.
+            Manager.Names = Naming;
+            Manager.FindWeapons = text => _catalogs is not { } catalogs
+                ? null
+                : catalogs.Items.Search(text, catalogs.Names).Select(w => w.GameNumber).ToHashSet();
+
             Manager.Refresh();
             Status = $"{_catalogs.Items.Count} weapons";
         }
@@ -580,11 +589,45 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _catalogs = _catalogs.WithLanguage(_bundles, value);
             _resolver = new WeaponResolver(_bundles, _catalogs);
             Show(Search.Length == 0 ? _catalogs.Items.Weapons : _catalogs.Items.Search(Search, _catalogs.Names));
+
+            // The manager's headings are weapon and skin names too, and they are read out of the
+            // table that has just changed rather than out of what a pack was called when it was
+            // built — so this is where they follow.
+            Manager.Relabel();
         }
         catch (Exception ex)
         {
             Status = Describe(ex, "changing the language");
         }
+    }
+
+    /// What a pack's weapon and skin are called in the language the catalogues are open in.
+    ///
+    /// Looked up by number and by skin id, not by anything the pack carries: the pack was built in
+    /// whatever language its author was using, and packs built before this existed carry nothing to
+    /// translate at all. What it recorded is the last resort — better than a blank, and the honest
+    /// answer for a weapon this installation does not have.
+    private (string? Name, string? Variant) Naming(Core.Pack.PackSubject subject)
+    {
+        if (_catalogs is not { } catalogs) return (null, null);
+
+        // Only weapons can be looked up, because weapons are the only kind anything here reads a
+        // catalogue for. Another kind falls through to the keys the pack recorded, which is the
+        // right answer until there is a catalogue to ask.
+        var record = subject.Kind == Core.Pack.PackKind.Weapon
+            ? catalogs.Items.ByGameNumber(subject.Number)
+            : null;
+
+        var variant = record is null || subject.Variant.Length == 0
+            ? null
+            : catalogs.Skins.ForWeapon(record.Index).FirstOrDefault(s =>
+                string.Equals(s.Id, subject.Variant, StringComparison.OrdinalIgnoreCase));
+
+        return (Say(record?.LocalizationKey ?? subject.NameKey),
+                Say(variant?.LocalizationKey ?? subject.VariantKey));
+
+        string? Say(string? key)
+            => key is { Length: > 0 } ? catalogs.Localization.Translate(key) : null;
     }
 
     private void Remember()

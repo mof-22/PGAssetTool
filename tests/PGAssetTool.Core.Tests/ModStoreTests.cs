@@ -1,5 +1,6 @@
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Mods;
+using PGAssetTool.Core.Pack;
 
 namespace PGAssetTool.Core.Tests;
 
@@ -247,7 +248,71 @@ public class ModStoreTests : IDisposable
 
         var kept = _store.Keep(built);
         Assert.Equal(kept, _store.Keep(kept));
-        Assert.Single(Directory.GetFiles(_store.ModsDirectory));
+        Assert.Single(_store.KeptPacks());
+    }
+
+    [Fact]
+    public void APackIsFiledUnderItsWeaponAndTheLookItChanges()
+    {
+        // The arrangement on disk is the one the manager shows, and both are the two questions
+        // somebody has about an installed mod: which weapon, and which of its skins.
+        var built = Path.Combine(_root, "mine.pgmod");
+        File.WriteAllText(built, "a pack");
+
+        var kept = _store.Keep(built, new PackSubject
+        {
+            Kind = PackKind.Weapon, Id = "ultimatum", Number = 416, Prefab = "Weapon834",
+            Name = "Ultimatum", Variant = "Weapon834_nuclear_reactor", VariantName = "Nuclear Reactor",
+        });
+
+        Assert.Equal(
+            Path.Combine(_store.ModsDirectory, PackKind.Weapon, "0416_ultimatum", "nuclear_reactor"),
+            Path.GetDirectoryName(kept));
+    }
+
+    [Fact]
+    public void TheWeaponAsItComesIsALookOfItsOwn()
+    {
+        var built = Path.Combine(_root, "plain.pgmod");
+        File.WriteAllText(built, "a pack");
+
+        var kept = _store.Keep(built, new PackSubject { Kind = PackKind.Weapon, Id = "beretta", Number = 16, Name = "Beretta" });
+
+        Assert.Equal(
+            Path.Combine(_store.ModsDirectory, PackKind.Weapon, "0016_beretta", "default"),
+            Path.GetDirectoryName(kept));
+    }
+
+    [Fact]
+    public void APackThatSaysNothingAboutItselfIsFiledSomewhereThatSaysSo()
+    {
+        var built = Path.Combine(_root, "converted.pgmod");
+        File.WriteAllText(built, "a pack");
+
+        Assert.Equal(
+            Path.Combine(_store.ModsDirectory, ModStore.Unfiled),
+            Path.GetDirectoryName(_store.Keep(built)));
+    }
+
+    [Fact]
+    public void DeletingTheLastPackUnderAWeaponTakesTheFolderWithIt()
+    {
+        // A heading over nothing is worse than no heading: the tree is there to be read.
+        var built = Path.Combine(_root, "only.pgmod");
+        File.WriteAllText(built, "a pack");
+
+        var subject = new PackSubject { Kind = PackKind.Weapon, Id = "ultimatum", Number = 416, Name = "Ultimatum" };
+        var kept = _store.Keep(built, subject);
+
+        var mod = new InstalledMod
+        {
+            Id = "ultimatum-default-abcd1234", Name = "Ultimatum", PackPath = kept,
+            InstalledAt = DateTimeOffset.Now, GameVersion = "1", TouchedBundles = [],
+        };
+
+        Assert.True(_store.DiscardKeptPack(mod));
+        Assert.False(Directory.Exists(Path.Combine(_store.ModsDirectory, PackKind.Weapon, "0416_ultimatum")));
+        Assert.True(Directory.Exists(_store.ModsDirectory));
     }
 
     [Fact]

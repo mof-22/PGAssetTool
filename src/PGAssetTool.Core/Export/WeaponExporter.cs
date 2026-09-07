@@ -344,14 +344,50 @@ public sealed class WeaponExporter(BundleSet bundles)
     public WeaponExport ExportAsWorkspace(WeaponTree tree, string outputRoot, string author, string? gameVersion)
     {
         var export = Export(tree, outputRoot);
+        var chosen = Chosen(tree);
+
         Pack.Workspace.Create(
             export.Directory,
-            id: $"{AssetExporter.Sanitize(tree.Record.Slug).ToLowerInvariant()}",
-            name: tree.DisplayName,
+            id: Identity(tree, chosen),
+            name: chosen is null ? tree.DisplayName : $"{tree.DisplayName} — {chosen.DisplayName ?? chosen.Record.Id}",
             author: author,
             gameVersion: gameVersion,
-            assets: export.Assets);
+            assets: export.Assets,
+            subject: new Pack.PackSubject
+            {
+                Kind = Pack.PackKind.Weapon,
+                Id = AssetExporter.Sanitize(tree.Record.Slug).ToLowerInvariant(),
+                Number = tree.Record.GameNumber,
+                Prefab = tree.Record.PrefabName,
+                Name = tree.DisplayName,
+                Variant = chosen?.Record.Id ?? "",
+                VariantName = chosen?.DisplayName ?? "",
+                NameKey = tree.Record.LocalizationKey ?? "",
+                VariantKey = chosen?.Record.LocalizationKey ?? "",
+            });
         return export;
+    }
+
+    /// What the tool will know this mod by, for as long as it exists.
+    ///
+    /// A name and a number would not do it. The id was the weapon's slug alone, so every mod of a
+    /// weapon was the same mod: installing a skin replaced the plain one, and installing somebody
+    /// else's replaced yours — silently, because replacing by id is exactly how a mod is updated.
+    /// Two mods of one weapon are two mods, whoever made them and whichever look they change.
+    ///
+    /// So each extraction mints its own. The readable half says what it is for at a glance; the
+    /// last eight characters are what make it this one. It is written into the workspace once and
+    /// never changes after — rebuilding the same workspace updates the mod it built before, which
+    /// is the one case where replacing is what was meant.
+    private static string Identity(WeaponTree tree, WeaponSkinView? chosen)
+    {
+        var slug = AssetExporter.Sanitize(tree.Record.Slug).ToLowerInvariant();
+        var look = chosen is null
+            ? "default"
+            : AssetExporter.Sanitize(Suffix(tree, chosen)).ToLowerInvariant();
+        var token = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4));
+
+        return $"{slug}-{look}-{token}";
     }
 
     /// <param name="only">

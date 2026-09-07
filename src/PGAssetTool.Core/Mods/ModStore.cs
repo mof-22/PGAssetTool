@@ -17,6 +17,13 @@ public sealed record InstalledMod
     public required string GameVersion { get; init; }
     public bool Enabled { get; init; } = true;
 
+    /// Which weapon and which of its looks this mod is for, copied out of the pack it came from.
+    ///
+    /// Kept in the ledger rather than read back from the pack each time. The manager groups every
+    /// installed mod by it the moment the tab is opened, and opening a hundred packs — several of
+    /// them signed and scrambled — to draw a list of headings is not a thing to do on a click.
+    public Pack.PackSubject? Subject { get; init; }
+
     /// The bundles this mod wrote to, and the manifest hash each had when it did. A bundle whose
     /// hash has since changed was replaced by a game update, which is what makes reapplying and
     /// backup cleanup possible.
@@ -140,19 +147,51 @@ public sealed class ModStore
     ///
     /// A pack built into a workspace is one deletion away from leaving an installed mod that cannot
     /// be reapplied or removed cleanly — which happened, and cost an uninstall to recover from.
-    public string Keep(string packPath)
+    public string Keep(string packPath, Pack.PackSubject? subject = null)
     {
-        Directory.CreateDirectory(ModsDirectory);
-
         // Already here: reinstalling from the copy must not spiral into copies of copies.
         var full = Path.GetFullPath(packPath);
         if (full.StartsWith(Path.GetFullPath(ModsDirectory) + Path.DirectorySeparatorChar,
                 StringComparison.OrdinalIgnoreCase))
             return full;
 
-        var kept = KeptPathFor(full);
+        var into = FolderFor(subject);
+        Directory.CreateDirectory(into);
+
+        var kept = KeptPathFor(into, full);
         File.Copy(packPath, kept, overwrite: true);
         return kept;
+    }
+
+    /// Where a pack is filed: a folder for the weapon, and one inside it for the look.
+    ///
+    /// Mods pile up in the tens and they are nearly all of the same handful of weapons, so a flat
+    /// folder stops being readable long before it stops working. The levels are the two questions
+    /// somebody actually has — which weapon, and which of its skins — and they are the same two the
+    /// manager groups by, so what is on disk and what is on screen are the same arrangement.
+    ///
+    /// A pack with nothing to say about itself goes in a folder that says so, rather than being
+    /// filed under a guess.
+    public string FolderFor(Pack.PackSubject? subject)
+        => subject is { IsKnown: true }
+            ? Path.Combine([ModsDirectory, .. subject.Path.Select(Sanitize)])
+            : Path.Combine(ModsDirectory, Unfiled);
+
+    /// Where packs go when they do not say what they are for.
+    public const string Unfiled = "unfiled";
+
+    /// Every kept pack, wherever in the tree it sits.
+    public IEnumerable<string> KeptPacks()
+        => Directory.Exists(ModsDirectory)
+            ? Directory.EnumerateFiles(ModsDirectory, "*" + Pack.PackBuilder.Extension, SearchOption.AllDirectories)
+            : [];
+
+    /// A folder name that means what it says and can be written down.
+    private static string Sanitize(string name)
+    {
+        var safe = new string(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray())
+            .Trim().TrimEnd('.');
+        return safe.Length == 0 ? "_" : safe;
     }
 
     /// Throws away the copy taken of a mod's pack, once nothing is installed from it.
@@ -176,7 +215,26 @@ public sealed class ModStore
 
         if (!File.Exists(full)) return false;
         File.Delete(full);
+        Prune(Path.GetDirectoryName(full));
         return true;
+    }
+
+    /// Takes away the folders a deleted pack was the last thing in.
+    ///
+    /// The tree is there to be read, and a weapon with nothing left under it is a heading over
+    /// nothing. Stops at the mods directory itself, which stays whether or not anything is in it.
+    private void Prune(string? directory)
+    {
+        var root = Path.GetFullPath(ModsDirectory);
+        for (var at = directory; at is not null; at = Path.GetDirectoryName(at))
+        {
+            var here = Path.GetFullPath(at);
+            if (here.Length <= root.Length || !here.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return;
+            if (!Directory.Exists(here) || Directory.EnumerateFileSystemEntries(here).Any()) return;
+
+            try { Directory.Delete(here); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }
+        }
     }
 
     /// The name a pack built at `sourcePath` is filed under.
@@ -186,12 +244,12 @@ public sealed class ModStore
     /// sorting by name sorts by nothing and reading the list means reading past the same noise each
     /// time. It still has to be there — two packs called the same thing from different directories
     /// would otherwise be one file — but it belongs where a disambiguator belongs.
-    private string KeptPathFor(string sourcePath)
+    private static string KeptPathFor(string into, string sourcePath)
     {
         var digest = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(sourcePath.ToLowerInvariant())))[..8];
         var name = Path.GetFileNameWithoutExtension(sourcePath);
-        return Path.Combine(ModsDirectory, $"{name}-{digest}{Path.GetExtension(sourcePath)}");
+        return Path.Combine(into, $"{name}-{digest}{Path.GetExtension(sourcePath)}");
     }
 
     /// Moves packs filed under the old digest-first name, and points the ledger at where they went.

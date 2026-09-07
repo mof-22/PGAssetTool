@@ -55,10 +55,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             Name = manifest.Name,
             Author = manifest.Author,
             Version = manifest.Version,
-            PackPath = store.Keep(packPath),
+            PackPath = store.Keep(packPath, manifest.Subject),
             InstalledAt = DateTimeOffset.Now,
             GameVersion = gameVersion,
             Enabled = true,
+            Subject = manifest.Subject,
             TouchedBundles = manifest.Operations
                 .Select(o => o.Target.Container)
                 .Distinct(StringComparer.OrdinalIgnoreCase)

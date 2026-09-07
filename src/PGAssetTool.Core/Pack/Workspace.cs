@@ -16,7 +16,7 @@ public static class Workspace
     /// packing takes them as they are instead of waiting for an edit that already happened.
     public static PackManifest Create(
         string directory, string id, string name, string author, string? gameVersion,
-        IEnumerable<ExportedAsset> assets, bool alreadyModified = false)
+        IEnumerable<ExportedAsset> assets, bool alreadyModified = false, PackSubject? subject = null)
     {
         var kept = assets as IReadOnlyCollection<ExportedAsset> ?? assets.ToList();
         var operations = new List<PackOperation>();
@@ -34,7 +34,7 @@ public static class Workspace
             });
         }
 
-        return Create(directory, id, name, author, gameVersion, operations, IconIn(directory, kept));
+        return Create(directory, id, name, author, gameVersion, operations, IconIn(directory, kept), subject);
     }
 
     /// Writes a workspace whose operations the caller has already worked out.
@@ -44,7 +44,7 @@ public static class Workspace
     /// builds the list and this only has to write it down.
     public static PackManifest Create(
         string directory, string id, string name, string author, string? gameVersion,
-        IReadOnlyList<PackOperation> operations, string icon)
+        IReadOnlyList<PackOperation> operations, string icon, PackSubject? subject = null)
     {
         var manifest = new PackManifest
         {
@@ -54,6 +54,7 @@ public static class Workspace
             Author = author,
             BuiltAgainstGameVersion = gameVersion,
             Icon = icon,
+            Subject = subject,
             Operations = operations.ToList(),
         };
         File.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
