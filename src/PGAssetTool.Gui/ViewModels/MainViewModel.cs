@@ -42,7 +42,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // used is no reason to forget them between runs, though, so the shell writes them out.
         Editor.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(EditorViewModel.SideBySide)) Remember();
+            if (e.PropertyName is nameof(EditorViewModel.SideBySide) or nameof(EditorViewModel.Linked))
+                Remember();
         };
         Manager.PropertyChanged += (_, e) =>
         {
@@ -164,6 +165,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OpaqueTextures = _settings.OpaqueTextures;
         Author = _settings.Author;
         Editor.SideBySide = _settings.SideBySide;
+        Editor.Linked = _settings.LinkedPreviews;
         Manager.ConfirmChanges = _settings.ConfirmChanges;
         Manager.TileSize = _settings.TileSize;
         ProtectPacks = _settings.ProtectPacks;
@@ -576,7 +578,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
             Author = Author.Trim(),
-            SideBySide = Editor.SideBySide, ConfirmChanges = Manager.ConfirmChanges,
+            SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
+            ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ProtectPacks = ProtectPacks,
         };
         try { _settings.Save(SettingsHome); }
@@ -721,7 +724,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         Preview.Show(picture, $"{node.Label}   @ {node.Bundle}", node.AlphaIsCoverage);
                         break;
                     case UnityMesh mesh:
-                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(node.PathId));
+                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(node.PathId),
+                            subject: $"{node.Bundle}:{node.PathId}");
                         break;
                     case PreviewSound sound:
                         Preview.Show(sound, $"{node.Label}   @ {node.Bundle}");

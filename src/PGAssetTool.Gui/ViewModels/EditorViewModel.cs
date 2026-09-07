@@ -37,10 +37,22 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         foreach (var preview in new[] { Original, Edited })
         {
             var pane = preview;
+            var other = ReferenceEquals(pane, Original) ? Edited : Original;
             pane.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName != nameof(PreviewViewModel.ChosenTexture)) return;
-                if (pane.ChosenTexture is { PathId: -1 } choice) WearFromDisk(pane, choice);
+                switch (e.PropertyName)
+                {
+                    case nameof(PreviewViewModel.ChosenTexture):
+                        if (pane.ChosenTexture is { PathId: -1 } choice) WearFromDisk(pane, choice);
+                        if (Linked) other.ChosenTexture = pane.ChosenTexture;
+                        break;
+
+                    // Both panes carry the same value, so the mirroring settles at once: the other
+                    // pane's own notification finds nothing to change and stops there.
+                    case nameof(PreviewViewModel.Camera):
+                        if (Linked) other.Camera = pane.Camera;
+                        break;
+                }
             };
         }
     }
@@ -58,6 +70,25 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public PreviewViewModel Edited { get; }
 
     [ObservableProperty] private bool _sideBySide;
+
+    /// Whether the two halves are turned and dressed together.
+    ///
+    /// On by default, because the question a comparison answers is what changed — and two models at
+    /// two angles wearing two textures differ in three ways at once, only one of which is the mod.
+    /// It comes off for the case it cannot serve: a replaced mesh, where the two are different
+    /// models and looking at each on its own terms is the point.
+    [ObservableProperty] private bool _linked = true;
+
+    /// Brings the halves together at the moment linking is asked for, rather than leaving them
+    /// apart until something is turned. The one on show leads: it is the one just been looked at.
+    partial void OnLinkedChanged(bool value)
+    {
+        if (!value) return;
+
+        var (from, to) = ShowingEdited ? (Edited, Original) : (Original, Edited);
+        to.Camera = from.Camera;
+        to.ChosenTexture = from.ChosenTexture;
+    }
 
     /// Which of the two a single-pane comparison is showing. Flicking between them in place is
     /// better at exposing a small difference than putting them next to each other.
@@ -313,9 +344,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                     Game: FromGame(bundles, file),
                     Disk: AssetPreview.FromFile(file.FullPath)));
 
-                ShowIn(Original, loaded.Game, $"{file.Name} in the game", file.AlphaIsCoverage);
+                ShowIn(Original, loaded.Game, $"{file.Name} in the game", file, "game");
                 ShowIn(Edited, loaded.Disk,
-                    file.Edited ? $"{file.Name} as edited" : $"{file.Name} unchanged", file.AlphaIsCoverage);
+                    file.Edited ? $"{file.Name} as edited" : $"{file.Name} unchanged", file, "disk");
             }
             finally
             {
@@ -346,12 +377,25 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         };
     }
 
-    private void ShowIn(PreviewViewModel preview, object? loaded, string caption, bool alphaIsCoverage)
+    /// <param name="side">
+    /// Which half of the comparison this is. Part of the subject because the two panes hold two
+    /// readings of one file, and a pane must not take the other's view for its own.
+    /// </param>
+    private void ShowIn(
+        PreviewViewModel preview, object? loaded, string caption, WorkspaceFile file, string side)
     {
         switch (loaded)
         {
-            case PreviewImage picture: preview.Show(picture, caption, alphaIsCoverage); break;
-            case UnityMesh mesh: preview.Show(mesh, caption, null); Offer(preview); break;
+            case PreviewImage picture: preview.Show(picture, caption, file.AlphaIsCoverage); break;
+
+            case UnityMesh mesh:
+                // Read after showing, not before: showing is what looks up the view this model was
+                // last left at, and the texture that comes back with it may not be the one the
+                // pane happened to be wearing a moment ago.
+                preview.Show(mesh, caption, null, $"{side}:{file.RelativePath}");
+                Offer(preview, preview.ChosenTexture?.Name);
+                break;
+
             case PreviewSound sound: preview.Show(sound, caption); break;
             default: preview.Clear("Nothing to show for this one."); break;
         }
@@ -363,7 +407,13 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// the editor never resolves — so a mesh here draws grey unless somebody says what to put on
     /// it. Offering the author's own files is both the useful answer and the honest one: what they
     /// want to see is their mesh wearing their texture, which is what the mod is.
-    private void Offer(PreviewViewModel preview)
+    /// <param name="wearing">
+    /// The one to put back on, when the same model is being read again. Emptying the list empties
+    /// the box bound to it, which writes a null back through the selection, so a choice that is to
+    /// survive has to be made again — and the file behind it may well be what changed, which is why
+    /// it is read from disk rather than assumed to be still on the model.
+    /// </param>
+    private void Offer(PreviewViewModel preview, string? wearing = null)
     {
         preview.TextureChoices.Clear();
         if (SelectedWorkspace is not { } workspace) return;
@@ -371,6 +421,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         preview.TextureChoices.Add(new TextureChoice("(none)", "", 0));
         foreach (var picture in Workspace.Pictures(workspace.Directory))
             preview.TextureChoices.Add(new TextureChoice(picture, workspace.Directory, -1));
+
+        if (wearing is null) return;
+        if (preview.TextureChoices.FirstOrDefault(c => c.Name == wearing) is not { } again) return;
+
+        preview.ChosenTexture = again;
+        WearFromDisk(preview, again);
     }
 
     /// Reads one of those images off disk and puts it on the model.

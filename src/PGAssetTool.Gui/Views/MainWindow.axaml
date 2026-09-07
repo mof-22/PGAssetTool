@@ -79,6 +79,7 @@
                    RenderOptions.BitmapInterpolationMode="None" />
       
             <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
+                          Camera="{Binding Camera, Mode=TwoWay}"
                           IsVisible="{Binding HasMesh}" />
 
             <ctl:WaveformView Sound="{Binding Sound}" IsVisible="{Binding HasSound}"
@@ -344,6 +345,10 @@
                       IsEnabled="{Binding CanPack}" />
               <CheckBox Content="Side by side" IsChecked="{Binding SideBySide}"
                         VerticalAlignment="Center" />
+              <!-- Applies to flipping as well as to the two panes: a flip between views at
+                   different angles compares the angles rather than the models. -->
+              <CheckBox Content="Linked" IsChecked="{Binding Linked}" VerticalAlignment="Center"
+                        ToolTip.Tip="Turn both halves together, and put the same texture on both." />
               <Button Content="Flip" Command="{Binding FlipCommand}"
                       IsVisible="{Binding !SideBySide}" />
               <!-- The icon the export draws is of the vanilla weapon; this one is the mod, from

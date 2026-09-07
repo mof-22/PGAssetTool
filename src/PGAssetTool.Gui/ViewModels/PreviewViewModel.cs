@@ -45,6 +45,36 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     [ObservableProperty] private string _caption = "";
     [ObservableProperty] private string? _nothing = "Select a texture, a mesh or a sound.";
 
+    /// How the model is being looked at.
+    ///
+    /// Here rather than in the control that draws it, because a view is worth more than the reading
+    /// that produced it. The editor re-reads a file whenever anything in the workspace is written —
+    /// saving the pack's own icon counts — and a camera owned by the control started over every
+    /// time, so turning the model to a good angle and then using it as the icon threw the angle
+    /// away at the moment it had proved useful.
+    [ObservableProperty] private Camera _camera = new();
+
+    /// What is on show, as far as "is this still the same thing" goes. Null for anything that has
+    /// no lasting identity, which starts the view over the way a different asset does.
+    private string? _subject;
+
+    /// The view each model was last left at, by subject.
+    ///
+    /// Per model rather than one for the last one looked at, because comparing two models means
+    /// going back and forth between them: an angle found for one is wanted again on the way back,
+    /// and a single remembered view lost it the moment anything else was selected. Kept for the
+    /// length of a session and no longer — an entry is a camera and a file name.
+    private readonly Dictionary<string, ViewState> _views = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record ViewState(Camera Camera, TextureChoice? Texture);
+
+    partial void OnCameraChanged(Camera value) => Remember();
+
+    private void Remember()
+    {
+        if (_subject is { } subject) _views[subject] = new ViewState(Camera, ChosenTexture);
+    }
+
     /// Whether the alpha channel is being honoured.
     ///
     /// Only some textures mean coverage by it. Icons do — all four hundred of them sit on an empty
@@ -131,8 +161,18 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         if (unchanged) Redraw();
     }
 
-    public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures)
+    /// <param name="subject">
+    /// Which asset this is, so each one keeps the angle it was turned to and the texture put on it
+    /// — through a second reading of the same file, and through a trip to something else and back.
+    /// A model nobody has looked at yet starts square, since an angle chosen for a pistol says
+    /// nothing about a rocket launcher.
+    /// </param>
+    public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures,
+        string? subject = null)
     {
+        _subject = subject;
+        var seen = subject is not null && _views.TryGetValue(subject, out var before) ? before : null;
+
         _picture = null;
         Sound = null;
         _automatic = textures;
@@ -140,7 +180,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Image = null;
         Mesh = mesh;
         MeshTextures = textures;
-        ChosenTexture = null;
+        ChosenTexture = seen?.Texture;
+        Camera = seen?.Camera ?? new Camera();
         Caption = $"{caption}   {mesh.VertexCount:N0} vertices, {mesh.Indices.Length / 3:N0} triangles"
             + (mesh.IsSkinned ? $", {mesh.BindPoses.Count} bones" : "")
             + (textures?.Any(t => t is not null) == true ? "" : ", no texture found");
@@ -153,6 +194,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     partial void OnChosenTextureChanged(TextureChoice? value)
     {
         if (value is null || value.PathId == 0) MeshTextures = _automatic;
+        Remember();
     }
 
     /// Covers the whole model with one texture, which is the point: the question it answers is what

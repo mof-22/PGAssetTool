@@ -506,6 +506,8 @@ internal static class SelfTest
             // the original one, or turning that option on would flatten every mask in the game.
             if (RoundTripWithoutAlpha(model) is { } alphaProblem) return Fail(alphaProblem);
 
+            if (TheViewOutlivesAReading(model, texture) is { } viewProblem) return Fail(viewProblem);
+
             // What was installed before this run touched anything. A test that writes to the game
             // has to leave it as it found it, and the only way to know that is to have looked
             // first — an earlier version of this left a mod behind every time the workspace it
@@ -938,6 +940,72 @@ internal static class SelfTest
             return $"the material points at {points} rather than back at {added.Shader}";
         }
 
+        return null;
+    }
+
+    /// An angle and a texture stay on the model when the same file is read again, and the two
+    /// halves of the comparison move together.
+    ///
+    /// The workspace is re-read whenever anything in it is written — saving the pack's own icon
+    /// counts, and so does anything an image editor does — and each reading empties the lists the
+    /// panes are bound to on its way past, which used to take the view with it. That put the angle
+    /// back to square at the exact moment somebody had turned the model to the one they wanted.
+    private static string? TheViewOutlivesAReading(MainViewModel model, Core.Pack.WorkspaceFile back)
+    {
+        if (model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".glb")) is not { } model3d)
+            return "no model in the extracted workspace to look at";
+
+        model.Editor.SelectedFile = model3d;
+        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+        if (model.Editor.Edited.Mesh is null) return "the file side of the comparison shows no model";
+
+        if (model.Editor.Edited.TextureChoices.FirstOrDefault(c => c.PathId == -1) is not { } wearing)
+            return "the editor offered none of the workspace's own textures to put on the model";
+
+        var turned = new Camera(Yaw: 2.1f, Pitch: -0.4f, Distance: 0.9f);
+        model.Editor.Edited.Camera = turned;
+        model.Editor.Edited.ChosenTexture = wearing;
+
+        if (model.Editor.Original.Camera != turned)
+            return "the halves are linked, and the game side did not follow the view";
+        if (model.Editor.Original.ChosenTexture != wearing)
+            return "the halves are linked, and the game side did not take the same texture";
+
+        // The reading a save sets off, which is where the view used to be lost.
+        model.Editor.Refresh();
+        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+
+        if (model.Editor.Edited.Camera != turned)
+            return $"reading the model again threw the view away: {model.Editor.Edited.Camera}";
+        if (model.Editor.Edited.ChosenTexture != wearing)
+            return "reading the model again took the texture off the model";
+        if (model.Editor.Edited.MeshTextures is null)
+            return "the texture was still the chosen one but no longer on the model";
+
+        // Away and back is the same asset as far as the view is concerned, and a different asset
+        // is not: an angle chosen for one model says nothing about the next.
+        model.Editor.SelectedFile = back;
+        WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+        model.Editor.SelectedFile = model3d;
+        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+
+        if (model.Editor.Edited.Camera != turned)
+            return "looking at something else and coming back lost the view";
+
+        // Unlinked they are free to differ, which is what a replaced mesh needs: the two are then
+        // different models, and each is worth looking at on its own terms.
+        model.Editor.Linked = false;
+        model.Editor.Edited.Camera = turned.Zoomed(1.5f);
+        if (model.Editor.Original.Camera != turned)
+            return "with the link off, one half still dragged the other along";
+
+        model.Editor.Linked = true;
+        if (model.Editor.Original.Camera != model.Editor.Edited.Camera)
+            return "linking them again left them looking from different places";
+
+        Console.WriteLine("editor   the view survives a reading, and the halves move together");
+        model.Editor.SelectedFile = back;
+        WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
         return null;
     }
 

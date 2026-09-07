@@ -24,6 +24,16 @@ public sealed class MeshView : Control
     public static readonly StyledProperty<IReadOnlyList<PreviewImage?>?> TexturesProperty =
         AvaloniaProperty.Register<MeshView, IReadOnlyList<PreviewImage?>?>(nameof(Textures));
 
+    /// Where the model is being looked at from.
+    ///
+    /// A property rather than a field, and bound two ways, so the view outlives the control: the
+    /// pane that draws a mesh is rebuilt whenever what it shows is read again, and an angle kept
+    /// here alone went back to square every time. It also lets two panes share one view, which is
+    /// what makes a side-by-side comparison a comparison.
+    public static readonly StyledProperty<Camera> CameraProperty =
+        AvaloniaProperty.Register<MeshView, Camera>(
+            nameof(Camera), new Camera(), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+
     public UnityMesh? Mesh
     {
         get => GetValue(MeshProperty);
@@ -36,21 +46,24 @@ public sealed class MeshView : Control
         set => SetValue(TexturesProperty, value);
     }
 
+    public Camera Camera
+    {
+        get => GetValue(CameraProperty);
+        set => SetValue(CameraProperty, value);
+    }
+
     private WriteableBitmap? _bitmap;
     private readonly RenderTarget _target = new();
     private PixelSize _size;
-    private Camera _camera = new();
     private Point? _dragging;
 
     static MeshView()
     {
-        AffectsRender<MeshView>(MeshProperty, TexturesProperty);
-        MeshProperty.Changed.AddClassHandler<MeshView>((view, _) =>
-        {
-            // A new model gets a fresh viewpoint; keeping the old one leaves the next mesh at
-            // whatever angle happened to suit the last.
-            view.Recentre();
-        });
+        // A new model no longer gets a fresh viewpoint from here. Whether one asset has replaced
+        // another or the same one has merely been read again is a question the control cannot
+        // answer, and answering it wrongly threw away an angle somebody had just chosen; whoever
+        // owns the camera decides.
+        AffectsRender<MeshView>(MeshProperty, TexturesProperty, CameraProperty);
     }
 
     /// Set while the middle button is down, which pans instead of turning.
@@ -62,15 +75,11 @@ public sealed class MeshView : Control
     /// pane is neither. The camera is the one the person turned to, which is the whole point —
     /// they have already decided what shows the model best.
     public PreviewImage? Snapshot(int size)
-        => Mesh is { } mesh ? PackIcon.Render(mesh, Textures, _camera, size) : null;
+        => Mesh is { } mesh ? PackIcon.Render(mesh, Textures, Camera, size) : null;
 
     /// Puts the view back to square. A tilt or a pan is easy to lose track of, and hunting the way
     /// back by hand is worse than either was useful.
-    public void Recentre()
-    {
-        _camera = new Camera();
-        InvalidateVisual();
-    }
+    public void Recentre() => Camera = new Camera();
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
@@ -92,8 +101,7 @@ public sealed class MeshView : Control
         {
             var half = Math.Min(Bounds.Width, Bounds.Height) * 0.5;
             if (half > 0)
-                _camera = _camera.Panned((float)((to.X - from.X) / half), (float)((from.Y - to.Y) / half));
-            InvalidateVisual();
+                Camera = Camera.Panned((float)((to.X - from.X) / half), (float)((from.Y - to.Y) / half));
             return;
         }
 
@@ -102,16 +110,17 @@ public sealed class MeshView : Control
         // of turning something, which orbiting alone cannot reach.
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {
-            _camera = _camera.Rolled((float)((to.X - from.X) * 0.01));
-            InvalidateVisual();
+            // Negative for a rightward drag, for the same reason the turning drag reads the way it
+            // does: the picture is a true view rather than a mirrored one, and the tilt has to
+            // follow the cursor across the picture as it is drawn.
+            Camera = Camera.Rolled((float)((from.X - to.X) * 0.01));
             return;
         }
 
         // Dragging takes the model with it: cursor right turns the near face right. The opposite
         // convention — moving the camera instead — reads as the model going the wrong way.
         // A drag across the full width turns it most of the way round.
-        _camera = _camera.Dragged((float)((to.X - from.X) * 0.01), (float)((to.Y - from.Y) * 0.01));
-        InvalidateVisual();
+        Camera = Camera.Dragged((float)((to.X - from.X) * 0.01), (float)((to.Y - from.Y) * 0.01));
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -123,8 +132,7 @@ public sealed class MeshView : Control
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
-        _camera = _camera.Zoomed(e.Delta.Y > 0 ? 0.88f : 1.14f);
-        InvalidateVisual();
+        Camera = Camera.Zoomed(e.Delta.Y > 0 ? 0.88f : 1.14f);
     }
 
     public override void Render(DrawingContext context)
@@ -141,7 +149,7 @@ public sealed class MeshView : Control
             _target.Resize(width, height);
         }
 
-        MeshRenderer.Render(mesh, _camera, _target, Textures);
+        MeshRenderer.Render(mesh, Camera, _target, Textures);
 
         using (var locked = _bitmap.Lock())
             System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);

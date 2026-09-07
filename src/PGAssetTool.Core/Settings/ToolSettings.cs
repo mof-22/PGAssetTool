@@ -40,6 +40,14 @@ public sealed record ToolSettings
     /// Whether the editor shows the original and the edit at once rather than one at a time.
     public bool SideBySide { get; init; }
 
+    /// Whether the two halves of the editor's comparison are turned and dressed together.
+    ///
+    /// On unless somebody says otherwise: two models at two angles wearing two textures differ in
+    /// three ways at once, only one of which is the mod. Off is for a replaced mesh, where the two
+    /// are different models and each is worth looking at on its own terms — which is a decision
+    /// about how somebody works rather than about the file in front of them, so it is kept.
+    public bool LinkedPreviews { get; init; } = true;
+
     /// Whether the manager asks before it rewrites the game. The warning about the game being open
     /// is not covered by this and is never skipped.
     public bool ConfirmChanges { get; init; } = true;
