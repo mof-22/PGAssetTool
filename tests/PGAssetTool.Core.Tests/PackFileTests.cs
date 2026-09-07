@@ -11,6 +11,11 @@ public class PackFileTests : IDisposable
 
     private string Path(string name) => System.IO.Path.Combine(_home, name);
 
+    /// A pack written by the format that signed the contents and not the name. Kept as a file
+    /// rather than rebuilt here, because what it is for is being older than the code reading it.
+    private static string Format1
+        => System.IO.Path.Combine(AppContext.BaseDirectory, "fixtures", "format1.pgmod");
+
     /// A zip with one entry, which is all any of this needs to be about.
     private static byte[] Zip(string contents = "the pack")
     {
@@ -87,6 +92,56 @@ public class PackFileTests : IDisposable
         Assert.Equal(SealState.Altered, PackFile.Inspect(path).State);
     }
 
+
+    [Fact]
+    public void ChangingTheNameOnItShowsUpAsWell()
+    {
+        // The name is part of what is signed, so it cannot be moved without the key: not onto
+        // somebody else's work, and not off work that was theirs.
+        using var me = PackAuthor.Mine(_home);
+        var path = Path("sealed.pgmod");
+        PackFile.Write(path, Zip(), me, "mof22");
+
+        // Found in the header rather than at an offset. The header is readable on purpose, which
+        // is all this needs to know about the container — and the replacement is the same length,
+        // so nothing else moves either.
+        var raw = File.ReadAllBytes(path);
+        "mof99"u8.CopyTo(raw.AsSpan(raw.AsSpan().IndexOf("mof22"u8)));
+        File.WriteAllBytes(path, raw);
+
+        var seal = PackFile.Inspect(path);
+        Assert.Equal("mof99", seal.Author);
+        Assert.Equal(SealState.Altered, seal.State);
+    }
+
+    [Fact]
+    public void APackFromBeforeTheNameWasSignedIsStillTheirs()
+    {
+        // Built by the format that signed the contents alone. Somebody published one of these; it
+        // does not become suspect because the format moved on.
+        var seal = PackFile.Inspect(Format1);
+
+        Assert.True(seal.Protected);
+        Assert.Equal(SealState.Signed, seal.State);
+        Assert.Equal("mof22", seal.Author);
+
+        using var archive = PackFile.Open(Format1);
+        Assert.NotNull(archive.GetEntry("pgmod.json"));
+    }
+
+    [Fact]
+    public void AnOlderPackIsVerifiedTheWayItWasSigned()
+    {
+        // What format 1 could and could not promise, written down: the contents are covered and
+        // the name beside them is not. Verifying an old pack the new way would call every one of
+        // them altered, which is a worse answer than the one the format can honestly give.
+        var path = Path("old.pgmod");
+        var raw = File.ReadAllBytes(Format1);
+        "mof99"u8.CopyTo(raw.AsSpan(raw.AsSpan().IndexOf("mof22"u8)));
+        File.WriteAllBytes(path, raw);
+
+        Assert.Equal(SealState.Signed, PackFile.Inspect(path).State);
+    }
 
     [Fact]
     public void SigningWithAnotherKeyReadsAsSomebodyElsesPack()

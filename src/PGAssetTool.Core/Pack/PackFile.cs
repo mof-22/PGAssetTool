@@ -55,7 +55,14 @@ public static class PackFile
     /// careless paste, a helpful tool — would have quietly changed the magic and left every pack
     /// built afterwards unreadable by every build before it, with no line in the diff to say so.
     /// Written out, it is a version byte, which is what it always was.
-    private const byte Format = 1;
+    ///
+    /// 2 signs the author's name along with the contents. 1 signed the contents alone, and is
+    /// still read: a pack somebody published then is not retrospectively suspect.
+    private const byte Format = 2;
+
+    /// The oldest shape this build will open. Nothing has been dropped yet, and the reason to
+    /// write it down is that dropping one is a decision about other people's files.
+    private const byte Oldest = 1;
 
     /// Fixed, and deliberately so: any build of this tool has to be able to open any pack. A key
     /// only the author knew would make a pack nobody else could install, which is a different
@@ -86,10 +93,12 @@ public static class PackFile
         try
         {
             var raw = File.ReadAllBytes(path);
-            if (Split(raw) is not var (_, header, payload)) return PackSeal.Plain;
+            if (Split(raw) is not var (version, header, payload)) return PackSeal.Plain;
 
             var publicKey = Convert.FromBase64String(header.PublicKey);
-            var state = PackAuthor.Verifies(payload, Convert.FromBase64String(header.Signature), publicKey)
+            var state = PackAuthor.Verifies(
+                    Signed(version, header.Author, payload),
+                    Convert.FromBase64String(header.Signature), publicKey)
                 ? SealState.Signed
                 : SealState.Altered;
 
@@ -112,7 +121,7 @@ public static class PackFile
 
         var header = JsonSerializer.SerializeToUtf8Bytes(
             new Header(author, Convert.ToBase64String(signer.PublicKey),
-                Convert.ToBase64String(signer.Sign(zip))),
+                Convert.ToBase64String(signer.Sign(Signed(Format, author, zip)))),
             Json);
 
         using var file = File.Create(path);
@@ -139,7 +148,7 @@ public static class PackFile
         // than reading it anyway means a later format is a plain "not signed" to an older build,
         // never a wrong answer about who wrote it.
         var version = raw[Magic.Length];
-        if (version != Format) return null;
+        if (version < Oldest || version > Format) return null;
 
         var length = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(Magic.Length + 1));
         var at = Magic.Length + 1 + 4;
@@ -149,6 +158,32 @@ public static class PackFile
         if (header is null) return null;
 
         return (version, header, Scramble(raw[(at + length)..]));
+    }
+
+    /// What the signature is taken over: the name in the header as well as the contents.
+    ///
+    /// A name that is not signed is only a label. Format 1 signed the contents alone, so the
+    /// author's name could be rewritten in a pack that went on reading as genuinely signed, by
+    /// the genuine key, with the genuine fingerprint beside it — somebody else's name over work
+    /// they did not put it to, or a name taken off work that was theirs. Nothing about the
+    /// contents was at risk either way, which is exactly why it was easy to miss.
+    ///
+    /// Re-signing a pack under another key is still not prevented, because it cannot be. What it
+    /// costs is the fingerprint, and now the name cannot be moved without the key.
+    ///
+    /// The name is length-prefixed rather than run together with the payload, so that no two
+    /// (name, contents) pairs can produce the same bytes to sign.
+    private static byte[] Signed(byte version, string author, byte[] payload)
+    {
+        if (version < 2) return payload;
+
+        var name = Encoding.UTF8.GetBytes(author);
+        var bytes = new byte[4 + name.Length + payload.Length];
+
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, name.Length);
+        name.CopyTo(bytes, 4);
+        payload.CopyTo(bytes, 4 + name.Length);
+        return bytes;
     }
 
     /// Its own inverse: the same keystream over the bytes puts them back.

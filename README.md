@@ -136,7 +136,13 @@ with protection on, it is instead a small container: a readable header saying wh
 same zip with a keystream over it. The header stays readable so the manager can say where a pack
 came from without unpacking it. The scrambling stops a pack being renamed to `.zip` and opened; it
 stops nothing else, and is not meant to. Signing says the contents are what the holder of that key
-put in, so a pack altered afterwards shows up as altered.
+put in, so a pack altered afterwards shows up as altered. The author's name in the header is signed
+along with them, so it cannot be moved onto somebody else's work, or off your own, without the key.
+
+Signing a pack again under a different key is not prevented, because it cannot be. What it costs is
+the fingerprint, which is the part worth checking: the name is what somebody typed, the fingerprint
+is what they hold. An author who publishes theirs lets people tell a re-signed pack from a genuine
+one.
 
 ### Operations
 
