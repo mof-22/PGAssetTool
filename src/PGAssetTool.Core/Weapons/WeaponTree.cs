@@ -75,8 +75,13 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             if (root is null)
                 unresolved.Add($"'{record.PrefabName}' was not found inside bundle '{prefabBundle}'");
             else
-                assets = ReferenceWalker.Closure(
-                    bundles.Context, file, root.PathId, _graph.Resolve, skip: Opaque);
+                // Filtered after the walk and never during it: what a withheld object points at is
+                // found exactly as before — a texture a component names is still a texture — and it
+                // is the object itself that does not appear. See Replaceable for which and why.
+                assets = ReferenceWalker
+                    .Closure(bundles.Context, file, root.PathId, _graph.Resolve, skip: Opaque)
+                    .Where(a => Pack.Replaceable.CanShow(a.Class))
+                    .ToList();
         }
 
         var skins = catalogs.Skins.ForWeapon(record.Index)

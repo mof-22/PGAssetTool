@@ -248,8 +248,9 @@ public sealed class WeaponExporter(BundleSet bundles)
         if (root is null) { skipped.Add($"{name}: no such model in '{model.Bundle}'"); return; }
 
         var closure = new List<AssetTypeValueField>();
-        foreach (var node in ReferenceWalker.Closure(
-                     bundles.Context, file, root.PathId, _graph.Resolve, skip: WeaponResolver.Opaque))
+        foreach (var node in ReferenceWalker
+                     .Closure(bundles.Context, file, root.PathId, _graph.Resolve, skip: WeaponResolver.Opaque)
+                     .Where(n => Pack.Replaceable.CanShow(n.Class)))
         {
             var bundle = node.Bundle.Length > 0 ? node.Bundle : model.Bundle;
             AssetsFileInstance holder;

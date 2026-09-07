@@ -223,6 +223,9 @@ yet can be added the same way, with existing assets repointed at them.
 Everything else is written out too — materials, animations, the prefab — as readable JSON, so you can
 see what is there even where you cannot yet change it.
 
+Components are the exception. This tool neither shows nor writes them: they are how the game decides
+what a thing *does*, and this is a tool for how things look and sound.
+
 ---
 
 ## Not done yet

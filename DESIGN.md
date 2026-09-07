@@ -88,6 +88,24 @@ replaced" coming to mean "a `Material` can be edited here", which it cannot.
 
 `addAsset` is the same write into a path id nothing is using.
 
+### The one thing that is neither
+
+Components, and the scripts that say which component they are, are neither shown nor written.
+
+They are how the game decides what a thing *does*. This is a tool for how things look and sound, and
+behaviour is a different question with different consequences: it reaches other players, where a
+texture does not.
+
+Not writing them is enforced at converting, at building and at applying. Applying is the one that
+holds — a pack built by something else never went past the other two and arrives anyway.
+
+Not *showing* them is a separate and weaker decision, made deliberately and worth being honest
+about: anything that opens the bundles shows the same thing, and this makes no claim to prevent
+that. What it buys is that the tool is not where somebody first meets the idea. References are still
+followed *through* them, so a texture or a sound a component names is found exactly as before.
+
+Nothing else in the tool is hidden, and nothing else should be. This is the exception, not a habit.
+
 ### Why the entry point is `.dat` and not source
 
 Building a `Shader` from `.shader` source would mean reimplementing Unity's shader compiler:

@@ -86,6 +86,25 @@ public class ReplaceableTests
     }
 
     [Fact]
+    public void AComponentIsNotListedEither()
+    {
+        // Weaker than refusing to write one, and known to be: anything that opens the bundles shows
+        // the same thing. What it buys is that this tool is not where somebody first meets the idea.
+        Assert.False(Replaceable.CanShow(AssetClassID.MonoBehaviour));
+        Assert.False(Replaceable.CanShow(AssetClassID.MonoScript));
+
+        // Everything else is listed, including the classes that cannot be replaced in an editable
+        // format. Not being editable is a different thing from not being shown.
+        foreach (var cls in new[]
+                 {
+                     AssetClassID.Texture2D, AssetClassID.Mesh, AssetClassID.AudioClip,
+                     AssetClassID.Material, AssetClassID.Shader, AssetClassID.Font,
+                     AssetClassID.GameObject, AssetClassID.Transform, AssetClassID.AnimationClip,
+                 })
+            Assert.True(Replaceable.CanShow(cls), $"{cls} should still be listed");
+    }
+
+    [Fact]
     public void TheRefusalSaysWhichFileAndWhy()
     {
         var said = Replaceable.WhyRefused(AssetClassID.MonoBehaviour, "weapon_thing.dat");

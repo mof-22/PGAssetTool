@@ -281,6 +281,14 @@ internal static class SelfTest
             if (model.Detail is not { } unfiltered) return Fail("turning the filter off lost the tree");
             var all = CountRows(unfiltered.Roots);
             Console.WriteLine($"filter   {everything} rows replaceable-only, {all} rows unfiltered");
+
+            // Withheld classes are not a filter and do not come back when one is turned off. The
+            // check is here, with the filter at its widest, because that is the only setting where
+            // failing to withhold them would show.
+            var classes = unfiltered.Roots.SelectMany(r => r.Children).Select(c => c.Label).ToList();
+            if (classes.Any(c => c is "MonoBehaviour" or "MonoScript"))
+                return Fail($"the tree lists a withheld class with the filter off: "
+                    + string.Join(", ", classes));
             if (all <= everything) return Fail("the filter hid nothing");
 
             model.ReplaceableOnly = true;
@@ -299,7 +307,7 @@ internal static class SelfTest
 
             var bound = model.Detail?.Roots.FirstOrDefault()?.Children.Select(c => c.Label).ToList() ?? [];
             Console.WriteLine($"window   classes shown: {string.Join(", ", bound)}");
-            if (bound.Contains("Transform") || bound.Contains("MonoScript"))
+            if (bound.Contains("Transform") || bound.Contains("GameObject"))
                 return Fail("the filter is not being applied to the tree the window shows");
 
             // InputGesture only prints the shortcut beside the menu item; something has to register
