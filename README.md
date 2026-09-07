@@ -2,102 +2,181 @@
 
 日本語版は [README.ja.md](README.ja.md) にあります。
 
-A Windows tool for the AssetBundles of a pixel-styled shooter (Unity 2021.3, IL2CPP). It browses an
-item and everything it references, exports the assets in formats you can actually edit, packs the
-edits into a `.pgmod`, and installs that into the game with backups it can undo.
+A Windows tool for modding the items of a pixel-styled shooter built in Unity 2021.3 (IL2CPP). It
+finds an item and everything it uses, writes the assets out as files you can edit in ordinary
+programs, packs your edits into a `.pgmod`, and installs that into the game — with a backup of every
+bundle it touches, so anything it does can be undone.
 
-It ships no game content. A pack describes changes and names the assets already present in the
-player's own installation.
+Weapons and their skins today. The rest of the game's items are the same shape underneath and are
+where this is going.
 
-## Why
+It ships no game content. A pack describes changes and names assets already present in the player's
+own installation.
 
-Item data is spread across hundreds of bundles. A single weapon's model, materials, icon, skins,
-effects and display name each live somewhere different, and they are linked by three different
-mechanisms rather than one:
+---
 
-| Link | Example |
-| --- | --- |
-| Binary `PPtr` references | `Material` → `Texture2D` |
-| String paths resolved at runtime | a field holding `"Weapons/Weapon25"` |
-| Naming convention | `Weapon687` ↔ `Ray687` |
+## Getting it
 
-Following only `PPtr` references leaves the tree disconnected. PGAssetTool follows all three.
+You need Windows x64. A published build needs nothing else installed.
 
-## What it can do
-
-- **Browse** every weapon and the assets beneath it, with the names read from the game's own
-  localization bundles.
-- **Preview** a texture, play a sound, and turn a model, before deciding what to change.
-- **Export** images as PNG, audio as WAV, meshes as glTF, and anything else as a readable JSON dump
-  of its fields.
-- **Replace** textures, meshes and audio from ordinary files — and any other class from its own
-  serialized bytes.
-- **Add** an asset the bundle did not have, and repoint existing assets at it.
-- **Pack** the result into a `.pgmod`, optionally signed, and hand it to somebody else.
-- **Install** several packs at once, turn them off and on, and remove them, with every bundle
-  restorable from a backup taken before the first write.
-- **Import** a mod made in another asset editor and turn it into a workspace this tool can pack.
-
-## Requirements
-
-- Windows x64
-- .NET 10 SDK, to build. A published build needs nothing installed.
-
-`classdata.tpk`, Unity's engine class database, is embedded in the core assembly. It is needed
-because the files under `*_Data` are built without a TypeTree; AssetBundles carry their own and need
-nothing extra. It describes stock Unity classes only and has nothing to do with the game's own code.
-See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
-
-## Build
-
-```
-dotnet build -c Release
-```
-
-The GUI publishes to a single self-contained executable:
+To build it yourself you need the .NET 10 SDK:
 
 ```
 dotnet publish src/PGAssetTool.Gui -c Release -o dist
 ```
 
-`dist/PGAssetTool.exe` then runs on a machine with no .NET installed, and keeps everything it writes
-beside itself.
+`dist/PGAssetTool.exe` is then a single file that runs anywhere and keeps everything it writes beside
+itself — no registry, no `%APPDATA%`.
 
-## The GUI
+Start it. It locates the game through Steam on its own.
 
-`PGAssetTool.exe` opens on three workspaces, switched with `Ctrl+1`, `Ctrl+2`, `Ctrl+3`.
+---
 
-**Browse** lists the weapons and, for the selected one, the tree of everything it references —
-models, materials, textures, sounds, skins, effects. A texture is shown, a clip plays with the space
-bar, and a model can be turned by dragging, tilted with `Shift`, moved with the middle button and
-squared up again with `R`. `Ctrl+Shift+R` narrows the tree to the assets that can be replaced;
-`Ctrl+Shift+A` switches how transparency is written. `Ctrl+E` extracts the selected weapon.
+## Your first mod
 
-**Editor** lists the workspaces that have been extracted, marks the files edited since, and builds
-and applies packs from them. The pack's name, author, version and description are edited here, and
-its picture — drawn from the model at extraction, and replaceable with any view you like. Several
-workspaces can be selected and packed and installed in one go.
+Repainting a weapon, start to finish. Ten minutes, and nothing here is hard to undo.
 
-**Manager** shows what is installed, as tiles resized with `Ctrl` and the wheel, each with the
-pack's own picture, its author and its signature. Mods can be turned off without uninstalling.
-It also reads the game rather than only the ledger, so a bundle changed by something else is
-visible before anyone installs over it.
+**1. Find the weapon.** The **Browse** tab lists every weapon by the name the game shows. Type in the
+search box — a number, a name in any language the game has, or part of one.
 
-## The CLI
+**2. Look at it.** Selecting a weapon shows everything it uses: models, textures, sounds, skins.
+Click a texture to see it, a sound to hear it (space plays and stops), a model to turn it with the
+mouse. This is worth doing before deciding what to change.
+
+**3. Write it out.** `Ctrl+E`, or **File → Extract weapon**. That makes a *workspace*: a folder of
+ordinary files — PNGs, WAVs, glTF models — plus a small `pgmod.json` recording what each one came
+from. To change only one skin rather than the whole weapon, pick it in the dropdown above the tree
+first.
+
+**4. Edit a file.** Open one of the PNGs in whatever you draw in, change it, save it. The **Editor**
+tab is watching the folder and marks the file as edited the moment you do.
+
+You can also drag a file onto the window instead of finding the folder — dropping `ultimatum.png`
+puts it where `ultimatum.png` belongs.
+
+**5. See what you did.** The Editor shows the game's version and yours — **Side by side**, or
+flipping between them in place, which is better at exposing a small difference. Either way they stay
+in step: two models turn together and wear the same texture, so the only difference left between
+them is the change you made.
+
+**6. Put it in the game.** **Build and apply**. Close the game first — the tool will not write to it
+while it is running. Start the game and look at your weapon.
+
+**7. Change your mind.** The **Manager** tab lists what is installed. **Turn off** puts the game back
+without uninstalling; **Remove** takes the mod out altogether. Either way every bundle goes back to
+the copy taken before the first write.
+
+---
+
+## The three tabs
+
+**Browse** — every weapon, and the tree of everything the selected one references. Previews live
+here. `Ctrl+Shift+R` narrows the tree to the things that can actually be replaced, which is usually
+what you want.
+
+**Editor** — the workspaces you have extracted, which files you have edited, and the comparison
+between yours and the game's. The pack's name, author, version, description and picture are set
+here. Several workspaces can be selected and built and installed together.
+
+**Manager** — what is installed. Packs are filed by the item they change and the look they change,
+in a shelf on the left that also searches; the tiles show each pack's own picture. It reads the game
+itself rather than only its own records, so a bundle changed by something else is visible before
+anyone installs over it.
+
+---
+
+## Installing somebody else's pack
+
+Drag the `.pgmod` onto the window. That is the whole of it — it installs and appears in the Manager.
+
+You can drop several at once. Installing is a whole-game rebuild, so several together is both faster
+and safer than one at a time.
+
+---
+
+## Shortcuts
+
+| Key | What it does |
+| --- | --- |
+| `Ctrl+1` `Ctrl+2` `Ctrl+3` | Browse, Editor, Manager |
+| `Ctrl+F` | Jump to the search on this tab |
+| `Ctrl+E` | Extract the selected weapon |
+| `Ctrl+Shift+E` | Extract just the selected asset |
+| `Ctrl+A` | Show the alpha channel of the picture in front of you |
+| `Ctrl+Shift+R` | Show only what can be replaced |
+| `Ctrl+R` | Re-read the game from disk |
+| `F5` | Re-read the workspaces |
+| `Delete` | Delete the selected workspace, or remove the selected mod |
+| `Ctrl+,` | Options |
+
+With a model in front of you:
+
+| | |
+| --- | --- |
+| Drag | Turn it |
+| `Shift` + drag | Tilt it |
+| Middle button + drag | Move it in the frame |
+| Wheel | Closer and further |
+| `R` | Straighten it up |
+
+And in the Manager, `Ctrl` with the wheel resizes the tiles, and holding `Shift` turns **Remove**
+into **Remove and delete**, which throws the kept pack file away as well.
+
+---
+
+## Sharing a pack
+
+**Build pack** writes a `.pgmod` into the workspace. Hand it to anyone; it names assets in their
+installation rather than carrying game content.
+
+Turn on **Protect this pack** and it is signed as well. Signing says the contents are what the holder
+of your key put in, so a pack somebody altered afterwards shows as altered — and your name is signed
+with them, so it cannot be moved onto somebody else's work, or taken off yours.
+
+What it cannot prevent is somebody re-signing a pack under their own key. What that costs them is the
+fingerprint, which is the part worth checking: the name is what somebody typed, the fingerprint is
+what they hold. Publish yours and people can tell a genuine pack from a re-signed one. Yours is in
+**File → Options**.
+
+---
+
+## When something is wrong
+
+**The game was not found.** The window says so on startup. It is located through Steam; an
+installation somewhere Steam does not know about has to be named on the command line, with
+`--game <folder>`. The GUI has no setting for it yet.
+
+**"The game is running."** Close it. Nothing is written to the game's files while it is open, because
+rewriting a bundle out from under it leaves a half-written file.
+
+**A bundle was changed by something else.** The Manager says so, and `verify` on the command line
+lists every bundle that differs from what the game recorded and says which differences an installed
+mod accounts for. If another tool wrote it, this one has no original to put back.
+
+**A pack will not apply.** It says why. Usually the asset it names has moved in a game update; a pack
+records the item's name and class as well as its id, and looks it up again when the id no longer
+finds it.
+
+**Undo everything.** Remove every mod in the Manager. Every bundle goes back to the copy taken before
+the first write.
+
+---
+
+## The command line
+
+Everything the GUI does, for scripting. Built at
+`src/PGAssetTool.Cli/bin/Release/net10.0-windows/win-x64/pgassettool.exe`, or:
 
 ```
 dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 ```
-
-The built executable is at `src/PGAssetTool.Cli/bin/Release/net10.0-windows/win-x64/pgassettool.exe`
-if you would rather call it directly.
 
 | Command | What it does |
 | --- | --- |
 | `info` | Show the detected installation and version. |
 | `weapons [<filter>]` | List weapons, filtered by name, slug, tag or prefab. |
 | `show <weapon>` | Show one weapon and everything it references. Takes the in-game number (`819`), a prefab name (`Weapon1257`) or a slug. The in-game number and the prefab number are different sequences. |
-| `extract <weapon>` | Write out everything belonging to a weapon. With `--workspace`, also writes a `pgmod.json` naming every replaceable file. |
+| `extract <weapon>` | Write out everything belonging to a weapon. With `--workspace`, also writes the `pgmod.json` that makes it packable. |
 | `pack [<directory>]` | Build a `.pgmod` from a workspace. Only files edited since the extract are included. |
 | `convert <path>` | Turn raw `.dat` assets exported by another asset editor into a packable workspace. |
 | `apply <pack>` | Install a `.pgmod` into the game. |
@@ -113,158 +192,77 @@ if you would rather call it directly.
 | `--language <bundle>` | Localization bundle to read names from (default `l_en-gb`). |
 | `--out <directory>` | Where the output goes. `extract` defaults to `./workspace`, `convert` to a `converted` folder beside its input. |
 | `--author <name>` | Recorded in the manifest. |
-| `--skin <id or name>` | Also write out one of the weapon's skins. Off by default: a weapon carries up to a dozen, and writing all of them multiplies the workspace for the sake of the one being worked on. `show` lists what a weapon has. |
+| `--skin <id or name>` | Write out one of the weapon's skins instead of the weapon as it comes. `show` lists what a weapon has. |
 | `--opaque` | Write textures with no alpha channel. Most of them keep emission rather than transparency there, and an editor opens those as almost invisible. An image brought back without an alpha channel keeps the original one. |
 | `--protect` | Sign the built pack, and keep it from opening as a zip. |
 | `--force` | Let `apply` back up a bundle that is already modified. |
 
 ```
-dotnet run --project src/PGAssetTool.Cli -c Release -- weapons crystal
-dotnet run --project src/PGAssetTool.Cli -c Release -- extract 819 --workspace --out workspace
-dotnet run --project src/PGAssetTool.Cli -c Release -- pack workspace/0819_something
-dotnet run --project src/PGAssetTool.Cli -c Release -- apply workspace/0819_something/something.pgmod
+pgassettool weapons crystal
+pgassettool extract 819 --workspace --out workspace
+pgassettool pack workspace/0819_something
+pgassettool apply workspace/0819_something/something.pgmod
 ```
 
-## Workspaces and packs
+---
 
-`extract --workspace` writes a directory of files plus a `pgmod.json` naming the target of every
-replaceable one, and the hash each had when it was written. Edit the files you care about; packing
-keeps only the ones that changed, so a workspace of sixty files can produce a pack of two.
+## What can be changed
 
-A `.pgmod` is a zip holding that manifest, the files it references, and the pack's picture. Built
-with protection on, it is instead a small container: a readable header saying who built it, and the
-same zip with a keystream over it. The header stays readable so the manager can say where a pack
-came from without unpacking it. The scrambling stops a pack being renamed to `.zip` and opened; it
-stops nothing else, and is not meant to. Signing says the contents are what the holder of that key
-put in, so a pack altered afterwards shows up as altered. The author's name in the header is signed
-along with them, so it cannot be moved onto somebody else's work, or off your own, without the key.
-
-Signing a pack again under a different key is not prevented, because it cannot be. What it costs is
-the fingerprint, which is the part worth checking: the name is what somebody typed, the fingerprint
-is what they hold. An author who publishes theirs lets people tell a re-signed pack from a genuine
-one.
-
-### Operations
-
-| Operation | Source | Applies to |
+| What | From | |
 | --- | --- | --- |
-| `replaceTexture` | `.png` | `Texture2D` |
-| `replaceMesh` | `.glb` | `Mesh` |
-| `replaceAudio` | `.wav`, `.mp3`, `.ogg` | `AudioClip` |
-| `replaceRaw` | `.dat` | any class |
-| `addAsset` | `.dat` | any class the bundle already describes |
+| Textures | `.png` | edit in anything |
+| Models | `.glb` | edit in anything |
+| Sounds | `.wav`, `.mp3`, `.ogg` | edit in anything |
+| Anything else | `.dat` | the asset's own bytes — materials, fonts, shaders, transforms |
 
-The first three take a file anybody can edit in an ordinary tool, and are what a class has to have
-before it is called replaceable. `replaceRaw` is a level below them: it writes an asset's own
-serialized bytes back without understanding the class, which is how a `Material`, a `Font`, a
-`Transform` or a `Shader` gets changed at all. `addAsset` is the same write into a path id nothing
-is using.
+The first three are files any ordinary program opens, which is what a class needs before this tool
+calls it replaceable. The last is a level below: it writes an asset's bytes back without
+understanding them, which is how everything else gets changed at all. Assets the game does not have
+yet can be added the same way, with existing assets repointed at them.
 
-A manifest says which `formatVersion` it was written for, and a pack from a later one is refused
-rather than half understood.
+Everything else is written out too — materials, animations, the prefab — as readable JSON, so you can
+see what is there even where you cannot yet change it.
 
-### Adding an asset
+---
 
-An asset that is not in the game yet has no path id anyone can rely on. The one it was built with is
-recorded and tried first — that keeps a pack matching what its author tested — but nothing reserves
-that number in the player's bundle, and a game update can put a real asset there. So the identity is
-a handle the pack chooses (`newId`), and anything pointing at the new asset records *where* the
-pointer is rather than what it holds:
+## Not done yet
 
-```json
-{ "op": "addAsset",
-  "target": { "container": "ecw_34", "class": "Shader", "name": "font_color_fix",
-              "pathId": -2415237287598442480 },
-  "source": "font_color_fix.dat",
-  "newId": "font_color_fix" },
+- **Items other than weapons.** Hats, capes, masks, boots and pets are the same arrangement under
+  other names, and the machinery that reads and writes them is already general.
+- **Writing to `.assets`** — the files under `*_Data` — and sprite atlases. Everything here writes
+  AssetBundles.
+- **An editable format for fonts and shaders.** Their bytes go back through the raw route; what is
+  missing is a format to edit them *in*.
+- **Editing the JSON field dump.** It is written to be read; nothing reads it back. Changing one
+  field of a material still means going through the raw bytes.
+- **Previewing a skin's own model.** Extraction handles it; the preview's picker offers only
+  textures.
 
-{ "op": "replaceRaw",
-  "target": { "container": "ecw_34", "class": "Material", "name": "debugger_20_26_map_font" },
-  "source": "debugger_20_26_map_font.dat",
-  "pointers": [ { "path": "m_Shader", "newId": "font_color_fix" } ] }
-```
+---
 
-Applying hands out an id and fills in every pointer naming it. A pack that would need something this
-cannot promise is refused with a reason rather than made to fit: no type information for the class
-in that bundle, a payload left behind in a stream, a reference to a file the bundle does not list, or
-a name another asset of that class already has.
+## For anyone changing the tool
 
-## Importing a mod made in another tool
-
-`convert` takes the `.dat` files an asset editor writes — named `<asset>-CAB-<hash>-<pathId>.dat` —
-and turns them into a workspace. A `.dat` carries no type of its own, so the class is recovered from
-the asset it came from. When the game has no asset at that path id, the mod is *adding* one: the
-class is worked out from the bytes instead, by parsing them through each type the bundle describes
-and keeping the one that writes back byte for byte.
-
-The pointers that need repointing are found, not declared. The author's own files already point at
-the new asset by whatever id their editor gave it, so every pointer holding one of those numbers is
-one that has to be rewritten.
-
-```
-pgassettool convert path/to/mod --out PGAssetTool-data/workspace/my_mod
-pgassettool pack PGAssetTool-data/workspace/my_mod
-pgassettool apply PGAssetTool-data/workspace/my_mod/my_mod.pgmod
-```
-
-Converting into the workspace root means the result also appears in the GUI's Editor, which is where
-it can be packed, installed and managed from there on.
-
-## Where it keeps things
-
-Everything the tool writes lives in `PGAssetTool-data/`, beside the executable. No registry, no
-`%APPDATA%`. Inside a checkout it resolves to the repository root, so every build shares one store.
-
-```
-PGAssetTool-data/
-  settings.json          preferences
-  author.key             the key packs are signed with
-  mods/                  packs kept so a mod can be reinstalled without its workspace
-  workspace/             extracted and converted workspaces
-  installs/<game>/
-    backup/              each bundle as it was before the first write to it
-```
-
-## Safety
-
-- Nothing is written while the game is running. Both the manager and the editor's build-and-apply
-  refuse until it is closed.
-- A bundle is backed up before it is first written to. Applying, toggling and removing all work by
-  restoring every affected bundle and reapplying what is enabled, in the order it was installed —
-  so turning one mod off cannot undo another that shares a bundle, and nothing stacks.
-- `apply` refuses a bundle that something else has already modified and has no backup, unless
-  `--force` says to accept its contents as the original.
-- `verify` compares every bundle against the hash the game recorded, and says which of the
-  differences are accounted for by an installed mod.
-
-## Verifying a change
+[DESIGN.md](DESIGN.md) is why it is built the way it is: how an item's parts are found, what a pack
+is, how adding an asset works, and which pieces look arbitrary but are load-bearing.
 
 ```
 dotnet test -c Release
 dotnet run --project src/PGAssetTool.Gui -c Release -- --self-test
 ```
 
-`dotnet test` needs no game and is what CI runs. `--self-test` is the real check: it drives the
-whole tool against the live installation — resolving weapons, decoding previews, building the real
-window and reading back what landed in it, then extracting, editing, packing, installing, toggling
-and removing for real. It refuses to start if the game is running, removes only its own pack, uses
-its own workspace and settings, and asserts at the end that the author's settings file is
-byte-identical to what it was.
+`dotnet test` needs no game and is what CI runs. `--self-test` is the real check — it drives the
+whole tool against the live installation and puts everything back afterwards.
 
-## Not done yet
+`classdata.tpk`, Unity's engine class database, is embedded in the core assembly. It is needed
+because the files under `*_Data` are built without a TypeTree; AssetBundles carry their own. It
+describes stock Unity classes only and has nothing to do with the game's own code. See
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-- **Writing to `.assets`** — the files under `*_Data` — and sprite atlases. Everything here writes
-  AssetBundles.
-- **An editable format for fonts and shaders.** Their bytes go back through `replaceRaw`; what is
-  missing is a format to edit them *in*, which is what a class needs before it counts as replaceable.
-- **Editing the JSON field dump.** It is written to be read; nothing reads it back. Changing one
-  field of a `Material` still means going through the raw bytes.
-- **Previewing a skin's own model.** Extraction handles it; the preview's picker offers only
-  textures.
+---
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
-This project ships no game content. Mod packs describe changes declaratively and reference the
-assets already present in the user's own installation.
+This project ships no game content. Mod packs describe changes declaratively and reference the assets
+already present in the user's own installation.
