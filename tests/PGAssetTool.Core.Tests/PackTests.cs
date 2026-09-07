@@ -220,4 +220,34 @@ public class PackTests : IDisposable
         Assert.Equal("beretta.pgmod", PackBuilder.FileNameFor(new PackManifest { Id = "beretta", Name = "" }));
         Assert.Equal("mod.pgmod", PackBuilder.FileNameFor(new PackManifest { Id = "...", Name = "   " }));
     }
+
+    [Fact]
+    public void ExtractingTheSameThingTwiceDoesNotWriteOverTheFirst()
+    {
+        // Two mods of one weapon are two mods, so two workspaces are two directories. Writing over
+        // the first took an author's edits with it, and the manifest that said which mod they were.
+        var wanted = Path.Combine(_workspace, "0416_ultimatum");
+
+        Assert.Equal(wanted, Workspace.Free(wanted));
+
+        Directory.CreateDirectory(wanted);
+        File.WriteAllText(Path.Combine(wanted, PackManifest.FileName), "{}");
+        Assert.Equal(wanted + "_2", Workspace.Free(wanted));
+
+        Directory.CreateDirectory(wanted + "_2");
+        File.WriteAllText(Path.Combine(wanted + "_2", PackManifest.FileName), "{}");
+        Assert.Equal(wanted + "_3", Workspace.Free(wanted));
+    }
+
+    [Fact]
+    public void ADirectoryThatIsNotAWorkspaceIsNotSteppedOver()
+    {
+        // Present is not the same as somebody's. An empty folder left behind by a run that failed
+        // half way is a folder to write into, not one to number past.
+        var wanted = Path.Combine(_workspace, "0016_beretta");
+        Directory.CreateDirectory(wanted);
+        File.WriteAllText(Path.Combine(wanted, "leftover.png"), "not a manifest");
+
+        Assert.Equal(wanted, Workspace.Free(wanted));
+    }
 }

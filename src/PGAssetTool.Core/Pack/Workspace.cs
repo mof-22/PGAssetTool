@@ -94,6 +94,27 @@ public static class Workspace
             .ToList();
     }
 
+    /// A directory to extract into that is not already somebody's workspace, numbering up until it
+    /// finds one.
+    ///
+    /// Extracting wrote to a name made from the weapon and the skin, so asking for the same one
+    /// twice wrote over the first: the files an author had edited, and the manifest that said which
+    /// mod their work was. Two mods of one weapon are two mods — the id has said so since it began
+    /// being minted per extraction — and two workspaces are two directories for the same reason.
+    ///
+    /// The manifest is what makes a directory somebody's rather than merely present: an empty
+    /// folder, or one holding something else entirely, is not a workspace and is not stepped over.
+    public static string Free(string wanted)
+    {
+        for (var n = 1; n < 1000; n++)
+        {
+            var at = n == 1 ? wanted : $"{wanted}_{n}";
+            if (!File.Exists(Path.Combine(at, PackManifest.FileName))) return at;
+        }
+
+        return wanted;
+    }
+
     public static PackManifest Read(string directory)
         => Once(PackManifest.Parse(File.ReadAllText(Path.Combine(directory, PackManifest.FileName))));
 

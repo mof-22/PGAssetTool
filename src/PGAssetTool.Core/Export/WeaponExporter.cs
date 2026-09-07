@@ -49,9 +49,9 @@ public sealed class WeaponExporter(BundleSet bundles)
     public WeaponExport Export(WeaponTree tree, string outputRoot)
     {
         var chosen = Chosen(tree);
-        var directory = Path.Combine(outputRoot,
+        var directory = Pack.Workspace.Free(Path.Combine(outputRoot,
             $"{tree.Record.GameNumber:D4}_{AssetExporter.Sanitize(tree.Record.Slug)}"
-            + (chosen is null ? "" : $"_{AssetExporter.Sanitize(Suffix(tree, chosen))}"));
+            + (chosen is null ? "" : $"_{AssetExporter.Sanitize(Suffix(tree, chosen))}")));
         Directory.CreateDirectory(directory);
 
         var assets = new List<ExportedAsset>();

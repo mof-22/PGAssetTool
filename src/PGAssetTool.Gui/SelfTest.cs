@@ -1515,6 +1515,22 @@ internal static class SelfTest
                 return $"'{skin.Name}' only repaints and the model it repaints was not written";
         }
 
+        // Asked for again, the same skin gets a workspace of its own rather than writing over the
+        // one that is already there — which used to take an author's edits with it, and the
+        // manifest that said which mod their work was.
+        model.ChosenSkin = withModel;
+        model.ExtractWeaponCommand.Execute(null);
+        WaitWhile(() => model.Busy, 300_000);
+
+        if (model.LastExport is not { } again || !Directory.Exists(again))
+            return $"extracting '{withModel.Name}' a second time wrote nothing: {model.Status}";
+        if (string.Equals(Path.GetFullPath(again), Path.GetFullPath(written[1]),
+                StringComparison.OrdinalIgnoreCase))
+            return $"extracting '{withModel.Name}' twice wrote over the first at {again}";
+
+        Console.WriteLine($"skins    asked for '{withModel.Name}' again -> {Path.GetFileName(again)}");
+        written.Add(again);
+
         // Two looks of one weapon are two mods.
         //
         // The id used to be the weapon's slug and nothing else, so every mod of a weapon was the
@@ -1526,6 +1542,11 @@ internal static class SelfTest
 
         if (manifests[0].Id == manifests[1].Id)
             return $"two skins of one weapon were both called '{manifests[0].Id}'";
+
+        // Including the two of the same skin: two extractions are two mods whatever they were made
+        // from, which is what "mints its own" has to mean to be worth anything.
+        if (manifests.Select(m => m.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifests.Count)
+            return $"{manifests.Count} extractions produced fewer ids than that";
 
         foreach (var manifest in manifests)
         {
