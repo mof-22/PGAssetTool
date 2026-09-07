@@ -30,7 +30,15 @@ public sealed partial class TreeNode(
     /// Two-way bound to the row, so clicking one and expanding it are the same gesture.
     [ObservableProperty] private bool _isExpanded;
 
-    public bool HasChildren => Children.Count > 0;
+    /// A model this row stands for whose contents have not been read yet.
+    ///
+    /// A skin that brings its own model is recorded as a place rather than as what is in it:
+    /// reading the closure of every skin would be a bundle walk per skin every time a weapon was
+    /// selected, and most of them are never opened. So it is read when somebody opens the row, and
+    /// the row can be opened whether or not it has anything under it yet.
+    public SkinModel? Unread { get; init; }
+
+    public bool HasChildren => Children.Count > 0 || Unread is not null;
 
     public string Icon => Class switch
     {
@@ -55,6 +63,7 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
     {
         Tree = tree;
         Roots = Build(tree, replaceableOnly);
+        Watch(Roots);
     }
 
     public WeaponTree Tree { get; }
@@ -62,6 +71,29 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
 
     /// Set by the shell so a click in the tree can be turned into a preview.
     public Action<TreeNode?>? NodeSelected { get; set; }
+
+    /// Set by the shell so opening a row whose contents have not been read can read them. The shell
+    /// owns the bundles and the lock around them; this only says which row was opened.
+    public Action<TreeNode>? NodeOpened { get; set; }
+
+    /// Watches the rows that stand for something unread, so opening one asks for it — once.
+    private void Watch(IEnumerable<TreeNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Unread is not null)
+            {
+                var row = node;
+                row.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName != nameof(TreeNode.IsExpanded)) return;
+                    if (row is { IsExpanded: true, Children.Count: 0 }) NodeOpened?.Invoke(row);
+                };
+            }
+
+            Watch(node.Children);
+        }
+    }
 
     [ObservableProperty] private TreeNode? _selectedNode;
 
@@ -116,7 +148,14 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
             var skins = new TreeNode("Skins", $"{tree.Skins.Count}");
             foreach (var skin in tree.Skins)
             {
-                var node = new TreeNode(skin.DisplayName ?? skin.Record.Id, skin.Record.Id);
+                // A skin that brings its own model gets a row for it, read when it is opened. Its
+                // own materials do not resolve against the usual roots — the model carries what it
+                // needs — so without this there was nothing of such a skin to look at at all.
+                var node = new TreeNode(skin.DisplayName ?? skin.Record.Id, skin.Record.Id)
+                {
+                    Unread = skin.Model,
+                };
+
                 foreach (var material in skin.Materials)
                 {
                     // With one material there is nothing to distinguish, so its textures hang

@@ -268,7 +268,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 var tree = await Task.Run(() => _resolver.Resolve(value.Record));
                 Preview.Clear();
                 _tree = tree;
-                Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview };
+                Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview, NodeOpened = ReadModel };
                 Status = $"{value.Name} — {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}";
             }
             finally
@@ -584,7 +584,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_tree is null) return;
 
         Preview.Clear();
-        Detail = new WeaponDetailViewModel(_tree, value) { NodeSelected = ShowPreview };
+        Detail = new WeaponDetailViewModel(_tree, value) { NodeSelected = ShowPreview, NodeOpened = ReadModel };
     }
 
     /// Changing the language means every name in the catalogs, so the game is read again.
@@ -688,6 +688,75 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         OfferTextures();
         OfferSkins(value?.Tree);
+    }
+
+    /// Reads what a skin's own model is made of, the first time somebody opens its row.
+    ///
+    /// Deferred rather than done when the weapon is selected: a weapon carries up to a dozen skins,
+    /// several of which bring a model, and walking every one of them to fill rows nobody opens
+    /// would be paid on every click in the weapon list. Walking one when it is asked for is paid by
+    /// whoever asked.
+    private async void ReadModel(TreeNode node)
+    {
+        if (node.Unread is not { } model) return;
+
+        try
+        {
+            await _reading.WaitAsync();
+            try
+            {
+                if (_bundles is not { } bundles) return;
+
+                var found = await Task.Run(() =>
+                {
+                    var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
+                    var file = bundles.Open(model.Bundle);
+                    var root = ReferenceWalker.FindByName(
+                        bundles.Context, file, AssetClassID.GameObject, name);
+
+                    return root is null
+                        ? []
+                        : ReferenceWalker
+                            .Closure(bundles.Context, file, root.PathId,
+                                new BundleGraph(bundles).Resolve, skip: WeaponResolver.Opaque)
+                            .Where(a => Replaceable.CanShow(a.Class)
+                                && (!ReplaceableOnly || Replaceable.Supports(a.Class)))
+                            .ToList();
+                });
+
+                // Grouped the way the weapon's own objects are, so a skin's model reads as the same
+                // kind of thing as the weapon it replaces.
+                foreach (var group in found
+                             .GroupBy(a => a.Class)
+                             .OrderBy(g => g.Key.ToString(), StringComparer.Ordinal))
+                {
+                    var into = new TreeNode(group.Key.ToString(), $"{group.Count()}")
+                    {
+                        IsExpanded = Replaceable.Supports(group.Key),
+                    };
+
+                    foreach (var asset in group.OrderBy(a => a.Name, StringComparer.Ordinal))
+                        into.With(new TreeNode(
+                            asset.Name.Length > 0 ? asset.Name : $"(unnamed {asset.PathId})",
+                            asset.Bundle.Length > 0 ? asset.Bundle : model.Bundle,
+                            asset.Class, asset.PathId,
+                            asset.Bundle.Length > 0 ? asset.Bundle : model.Bundle));
+
+                    node.With(into);
+                }
+
+                if (node.Children.Count == 0)
+                    Status = $"'{node.Label}' brings a model and nothing in it could be read.";
+            }
+            finally
+            {
+                _reading.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = Describe(ex, $"reading the model behind '{node.Label}'");
+        }
     }
 
     /// The skins this weapon has, offered so one of them can be extracted alongside its own files.

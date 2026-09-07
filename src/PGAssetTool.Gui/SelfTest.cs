@@ -289,6 +289,7 @@ internal static class SelfTest
             if (classes.Any(c => c is "MonoBehaviour" or "MonoScript"))
                 return Fail($"the tree lists a withheld class with the filter off: "
                     + string.Join(", ", classes));
+
             if (all <= everything) return Fail("the filter hid nothing");
 
             model.ReplaceableOnly = true;
@@ -435,8 +436,36 @@ internal static class SelfTest
                 Console.WriteLine($"         {skin.Label} -> "
                     + string.Join(", ", skin.Children.Select(c => c.Label)));
 
-            if (skins.Children.All(s => s.Children.Count == 0))
-                return Fail("no skin reached a texture");
+            if (skins.Children.All(s => s.Children.Count == 0 && s.Unread is null))
+                return Fail("no skin reached anything at all");
+
+            // A skin that replaces the weapon rather than repainting it has nothing under it until
+            // its row is opened, because reading every such model on every click in the weapon list
+            // is a walk per skin nobody asked for. Opening one asks for that one.
+            if (skins.Children.FirstOrDefault(s => s.Unread is not null) is not { } withModel)
+                return Fail("#416 has skins that bring their own model and none is marked unread");
+
+            if (withModel.Children.Count > 0)
+                return Fail($"'{withModel.Label}' was read before anybody opened it");
+
+            withModel.IsExpanded = true;
+            WaitWhile(() => withModel.Children.Count == 0, 60_000);
+
+            var inside = withModel.Children.SelectMany(c => c.Children).ToList();
+            Console.WriteLine($"skins    opening '{withModel.Label}' read "
+                + $"{string.Join(", ", withModel.Children.Select(c => $"{c.Label} {c.Children.Count}"))}");
+
+            if (inside.Count == 0) return Fail($"opening '{withModel.Label}' read nothing");
+            if (inside.All(c => c.Class != AssetsTools.NET.Extra.AssetClassID.Mesh))
+                return Fail($"'{withModel.Label}' brings its own model and no mesh came back");
+
+            // Read once. Opening and closing the row again must not pile the same rows up under it.
+            var read = withModel.Children.Count;
+            withModel.IsExpanded = false;
+            withModel.IsExpanded = true;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            if (withModel.Children.Count != read)
+                return Fail($"opening it again read it again: {read} -> {withModel.Children.Count}");
 
             if (!Select(model, 16)) return Fail("selecting #16 resolved nothing");
 
@@ -1781,18 +1810,33 @@ internal static class SelfTest
     private static string? SecondWorkspace(
         MainViewModel model, int weapon, string folder, string id, string name)
     {
-        if (!Select(model, weapon)) return null;
+        // Every step says which one it was. Answering "it could not be prepared" for five different
+        // failures meant a run that fell over here left nothing to go on but a guess.
+        if (!Select(model, weapon))
+        {
+            Console.WriteLine($"batch    #{weapon} could not be selected");
+            return null;
+        }
 
         model.ExtractWeaponCommand.Execute(null);
         WaitWhile(() => model.Busy, 120_000);
-        if (model.LastExport is not { } exported || !Directory.Exists(exported)) return null;
+        if (model.LastExport is not { } exported || !Directory.Exists(exported))
+        {
+            Console.WriteLine($"batch    extracting #{weapon} wrote nothing: {model.Status}");
+            return null;
+        }
 
-        if (Rename(model, exported, folder, name, id) is not { } directory) return null;
+        if (Rename(model, exported, folder, name, id) is not { } directory)
+        {
+            Console.WriteLine($"batch    '{Path.GetFileName(exported)}' could not be renamed to '{folder}': {model.Editor.Status}");
+            return null;
+        }
+
         var manifest = PGAssetTool.Core.Pack.Workspace.Read(directory);
 
         // Packing keeps only what differs from the export, so an untouched workspace packs nothing.
         var texture = manifest.Operations.FirstOrDefault(o => o.Source.EndsWith(".png"));
-        if (texture is null) return null;
+        if (texture is null) { Console.WriteLine($"batch    '{folder}' has no texture to edit"); return null; }
 
         var path = Path.Combine(directory, texture.Source);
         File.WriteAllBytes(path, [.. File.ReadAllBytes(path), .. new byte[16]]);
