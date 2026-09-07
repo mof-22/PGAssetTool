@@ -369,14 +369,27 @@ internal static class SelfTest
             // Ctrl+R throws the reader away and starts over, which is the slowest thing the GUI
             // does on purpose. It used to take fifteen seconds, nearly all of it rebuilding the
             // CAB index through a class database loaded once per bundle.
+            // Searched, so the reload has something to put back wrongly. A reload happens under
+            // somebody in the middle of something — building a pack causes one — and it used to
+            // hand back the whole list while the search box still said what they had typed.
+            model.Search = "ultimatum";
+            var narrowed = model.Weapons.Count;
+
             clock.Restart();
             // Blocking rather than awaiting: an await here would resume on a pool thread, and the
             // headless window can only be closed from the one that made it.
             Settle(model.ReloadAsync(), "reloading");
             WaitWhile(() => model.Busy, 120_000);
-            Console.WriteLine($"reload   {clock.ElapsedMilliseconds}ms for the whole game");
+            Console.WriteLine($"reload   {clock.ElapsedMilliseconds}ms for the whole game, "
+                + $"'{model.Search}' still showing {model.Weapons.Count} of {narrowed}");
             if (clock.ElapsedMilliseconds > 8000)
                 return Fail($"reloading took {clock.ElapsedMilliseconds}ms");
+
+            if (narrowed == 0) return Fail("searching for 'ultimatum' found nothing to reload with");
+            if (model.Weapons.Count != narrowed)
+                return Fail($"reloading put {model.Weapons.Count} weapons back where a search left {narrowed}");
+
+            model.Search = "";
 
             // With a window open the list box owns the selection, and rebuilding the collection —
             // which searching and reloading both do — clears it. So pick one again before asking

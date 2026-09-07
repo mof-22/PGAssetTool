@@ -186,7 +186,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             foreach (var (bundle, name) in GameCatalogs.Languages(_bundles!))
                 Languages.Add(new LanguageOption(bundle, name));
 
-            Show(_catalogs!.Items.Weapons);
+            // Whatever is being searched for, still. A reload happens under somebody who is in the
+            // middle of something — building a pack reloads the game — and putting the whole list
+            // back while the search box still says what they typed reads as the search breaking.
+            Show(Search.Length == 0
+                ? _catalogs!.Items.Weapons
+                : _catalogs!.Items.Search(Search, _catalogs.Names));
+
             Editor.Rescan(WorkspaceRoot);
 
             // The manager files mods by weapon and by skin, and both are things only the catalogues
