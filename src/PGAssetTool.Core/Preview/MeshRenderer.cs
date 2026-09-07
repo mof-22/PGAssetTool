@@ -44,19 +44,29 @@ public sealed record Camera(
     /// any more — so feeding the drag straight in meant that after a quarter turn of tilt, dragging
     /// up span the model sideways. Undoing the roll first asks the question the drag actually means:
     /// which way did the cursor go across the picture as it now stands.
+    ///
+    /// Sideways and yaw agree in sign because the picture is no longer mirrored: dragging right
+    /// walks the viewer round towards the model's own right, which is the side of the screen that
+    /// side is now drawn on. Both halves of that flipped together, so the drag still takes the
+    /// model with it — cursor right turns the near face right, as it always did.
     public Camera Dragged(float right, float down)
     {
         var (c, s) = (MathF.Cos(Roll), MathF.Sin(Roll));
-        return Turned(-(c * right + s * down), -(s * right - c * down));
+        return Turned(c * right - s * down, s * right + c * down);
     }
 
+    /// Pitch is not stopped at the poles.
+    ///
+    /// It was, on the reasoning that a camera looking straight down has no up vector to build a
+    /// frame from — which is true of a frame built by crossing the view direction with the world's
+    /// up, and not of this one: screen-right comes from the yaw alone, so the frame stays square at
+    /// every pitch and simply carries on over the top. Stopping there cost more than it saved once
+    /// tilting arrived, since the way to look at a model from underneath is to go over the top and
+    /// straighten it, and a wall two degrees short of vertical made that impossible.
     public Camera Turned(float dYaw, float dPitch) => this with
     {
         Yaw = Yaw + dYaw,
-
-        // Stop just short of the poles: at exactly straight up the view direction and the up vector
-        // are parallel and the frame cannot be built.
-        Pitch = Math.Clamp(Pitch + dPitch, -1.55f, 1.55f),
+        Pitch = Pitch + dPitch,
     };
 
     /// Tilts the model in the plane of the screen.
@@ -338,7 +348,16 @@ public static class MeshRenderer
                 ux * cr - rx * sr, uy * cr - ry * sr, uz * cr - rz * sr);
         }
 
-        return new Basis(rx, ry, rz, ux, uy, uz, fx, fy, fz);
+        // Screen-right is the opposite of the axis that comes out of the frame above, because
+        // forward points at the viewer: they are standing on the far side of the model from Unity's
+        // own camera, and what that camera has on its right is on their left. Taking it as right
+        // drew every model as its own mirror image — invisible on a gun, obvious the moment a
+        // texture has writing on it.
+        //
+        // Flipped here, after the roll, rather than by building the frame the other way round. The
+        // roll turns the two screen axes into each other, so a frame that starts out mirrored is
+        // not a mirrored frame once it has been rolled — it is a different view altogether.
+        return new Basis(-rx, -ry, -rz, ux, uy, uz, fx, fy, fz);
     }
 
     private static ((float X, float Y, float Z) Centre, (float X, float Y, float Z) Size, float Radius)

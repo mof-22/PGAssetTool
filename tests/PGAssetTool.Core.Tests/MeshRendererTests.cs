@@ -142,13 +142,28 @@ public class MeshRendererTests
     }
 
     [Fact]
-    public void TheCameraStopsShortOfLookingStraightDown()
+    public void TheCameraGoesOverTheTopAndCarriesOn()
     {
-        // At the pole the view direction and the up vector are parallel and the frame collapses.
-        var camera = new Camera().Turned(0, 100f);
+        // Straight down, and past it. Screen-right comes from the yaw alone, so there is no pole
+        // for the frame to collapse at — and going over the top is how a model is looked at from
+        // underneath without fighting a wall two degrees short of vertical.
+        // A solid rather than a flat one: a plane seen exactly edge-on draws nothing however good
+        // the frame is, which says nothing about the frame.
+        var solid = Mesh(
+            [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+            [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3]);
 
-        Assert.True(camera.Pitch < MathF.PI / 2, $"pitch reached {camera.Pitch}");
-        Assert.True(Covered(Draw(Quad(), camera)) >= 0);
+        foreach (var pitch in new[] { MathF.PI / 2, MathF.PI * 0.75f, MathF.PI, -MathF.PI })
+        {
+            var drawn = Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: pitch)));
+            Assert.True(drawn > 0, $"nothing was drawn at a pitch of {pitch}");
+        }
+
+        // A whole turn of pitch is where it started.
+        Assert.Equal(
+            Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: 0.2f))),
+            Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: 0.2f).Turned(0, MathF.Tau))),
+            tolerance: 4);
     }
 
     [Fact]
@@ -213,16 +228,28 @@ public class MeshRendererTests
     }
 
     [Fact]
-    public void TheCorrectionDoesNotMirrorTheModel()
+    public void TheModelIsDrawnTheWayTheGameSeesItRatherThanMirrored()
     {
-        // Reordering axes can flip handedness. A bar with its mass to one side has to stay on that
-        // side, or every preview of an asymmetric model would be a mirror image of the real thing.
+        // The ground truth is Unity's own camera: it looks along +Z and has +X on its right. So a
+        // model with its mass at +X, seen from where that camera stands, draws heavy on the right,
+        // and seen from the other side draws heavy on the left. A mirrored projection satisfies
+        // one of those and not the other, which is the whole difficulty of noticing it: a weapon's
+        // silhouette looks equally plausible either way round, and only a texture with writing on
+        // it says which way the picture is facing.
         float[] positions = [0, 0, 0, 2, 0, 0, 2, 0.4f, 0, 0, 0.1f, 0];
         var lopsided = Mesh(positions, [0, 1, 2, 0, 2, 3]);
 
-        var pixels = Draw(lopsided, new Camera(Yaw: 0, Pitch: 0));
+        var (left, right) = Halves(Draw(lopsided, new Camera(Yaw: MathF.PI, Pitch: 0)));
+        Assert.True(right > left, $"from the game's own side the heavy end drew {right} right, {left} left");
 
-        // The tall end is at +X in the model, so more of the drawing sits right of centre than left.
+        var (fromBehindLeft, fromBehindRight) = Halves(Draw(lopsided, new Camera(Yaw: 0, Pitch: 0)));
+        Assert.True(fromBehindLeft > fromBehindRight,
+            $"from behind the heavy end drew {fromBehindRight} right, {fromBehindLeft} left");
+    }
+
+    /// How much was drawn either side of the middle.
+    private static (int Left, int Right) Halves(byte[] pixels)
+    {
         var (left, right) = (0, 0);
         for (var y = 0; y < Size; y++)
         for (var x = 0; x < Size; x++)
@@ -231,7 +258,7 @@ public class MeshRendererTests
                 if (x < Size / 2) left++; else right++;
             }
 
-        Assert.True(right > left, $"the heavy end drew {right} pixels right and {left} left");
+        return (left, right);
     }
 
     private static (int MinX, int MaxX, int MinY, int MaxY) Extent(byte[] pixels)
@@ -357,7 +384,10 @@ public class MeshRendererTests
 
         var target = new RenderTarget();
         target.Resize(Size, Size);
-        MeshRenderer.Render(twoHalves, new Camera(Yaw: 0, Pitch: 0), target,
+
+        // From the side the game's own camera looks from, where the model's -X is the screen's
+        // left, so the halves are where the lines above say they are.
+        MeshRenderer.Render(twoHalves, new Camera(Yaw: MathF.PI, Pitch: 0), target,
             [Swatch(200, 0, 0), Swatch(0, 0, 200)]);
 
         // Well inside the drawing: the model is framed with a margin, so a quarter of the way in
@@ -536,11 +566,11 @@ public class MeshRendererTests
     }
 
     [Fact]
-    public void WithNoTiltADragMeansExactlyWhatItAlwaysMeant()
+    public void WithNoTiltADragIsNothingMoreThanAYawAndAPitch()
     {
         var start = new Camera(Yaw: 0.2f, Pitch: 0.3f);
 
-        Assert.Equal(start.Turned(-0.1f, 0.2f), start.Dragged(0.1f, 0.2f));
+        Assert.Equal(start.Turned(0.1f, 0.2f), start.Dragged(0.1f, 0.2f));
     }
 
     [Fact]
