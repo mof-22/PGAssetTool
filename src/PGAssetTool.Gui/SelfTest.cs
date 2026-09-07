@@ -492,6 +492,22 @@ internal static class SelfTest
             if (unoffered.Count > 0)
                 return Fail($"the model's own textures are not offered for it: {string.Join(", ", unoffered)}");
 
+            // And it should not need choosing. Which texture goes on which part is decided by the
+            // renderers in the model, which are read along with everything else — so selecting the
+            // skin's mesh dresses it, the same as selecting the weapon's own does.
+            if (inside.FirstOrDefault(c => c.Class == AssetsTools.NET.Extra.AssetClassID.Mesh
+                    && c.Label.Contains(withModel.Detail ?? "", StringComparison.OrdinalIgnoreCase))
+                is not { } skinMesh)
+                skinMesh = inside.First(c => c.Class == AssetsTools.NET.Extra.AssetClassID.Mesh);
+
+            model.Detail!.SelectedNode = skinMesh;
+            WaitWhile(() => model.Preview.Mesh is null, 60_000);
+
+            var dressed = model.Preview.MeshTextures?.Count(t => t is not null) ?? 0;
+            Console.WriteLine($"skins    '{skinMesh.Label}' came up wearing {dressed} texture(s)");
+            if (dressed == 0)
+                return Fail($"'{skinMesh.Label}' came up grey, with nothing worked out to put on it");
+
             // Read once. Opening and closing the row again must not pile the same rows up under it.
             var read = withModel.Children.Count;
             withModel.IsExpanded = false;

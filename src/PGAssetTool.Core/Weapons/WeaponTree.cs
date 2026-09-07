@@ -112,6 +112,15 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     /// materials, and Unity pairs submesh i with material i. A SkinnedMeshRenderer names its own
     /// mesh, while a MeshRenderer leaves that to a MeshFilter on the same GameObject, so both
     /// shapes have to be followed to cover every weapon.
+    /// The same question asked of something resolved later: a skin's own model, whose closure is
+    /// read when somebody opens it rather than when the weapon is selected.
+    ///
+    /// Public because the answer is the same one, worked out the same way. A second implementation
+    /// for the skin case would be a second thing to get wrong about how Unity pairs a submesh with
+    /// a material.
+    public IReadOnlyList<MeshTextures> TexturesFor(string bundle, IReadOnlyList<AssetNode> assets)
+        => TexturesForMeshes(bundle, assets);
+
     private IReadOnlyList<MeshTextures> TexturesForMeshes(string prefabBundle, IReadOnlyList<AssetNode> assets)
     {
         var found = new List<MeshTextures>();

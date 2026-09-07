@@ -297,6 +297,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 var tree = await Task.Run(() => _resolver.Resolve(value.Record));
                 Preview.Clear();
                 _tree = tree;
+
+                // What was learned about the last weapon's skins says nothing about this one's.
+                _alsoTextured.Clear();
+
                 Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview, NodeOpened = ReadModel };
                 Status = $"{value.Name} — {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}";
             }
@@ -690,9 +694,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
     /// geometry and the thing being judged — how a texture sits on the model — is invisible.
+    /// Meshes whose textures were worked out after the weapon was: a skin's own model, read when
+    /// somebody opened its row. Kept beside the weapon's own rather than merged into them, because
+    /// the weapon's are part of a resolved tree and this is what has been learned since.
+    private readonly List<MeshTextures> _alsoTextured = [];
+
     private IReadOnlyList<PreviewImage?>? TexturesFor(long meshPathId)
     {
-        if (_tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == meshPathId) is not { } slots) return null;
+        if ((_tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == meshPathId)
+             ?? _alsoTextured.FirstOrDefault(m => m.MeshPathId == meshPathId)) is not { } slots)
+            return null;
 
         return slots.BySubMesh.Select(node =>
         {
@@ -736,7 +747,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (_bundles is not { } bundles) return;
 
-                var found = await Task.Run(() =>
+                var walked = await Task.Run(() =>
                 {
                     var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
                     var file = bundles.Open(model.Bundle);
@@ -748,10 +759,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         : ReferenceWalker
                             .Closure(bundles.Context, file, root.PathId,
                                 new BundleGraph(bundles).Resolve, skip: WeaponResolver.Opaque)
-                            .Where(a => Replaceable.CanShow(a.Class)
-                                && (!ReplaceableOnly || Replaceable.Supports(a.Class)))
+                            .Where(a => Replaceable.CanShow(a.Class))
                             .ToList();
                 });
+
+                // Which texture belongs on which part is decided by the renderers, and they are in
+                // what was just walked — so it is asked before the filter takes them out again.
+                // Without this a skin's own model came up grey and somebody had to guess.
+                if (_resolver is { } resolver)
+                    foreach (var slots in await Task.Run(() => resolver.TexturesFor(model.Bundle, walked)))
+                        if (_alsoTextured.All(m => m.MeshPathId != slots.MeshPathId))
+                            _alsoTextured.Add(slots);
+
+                var found = walked
+                    .Where(a => !ReplaceableOnly || Replaceable.Supports(a.Class))
+                    .ToList();
 
                 // Grouped the way the weapon's own objects are, so a skin's model reads as the same
                 // kind of thing as the weapon it replaces.
