@@ -45,7 +45,17 @@ public enum SealState
 /// somebody's work is not casually lifted out of the file they published.
 public static class PackFile
 {
-    private static readonly byte[] Magic = "PGMOD"u8.ToArray();
+    private static readonly byte[] Magic = "PGMOD"u8.ToArray();
+
+    /// The shape of the container, written straight after the magic.
+    ///
+    /// It has been there since the first protected pack, but as a control character inside the
+    /// magic's own string literal, where nothing showed it: not the editor, not a diff, not a
+    /// grep for the constant. Anything that strips control characters from a source file — a
+    /// careless paste, a helpful tool — would have quietly changed the magic and left every pack
+    /// built afterwards unreadable by every build before it, with no line in the diff to say so.
+    /// Written out, it is a version byte, which is what it always was.
+    private const byte Format = 1;
 
     /// Fixed, and deliberately so: any build of this tool has to be able to open any pack. A key
     /// only the author knew would make a pack nobody else could install, which is a different
@@ -67,7 +77,7 @@ public static class PackFile
     public static byte[] Contents(string path)
     {
         var raw = File.ReadAllBytes(path);
-        return Split(raw) is var (_, payload) ? payload : raw;
+        return Split(raw) is var (_, _, payload) ? payload : raw;
     }
 
     /// Who built it and whether it still matches, without unpacking anything.
@@ -76,7 +86,7 @@ public static class PackFile
         try
         {
             var raw = File.ReadAllBytes(path);
-            if (Split(raw) is not var (header, payload)) return PackSeal.Plain;
+            if (Split(raw) is not var (_, header, payload)) return PackSeal.Plain;
 
             var publicKey = Convert.FromBase64String(header.PublicKey);
             var state = PackAuthor.Verifies(payload, Convert.FromBase64String(header.Signature), publicKey)
@@ -107,6 +117,7 @@ public static class PackFile
 
         using var file = File.Create(path);
         file.Write(Magic);
+        file.WriteByte(Format);
 
         Span<byte> length = stackalloc byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(length, header.Length);
@@ -120,18 +131,24 @@ public static class PackFile
 
     /// Splits a protected pack into what it says about itself and what it holds. Null for a plain
     /// zip, which is every pack built before this existed and every one built with protection off.
-    private static (Header Header, byte[] Payload)? Split(byte[] raw)
+    private static (byte Version, Header Header, byte[] Payload)? Split(byte[] raw)
     {
-        if (raw.Length < Magic.Length + 4 || !raw.AsSpan(0, Magic.Length).SequenceEqual(Magic)) return null;
+        if (raw.Length < Magic.Length + 5 || !raw.AsSpan(0, Magic.Length).SequenceEqual(Magic)) return null;
 
-        var length = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(Magic.Length));
-        var at = Magic.Length + 4;
+        // A version this build does not know is not a pack it can speak for. Refusing here rather
+        // than reading it anyway means a later format is a plain "not signed" to an older build,
+        // never a wrong answer about who wrote it.
+        var version = raw[Magic.Length];
+        if (version != Format) return null;
+
+        var length = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(Magic.Length + 1));
+        var at = Magic.Length + 1 + 4;
         if (length < 0 || at + length > raw.Length) return null;
 
         var header = JsonSerializer.Deserialize<Header>(raw.AsSpan(at, length), Json);
         if (header is null) return null;
 
-        return (header, Scramble(raw[(at + length)..]));
+        return (version, header, Scramble(raw[(at + length)..]));
     }
 
     /// Its own inverse: the same keystream over the bytes puts them back.
