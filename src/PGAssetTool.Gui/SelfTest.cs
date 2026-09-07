@@ -508,6 +508,8 @@ internal static class SelfTest
 
             if (TheViewOutlivesAReading(model, texture) is { } viewProblem) return Fail(viewProblem);
 
+            if (TwoModelsKeepTheirOwnViews(model, texture) is { } swapProblem) return Fail(swapProblem);
+
             if (DroppedFilesLand(model, texture) is { } dropProblem) return Fail(dropProblem);
 
             // What was installed before this run touched anything. A test that writes to the game
@@ -1065,6 +1067,54 @@ internal static class SelfTest
                     StringComparison.OrdinalIgnoreCase)))
             return "the deleted workspace is still in the list";
 
+        return null;
+    }
+
+    /// Going back and forth between two models leaves each one at its own angle.
+    ///
+    /// Each pane remembers a view per model, and the two panes hand their view to each other while
+    /// they are linked — which they must not do while one of them still holds the model before
+    /// last. Doing it anyway wrote one model's angle into the other's memory, so walking between
+    /// two meshes carried a view across, back, and across again, and everything came round to
+    /// where it started every few passes. Three passes, because one shows nothing.
+    private static string? TwoModelsKeepTheirOwnViews(MainViewModel model, Core.Pack.WorkspaceFile back)
+    {
+        var meshes = model.Editor.Files.Where(f => f.Name.EndsWith(".glb")).Take(2).ToList();
+        if (meshes.Count < 2) return "the workspace has only one model, and this needs two";
+
+        Camera[] views =
+        [
+            new(Yaw: 1.1f, Pitch: 0.2f, Distance: 1.3f),
+            new(Yaw: -0.6f, Pitch: -0.9f, Distance: 2.2f),
+        ];
+
+        for (var i = 0; i < 2; i++)
+        {
+            model.Editor.SelectedFile = meshes[i];
+            WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+            if (model.Editor.Edited.Mesh is null) return $"'{meshes[i].Name}' would not show";
+
+            model.Editor.Edited.Camera = views[i];
+        }
+
+        for (var pass = 1; pass <= 3; pass++)
+            for (var i = 0; i < 2; i++)
+            {
+                model.Editor.SelectedFile = meshes[i];
+                WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+
+                if (model.Editor.Edited.Camera != views[i])
+                    return $"on pass {pass} '{meshes[i].Name}' came back at "
+                        + $"{model.Editor.Edited.Camera}, not {views[i]}";
+                if (model.Editor.Linked && model.Editor.Original.Camera != views[i])
+                    return $"on pass {pass} the two halves of '{meshes[i].Name}' disagree";
+            }
+
+        Console.WriteLine($"editor   '{meshes[0].Name}' and '{meshes[1].Name}' kept their own views "
+            + "across three passes");
+
+        model.Editor.SelectedFile = back;
+        WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
         return null;
     }
 

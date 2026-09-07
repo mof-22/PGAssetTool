@@ -44,13 +44,13 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 {
                     case nameof(PreviewViewModel.ChosenTexture):
                         if (pane.ChosenTexture is { PathId: -1 } choice) WearFromDisk(pane, choice);
-                        if (Linked) other.ChosenTexture = pane.ChosenTexture;
+                        if (Linked && !_pairing) other.ChosenTexture = pane.ChosenTexture;
                         break;
 
                     // Both panes carry the same value, so the mirroring settles at once: the other
                     // pane's own notification finds nothing to change and stops there.
                     case nameof(PreviewViewModel.Camera):
-                        if (Linked) other.Camera = pane.Camera;
+                        if (Linked && !_pairing) other.Camera = pane.Camera;
                         break;
                 }
             };
@@ -79,11 +79,19 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// models and looking at each on its own terms is the point.
     [ObservableProperty] private bool _linked = true;
 
+    /// Set while both halves are being filled, so neither hands its view to the other mid-way.
+    private bool _pairing;
+
     /// Brings the halves together at the moment linking is asked for, rather than leaving them
     /// apart until something is turned. The one on show leads: it is the one just been looked at.
     partial void OnLinkedChanged(bool value)
     {
-        if (!value) return;
+        if (value) Pair();
+    }
+
+    private void Pair()
+    {
+        if (!Linked) return;
 
         var (from, to) = ShowingEdited ? (Edited, Original) : (Original, Edited);
         to.Camera = from.Camera;
@@ -424,9 +432,26 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                     Game: FromGame(bundles, file),
                     Disk: AssetPreview.FromFile(file.FullPath)));
 
-                ShowIn(Original, loaded.Game, $"{file.Name} in the game", file, "game");
-                ShowIn(Edited, loaded.Disk,
-                    file.Edited ? $"{file.Name} as edited" : $"{file.Name} unchanged", file, "disk");
+                // The link is off while both halves are being filled, and put back afterwards.
+                //
+                // The two are loaded one after the other, so for a moment one holds the file being
+                // opened and the other still holds the one before it. Mirroring across that moment
+                // wrote the new file's angle into the old file's memory — and since each pane
+                // remembers per model, going back and forth between two meshes walked the wrong
+                // view from one to the other and back, coming round again every few passes.
+                _pairing = true;
+                try
+                {
+                    ShowIn(Original, loaded.Game, $"{file.Name} in the game", file, "game");
+                    ShowIn(Edited, loaded.Disk,
+                        file.Edited ? $"{file.Name} as edited" : $"{file.Name} unchanged", file, "disk");
+                }
+                finally
+                {
+                    _pairing = false;
+                }
+
+                Pair();
             }
             finally
             {
