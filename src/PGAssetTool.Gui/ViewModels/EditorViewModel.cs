@@ -245,6 +245,86 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void RevertDetails() => ShowDetails(SelectedWorkspace);
 
+    /// What is about to be deleted, while it is being asked about; null the rest of the time.
+    [ObservableProperty] private Confirmation? _asking;
+
+    [RelayCommand]
+    private void Dismiss() => Asking = null;
+
+    [RelayCommand]
+    private async Task Proceed()
+    {
+        if (Asking is { } asking) await asking.Proceed();
+        Asking = null;
+    }
+
+    /// Throws a workspace away, folder and all.
+    ///
+    /// A workspace is a directory this tool wrote, and until now the only way to be rid of one was
+    /// to leave the tool and find it on disk — which a finished mod and a folder full of test
+    /// extracts both eventually need. It acts on the same selection everything else in this pane
+    /// acts on, and it asks first: what goes is the author's own work as much as the tool's, since
+    /// a mod half-built lives in exactly the directory the extract began as.
+    [RelayCommand]
+    private void Delete()
+    {
+        var chosen = Chosen;
+        if (chosen.Count == 0) { Status = "Nothing selected."; return; }
+
+        var subject = chosen.Count == 1 ? $"'{chosen[0].Name}'" : $"{chosen.Count} workspaces";
+        Asking = new Confirmation(
+            $"Delete {subject}?",
+            (chosen.Count > 1 ? string.Join(", ", chosen.Select(w => w.Name)) + "\n\n" : "")
+            + "The folder goes with everything in it, edits included, and this is not something the "
+            + "tool can undo. Packs already built from it are files of their own and stay where "
+            + "they are, installed or not.",
+            () => { Discard(chosen); return Task.CompletedTask; });
+    }
+
+    private void Discard(IReadOnlyList<WorkspaceItem> chosen)
+    {
+        // The watcher holds a handle on the directory it watches, and Windows will not delete a
+        // directory out from under one. Rescan puts a watcher back on whatever is selected after.
+        Watch(null);
+
+        var (gone, failed) = (0, new List<string>());
+        foreach (var workspace in chosen)
+        {
+            try
+            {
+                // Never anywhere but the folder this pane is showing. The list is built by walking
+                // that folder, so nothing else can get in — but a delete is worth checking twice,
+                // and a workspace whose row is stale would otherwise be a path from anywhere.
+                if (!Inside(Root, workspace.Directory))
+                {
+                    failed.Add($"{workspace.Name} is not in {Root}");
+                    continue;
+                }
+
+                Directory.Delete(workspace.Directory, recursive: true);
+                gone++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                failed.Add($"{workspace.Name}: {ex.Message}");
+            }
+        }
+
+        Rescan(Root);
+        Status = failed.Count == 0
+            ? $"{gone} deleted."
+            : $"{gone} deleted, {failed.Count} not — {string.Join("; ", failed)}";
+    }
+
+    private static bool Inside(string root, string path)
+    {
+        if (root.Length == 0) return false;
+
+        var within = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(path).StartsWith(within, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// Writes a drawing of the model, as the preview is showing it, and makes it the pack's picture.
     ///
     /// The one the export draws is of the vanilla weapon, since nothing has been edited at that

@@ -763,6 +763,14 @@ internal static class SelfTest
             if (model.Manager.Chosen.Count != 2)
                 return Fail($"two mods were selected and {model.Manager.Chosen.Count} are being acted on");
 
+            // With shift held, which is what turns Remove into Remove and delete. Removing on its
+            // own deliberately leaves the kept pack so reinstalling does not depend on the
+            // workspace — right for a person, and wrong for a test that runs on every change:
+            // twenty copies of one had piled up in the mods folder before this existed.
+            model.Manager.ShiftHeld = true;
+            if (model.Manager.RemoveLabel != "Remove and delete")
+                return Fail($"with shift held the button still says '{model.Manager.RemoveLabel}'");
+
             model.Manager.RemoveCommand.Execute(null);
             if (model.Manager.Asking is null) return Fail("removing asked for no confirmation");
             Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
@@ -780,10 +788,10 @@ internal static class SelfTest
             // check that removal really does restore rather than reverse each operation.
             if (AddedAssetIs(model, added!, installed: false) is { } addProblem3) return Fail(addProblem3);
 
-            // Removing a mod deliberately leaves its kept pack, so reinstalling does not depend on
-            // the workspace still existing. That is right for a person and wrong for a test that
-            // runs on every change: twenty copies of one had piled up in the mods folder.
-            foreach (var path in kept) if (File.Exists(path)) File.Delete(path);
+            model.Manager.ShiftHeld = false;
+            if (kept.Where(File.Exists).ToList() is { Count: > 0 } still)
+                return Fail($"shift-removing left {string.Join(", ", still.Select(Path.GetFileName))} behind");
+            Console.WriteLine($"manager  and the {kept.Count} kept pack file(s) went with them");
 
             var left = model.Manager.Mods.Select(m => m.Mod.Id).Where(id => !wasInstalled.Contains(id)).ToList();
             Console.WriteLine($"manager  installed before this run: {wasInstalled.Count}, left behind by it: {left.Count}");
@@ -800,6 +808,11 @@ internal static class SelfTest
             model.Editor.Refresh();
             if (model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath).Edited)
                 return Fail("putting the file back should clear the mark");
+
+            // The workspace this run made a second time round is no longer wanted, which is the
+            // case the button exists for. Deleted through it rather than around it, so the path a
+            // person takes is the one under test — and it leaves this run's scratch behind it.
+            if (WorkspacesCanBeDeleted(model, secondary) is { } deleteProblem) return Fail(deleteProblem);
 
             var nowPreferences = File.Exists(theirSettings) ? File.ReadAllText(theirSettings) : null;
             Console.WriteLine("status   the author's settings file: "
@@ -1023,6 +1036,35 @@ internal static class SelfTest
         Console.WriteLine("editor   the view survives a reading, and the halves move together");
         model.Editor.SelectedFile = back;
         WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+        return null;
+    }
+
+    /// A workspace can be thrown away from the editor, folder and all, and it asks first.
+    private static string? WorkspacesCanBeDeleted(MainViewModel model, string directory)
+    {
+        model.Editor.Rescan(model.WorkspaceRoot);
+        model.Editor.Selection.Clear();
+
+        model.Editor.SelectedWorkspace = model.Editor.Workspaces.FirstOrDefault(w =>
+            string.Equals(Path.GetFullPath(w.Directory), Path.GetFullPath(directory),
+                StringComparison.OrdinalIgnoreCase));
+        if (model.Editor.SelectedWorkspace is null)
+            return $"the editor no longer lists {Path.GetFileName(directory)} to delete";
+
+        model.Editor.DeleteCommand.Execute(null);
+        if (model.Editor.Asking is null) return "deleting a workspace asked for no confirmation";
+        Console.WriteLine($"editor   asked: {model.Editor.Asking.Title}");
+
+        model.Editor.ProceedCommand.Execute(null);
+        WaitWhile(() => model.Editor.Asking is not null, 30_000);
+        Console.WriteLine($"editor   {model.Editor.Status}");
+
+        if (Directory.Exists(directory)) return $"{Path.GetFileName(directory)} is still on disk";
+        if (model.Editor.Workspaces.Any(w =>
+                string.Equals(Path.GetFullPath(w.Directory), Path.GetFullPath(directory),
+                    StringComparison.OrdinalIgnoreCase)))
+            return "the deleted workspace is still in the list";
+
         return null;
     }
 

@@ -236,11 +236,20 @@
       </TabItem>
 
       <TabItem Header="Editor">
-        <Grid ColumnDefinitions="260,4,320,4,*" Margin="10"
-              DataContext="{Binding Editor}" x:DataType="vm:EditorViewModel">
+        <Panel DataContext="{Binding Editor}" x:DataType="vm:EditorViewModel">
+        <Grid ColumnDefinitions="260,4,320,4,*" Margin="10">
 
           <DockPanel Grid.Column="0">
-            <TextBlock DockPanel.Dock="Top" Text="Extracted" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+              <!-- Beside the list it acts on, and last in the row so it is not what the pointer
+                   lands on first. What it deletes is a folder of somebody's work. -->
+              <!-- Held off the splitter: flush against it, with the same background, the button
+                   read as part of the bar rather than as something to press. -->
+              <Button DockPanel.Dock="Right" Content="Delete" Command="{Binding DeleteCommand}"
+                      IsVisible="{Binding CanPack}" Padding="8,2" Margin="0,0,8,0"
+                      ToolTip.Tip="Deletes the selected workspace folders and everything in them." />
+              <TextBlock Text="Extracted" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </DockPanel>
             <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="dim"
                        TextWrapping="Wrap" Margin="0,6,0,0" />
 
@@ -367,6 +376,26 @@
             <ContentControl Content="{Binding Shown}" IsVisible="{Binding !SideBySide}" />
           </DockPanel>
         </Grid>
+
+        <!-- Deleting a workspace says what it is about to do first, the way anything that rewrites
+             the game does. Same shape as the manager's, and the DataContext stays on the editor
+             throughout for the same reason: the buttons are its commands. -->
+        <Border IsVisible="{Binding Asking, Converter={x:Static ObjectConverters.IsNotNull}}"
+                Background="#cc09090b">
+          <Border Background="#18181b" CornerRadius="6" Padding="20" MaxWidth="460"
+                  HorizontalAlignment="Center" VerticalAlignment="Center">
+            <StackPanel Spacing="12">
+              <TextBlock Text="{Binding Asking.Title}" FontSize="16" FontWeight="SemiBold"
+                         TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Asking.Body}" Classes="dim" TextWrapping="Wrap" />
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button Content="Cancel" Command="{Binding DismissCommand}" />
+                <Button Content="Go ahead" Command="{Binding ProceedCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </Border>
+        </Panel>
       </TabItem>
 
       <TabItem Header="Manager">
@@ -377,7 +406,9 @@
               <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
                 <Button Content="Turn on" Command="{Binding EnableCommand}" />
                 <Button Content="Turn off" Command="{Binding DisableCommand}" />
-                <Button Content="Remove" Command="{Binding RemoveCommand}" />
+                <!-- Says which of the two it will do: with shift held the pack file goes as well. -->
+                <Button Content="{Binding RemoveLabel}" Command="{Binding RemoveCommand}"
+                        ToolTip.Tip="Takes the mod out of the game. Hold shift to delete its pack as well." />
                 <Button Content="Reapply all" Command="{Binding ReapplyCommand}" />
                 <Button Content="Check every bundle" Command="{Binding CheckEverythingCommand}" />
               </StackPanel>

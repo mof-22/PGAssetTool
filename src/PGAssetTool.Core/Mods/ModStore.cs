@@ -155,6 +155,30 @@ public sealed class ModStore
         return kept;
     }
 
+    /// Throws away the copy taken of a mod's pack, once nothing is installed from it.
+    ///
+    /// Only ever a file of this store's own: a mod installed from a pack that was already in the
+    /// mods directory names that file, but one installed from a workspace names the copy, and the
+    /// author's original is theirs. Anything outside the directory is left alone and reported as
+    /// not deleted rather than quietly passed over, because "removed the file" and "the file was
+    /// somewhere I do not touch" are different answers to the same request.
+    ///
+    /// Answers whether a file went. Nothing to delete is not a failure — a mod whose pack has
+    /// already been deleted by hand is exactly the case this is being used to reach.
+    public bool DiscardKeptPack(InstalledMod mod)
+    {
+        if (mod.PackPath.Length == 0) return false;
+
+        var full = Path.GetFullPath(mod.PackPath);
+        if (!full.StartsWith(Path.GetFullPath(ModsDirectory) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (!File.Exists(full)) return false;
+        File.Delete(full);
+        return true;
+    }
+
     /// The name a pack built at `sourcePath` is filed under.
     ///
     /// The digest goes after the name rather than in front of it: the folder is browsed by a person

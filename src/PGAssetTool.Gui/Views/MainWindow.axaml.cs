@@ -40,6 +40,14 @@ public partial class MainWindow : Window
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
 
+        // Shift changes what the manager's Remove button says it will do, so the window has to know
+        // while it is held rather than at the moment of the click. Tunnelled and never handled:
+        // this only watches. Released on losing focus as well, because a window that is not in
+        // front does not see the key come back up, and the button would have stayed changed.
+        AddHandler(KeyDownEvent, (_, e) => Shift(e.KeyModifiers), RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, (_, e) => Shift(e.KeyModifiers), RoutingStrategies.Tunnel);
+        Deactivated += (_, _) => Shift(KeyModifiers.None);
+
         // Something inside the window has to hold the keyboard for a key press to have anywhere to
         // travel from. Freshly opened, nothing did, and every shortcut stayed dead until a click
         // landed somewhere. The weapon list is the right thing to hand it to: the arrow keys then
@@ -97,6 +105,12 @@ public partial class MainWindow : Window
         model.Workspace = MainViewModel.ManagerTab;
         await model.InstallPacks(packs);
         model.Manager.Refresh();
+    }
+
+    private void Shift(KeyModifiers modifiers)
+    {
+        if (DataContext is MainViewModel model)
+            model.Manager.ShiftHeld = modifiers.HasFlag(KeyModifiers.Shift);
     }
 
     private static void OnTapped(object? sender, TappedEventArgs e)

@@ -206,8 +206,54 @@ public sealed partial class ManagerViewModel : ObservableObject
     [RelayCommand]
     private void Disable() => Ask("Turn off", ids => Applier().SetEnabled(ids, false));
 
+    /// Whether the shift key is down, which is what turns removing into deleting.
+    ///
+    /// Kept here rather than read at the moment of the click, because the button says which of the
+    /// two it is about to do. A hidden second meaning on a button is a trap; one that announces
+    /// itself while the key is held is a shortcut.
+    [ObservableProperty] private bool _shiftHeld;
+
+    partial void OnShiftHeldChanged(bool value) => OnPropertyChanged(nameof(RemoveLabel));
+
+    public string RemoveLabel => ShiftHeld ? "Remove and delete" : "Remove";
+
+    /// Takes a mod out of the game, and with shift held throws its pack away as well.
+    ///
+    /// Remove on its own puts the bundles back and forgets the mod, and the copy of the pack stays
+    /// in the mods directory — which is what makes reinstalling it a click rather than a rebuild,
+    /// and what made the button's name a half-truth. The other half is here, behind a modifier and
+    /// behind its own confirmation, because a deleted pack that was never anywhere else is gone.
     [RelayCommand]
-    private void Remove() => Ask("Remove", ids => Applier().Remove(ids));
+    private void Remove()
+    {
+        if (!ShiftHeld) { Ask("Remove", ids => Applier().Remove(ids)); return; }
+
+        // Read before the confirmation: the rows are rebuilt by the refresh that follows the work,
+        // and the ones this was asked about would be gone by the time it mattered.
+        var mods = Chosen;
+
+        Ask("Remove and delete", ids => Applier().Remove(ids),
+            note: "The pack files are deleted as well, and installing these again would mean "
+                + "building them anew. Only this tool's own copies go; a pack of your own, "
+                + "anywhere else, is left where it is.",
+            alwaysConfirm: true,
+            afterwards: () =>
+            {
+                var store = new ModStore(_game()!);
+                var (gone, kept) = (0, 0);
+                foreach (var mod in mods)
+                {
+                    try { if (store.DiscardKeptPack(mod)) gone++; else kept++; }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                    {
+                        kept++;
+                    }
+                }
+
+                return kept == 0 ? $", {gone} pack file(s) deleted"
+                    : $", {gone} pack file(s) deleted, {kept} left in place";
+            });
+    }
 
     [RelayCommand]
     private void Reapply() => Ask("Reapply everything", _ => Applier().Reconcile(), needsSelection: false);
@@ -229,7 +275,21 @@ public sealed partial class ManagerViewModel : ObservableObject
 
     /// Puts the request behind a confirmation, unless the setting says otherwise — and always
     /// behind the running-game check, which the setting does not cover.
-    private void Ask(string what, Func<IReadOnlyList<string>, ReconcileResult> work, bool needsSelection = true)
+    /// <param name="note">
+    /// Said in the confirmation on top of what every one of these says, for a request that does
+    /// something the ordinary explanation does not cover.
+    /// </param>
+    /// <param name="alwaysConfirm">
+    /// Asks even when the setting says not to. The setting is about the rebuild — which is undone
+    /// by doing the opposite — and not about anything that cannot be taken back.
+    /// </param>
+    /// <param name="afterwards">
+    /// Run once the work is done, on the thread that owns the view models; what it answers is added
+    /// to what the status line says happened.
+    /// </param>
+    private void Ask(string what, Func<IReadOnlyList<string>, ReconcileResult> work,
+        bool needsSelection = true, string? note = null, bool alwaysConfirm = false,
+        Func<string>? afterwards = null)
     {
         if (_game() is not { } game) { Status = "The game is not open."; return; }
 
@@ -244,9 +304,9 @@ public sealed partial class ManagerViewModel : ObservableObject
         };
 
         var running = GameProcess.IsRunning(game);
-        if (!running && !ConfirmChanges)
+        if (!running && !ConfirmChanges && !alwaysConfirm)
         {
-            _ = Run(what, mods, work);
+            _ = Run(what, mods, work, afterwards);
             return;
         }
 
@@ -257,12 +317,14 @@ public sealed partial class ManagerViewModel : ObservableObject
                   + "half-written file behind. Close it first."
                 : (mods.Count > 1 ? string.Join(", ", mods.Select(m => m.Name)) + "\n\n" : "")
                   + "Every bundle these mods touch is restored from its backup and the enabled ones "
-                  + "are applied again, so the result is the same however this was reached.",
-            () => running ? Task.CompletedTask : Run(what, mods, work));
+                  + "are applied again, so the result is the same however this was reached."
+                  + (note is null ? "" : "\n\n" + note),
+            () => running ? Task.CompletedTask : Run(what, mods, work, afterwards));
     }
 
     private async Task Run(
-        string what, IReadOnlyList<InstalledMod> mods, Func<IReadOnlyList<string>, ReconcileResult> work)
+        string what, IReadOnlyList<InstalledMod> mods, Func<IReadOnlyList<string>, ReconcileResult> work,
+        Func<string>? afterwards = null)
     {
         Asking = null;
         Busy = true;
@@ -272,10 +334,16 @@ public sealed partial class ManagerViewModel : ObservableObject
         async Task Apply()
         {
             var result = await Task.Run(() => work(ids));
+
+            // After the game has been put back, never instead of it: a pack thrown away while the
+            // mod it installed was still in place would leave something that cannot be undone.
+            var also = afterwards?.Invoke() ?? "";
+
             Status = $"{what}: {result.Applied.Count} applied, {result.Restored.Count} restored"
                 + (result.Failed.Count > 0
                     ? $", {result.Failed.Count} failed — {string.Join("; ", result.Failed)}"
-                    : "");
+                    : "")
+                + also;
         }
 
         try
