@@ -415,46 +415,62 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 + $"{built.Sum(b => b.Bytes):N0} bytes" + trouble;
 
             if (!install || built.Count == 0) return;
-            if (_bundles is null) { Status = "The game is not open."; return; }
-            var game = _bundles.Game;
-
-            // The manager has always refused to write while the game is running; this path never
-            // did, and it is the one an author uses over and over. The packs are built and on disk,
-            // so nothing is lost by stopping here — only the writing waits.
-            if (GameProcess.IsRunning(game))
-            {
-                Status = $"{built.Count} pack(s) built. The game is running, and rewriting its "
-                    + "bundles now can leave a half-written file behind — close it, then apply.";
-                return;
-            }
-
-            CloseReader();
-
-            ReconcileResult result;
-            try
-            {
-                var store = new ModStore(game);
-                var version = "unknown";
-                using (var reading = new BundleSet(game))
-                    if (reading.Context.HasClassDatabase) version = GameVersion.Read(reading.Context, game);
-
-                var paths = built.Select(b => b.Path).ToList();
-                result = await Task.Run(() => new ModApplier(game, store).Install(paths, version));
-            }
-            finally
-            {
-                await LoadAsync();
-            }
-
-            // The warning is the reason applying from here is worth having: it is the moment an
-            // author can still decide that reaching another weapon was not what they meant.
-            var shared = result.Shared.Count > 0
-                ? "  " + string.Join("  ", result.Shared.Select(s => s.ToString()))
-                : "";
-
-            Status = $"{result.Applied.Count} applied, {result.Failed.Count} failed."
-                + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + shared + trouble;
+            await ApplyPacks(built.Select(b => b.Path).ToList(), trouble, $"{built.Count} pack(s) built. ");
         });
+    }
+
+    /// Installs packs that came from somewhere other than a workspace — dropped on the window,
+    /// most likely, which is how somebody else's mod gets in.
+    ///
+    /// The same reconcile the rest of the tool installs through, so a pack from outside is subject
+    /// to the same backups, the same ledger and the same undo as one built here.
+    public Task InstallPacks(IReadOnlyList<string> paths)
+        => paths.Count == 0
+            ? Task.CompletedTask
+            : RunExclusively("installing the packs", () => ApplyPacks(paths, "", ""));
+
+    /// <param name="trouble">What went wrong earlier in the same gesture, to be repeated at the end.</param>
+    /// <param name="sofar">What has already happened, for the message that says why nothing more will.</param>
+    private async Task ApplyPacks(IReadOnlyList<string> paths, string trouble, string sofar)
+    {
+        if (_bundles is null) { Status = "The game is not open."; return; }
+        var game = _bundles.Game;
+
+        // The manager has always refused to write while the game is running; this path never
+        // did, and it is the one an author uses over and over. The packs are built and on disk,
+        // so nothing is lost by stopping here — only the writing waits.
+        if (GameProcess.IsRunning(game))
+        {
+            Status = sofar + "The game is running, and rewriting its bundles now can leave a "
+                + "half-written file behind — close it, then apply.";
+            return;
+        }
+
+        CloseReader();
+
+        ReconcileResult result;
+        try
+        {
+            var store = new ModStore(game);
+            var version = "unknown";
+            using (var reading = new BundleSet(game))
+                if (reading.Context.HasClassDatabase) version = GameVersion.Read(reading.Context, game);
+
+            result = await Task.Run(() => new ModApplier(game, store).Install(paths, version));
+        }
+        finally
+        {
+            await LoadAsync();
+        }
+
+        // The warning is the reason applying from here is worth having: it is the moment an
+        // author can still decide that reaching another weapon was not what they meant.
+        var shared = result.Shared.Count > 0
+            ? "  " + string.Join("  ", result.Shared.Select(s => s.ToString()))
+            : "";
+
+        Status = $"{result.Applied.Count} applied, {result.Failed.Count} failed."
+            + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + shared + trouble;
     }
 
     /// Where extraction writes. Beside the tool unless the settings say otherwise, because a

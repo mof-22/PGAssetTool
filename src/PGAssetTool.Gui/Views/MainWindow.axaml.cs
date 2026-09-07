@@ -2,7 +2,9 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
+using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Preview;
 using PGAssetTool.Gui.ViewModels;
 
@@ -30,6 +32,14 @@ public partial class MainWindow : Window
         // otherwise scroll on the same gesture and the tiles would resize under a moving view.
         AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
 
+        // Files dropped anywhere on the window. Where they land is decided by what they are and
+        // which workspace is open rather than by which pixel was under the pointer: the panes are
+        // large, the answer is the same everywhere in them, and a drop that lands two pixels
+        // outside a target and does nothing is the worst version of this.
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        AddHandler(DragDrop.DropEvent, OnDrop);
+
         // Something inside the window has to hold the keyboard for a key press to have anywhere to
         // travel from. Freshly opened, nothing did, and every shortcut stayed dead until a click
         // landed somewhere. The weapon list is the right thing to hand it to: the arrow keys then
@@ -47,6 +57,46 @@ public partial class MainWindow : Window
             // A file watcher fires on its own thread; everything it leads to touches the UI.
             model.Editor.Settled += () => Avalonia.Threading.Dispatcher.UIThread.Post(model.Editor.Refresh);
         };
+    }
+
+    private static void OnDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    /// A pack is installed; anything else goes to the workspace the editor has open.
+    ///
+    /// Decided by what the file is rather than by which pane it landed on. A .pgmod is a mod
+    /// wherever it is dropped, and there is only one thing to do with one; a texture is an edit to
+    /// whatever is being worked on, and there is only one workspace that could mean.
+    private async void OnDrop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not MainViewModel model) return;
+        if (e.DataTransfer.TryGetFiles()?.Select(f => f.TryGetLocalPath()).OfType<string>().ToList()
+            is not { Count: > 0 } paths)
+            return;
+
+        e.Handled = true;
+
+        var packs = paths.Where(p => p.EndsWith(PackBuilder.Extension, StringComparison.OrdinalIgnoreCase)).ToList();
+        var rest = paths.Except(packs).ToList();
+
+        if (rest.Count > 0)
+        {
+            model.Workspace = MainViewModel.EditorTab;
+            model.Editor.Import(rest);
+        }
+
+        if (packs.Count == 0) return;
+
+        // Shown before it starts: installing is a whole-game rebuild, and watching the manager sit
+        // there is better than watching a tab that says nothing about what is happening.
+        model.Workspace = MainViewModel.ManagerTab;
+        await model.InstallPacks(packs);
+        model.Manager.Refresh();
     }
 
     private static void OnTapped(object? sender, TappedEventArgs e)

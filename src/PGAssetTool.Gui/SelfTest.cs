@@ -508,6 +508,8 @@ internal static class SelfTest
 
             if (TheViewOutlivesAReading(model, texture) is { } viewProblem) return Fail(viewProblem);
 
+            if (DroppedFilesLand(model, texture) is { } dropProblem) return Fail(dropProblem);
+
             // What was installed before this run touched anything. A test that writes to the game
             // has to leave it as it found it, and the only way to know that is to have looked
             // first — an earlier version of this left a mod behind every time the workspace it
@@ -574,6 +576,21 @@ internal static class SelfTest
                 return Fail($"this run installed {string.Join(", ", strays)} and has no plan to remove them");
 
             Console.WriteLine($"batch    installed: {string.Join(", ", installed.Select(m => m.Id))}");
+
+            // The same install a pack dropped on the window takes: a file, straight to the applier,
+            // with no workspace behind it. That is how somebody else's mod gets in, and it is the
+            // one install path with nothing in front of it to catch a mistake.
+            if (installed.FirstOrDefault(m => m.Id == PackIdentity)?.PackPath is not { } dropped)
+                return Fail("the kept pack has no path to install from");
+
+            _ = model.InstallPacks([dropped]);
+            WaitWhile(() => model.Busy, 300_000);
+            Console.WriteLine($"drop     installing '{Path.GetFileName(dropped)}' on its own: {model.Status}");
+
+            if (!model.Status.Contains("applied") || model.Status.Contains("1 failed"))
+                return Fail($"installing a pack by itself did not apply it: {model.Status}");
+            if (new PGAssetTool.Core.Mods.ModStore(model.Game!).Read().All(m => m.Id != PackIdentity))
+                return Fail("a pack installed on its own is not in the ledger");
 
             // Read out of the bundle the game will load, not out of what the applier said it did.
             if (AddedAssetIs(model, added!, installed: true) is { } addProblem2) return Fail(addProblem2);
@@ -1007,6 +1024,58 @@ internal static class SelfTest
         model.Editor.SelectedFile = back;
         WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
         return null;
+    }
+
+    /// Files dropped on the window reach the file in the workspace they were meant for.
+    ///
+    /// Three answers to "which one did you mean": the name says so, the selection says so, or
+    /// nothing does — and the third has to be said out loud rather than guessed at, because every
+    /// one of these overwrites a file somebody is working on.
+    private static string? DroppedFilesLand(MainViewModel model, Core.Pack.WorkspaceFile texture)
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "pgassettool-selftest-drop");
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            // Named the way the workspace names it, which is how a file comes back from an editor
+            // that was pointed straight at it.
+            var painted = File.ReadAllBytes(texture.FullPath).Concat(new byte[32]).ToArray();
+            var byName = Path.Combine(scratch, texture.Name);
+            File.WriteAllBytes(byName, painted);
+
+            model.Editor.Import([byName]);
+            if (!File.ReadAllBytes(texture.FullPath).SequenceEqual(painted))
+                return $"a file dropped under the workspace's own name did not land: {model.Editor.Status}";
+
+            // Named whatever the editor felt like, with the file it is meant for selected.
+            var again = painted.Concat(new byte[8]).ToArray();
+            var byChoice = Path.Combine(scratch, "whatever-my-editor-called-it.png");
+            File.WriteAllBytes(byChoice, again);
+
+            model.Editor.SelectedFile = model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath);
+            WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+
+            model.Editor.Import([byChoice]);
+            if (!File.ReadAllBytes(texture.FullPath).SequenceEqual(again))
+                return $"a file dropped under another name did not reach the selected one: {model.Editor.Status}";
+
+            // A kind of thing this workspace has nothing of, so there is no honest answer.
+            var stranger = Path.Combine(scratch, "nothing-here-is-called-this.glb");
+            File.WriteAllBytes(stranger, painted);
+
+            model.Editor.Import([stranger]);
+            if (!model.Editor.Status.Contains("not taken"))
+                return $"a file with nothing to replace was not refused: {model.Editor.Status}";
+
+            Console.WriteLine($"drop     '{texture.Name}' taken by name and by selection; "
+                + $"a .glb with nothing to replace refused ({model.Editor.Status.Trim()})");
+            return null;
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
     }
 
     /// Selecting resolves off the UI thread, and Detail holds the previous weapon while it does —

@@ -447,6 +447,104 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// Takes files dropped on the editor into the workspace that is selected.
+    ///
+    /// An author's other tools write wherever they write, and the step between them and here was
+    /// finding the workspace on disk and copying the file over by hand. What a file is meant to
+    /// replace is nearly always written on it — an edited `ultimatum.png` is the workspace's
+    /// `ultimatum.png` — so the name decides, and the file in front of them is the fallback for
+    /// when an editor has saved under a name of its own.
+    public void Import(IReadOnlyList<string> paths)
+    {
+        if (SelectedWorkspace is not { } workspace)
+        {
+            Status = "Choose a workspace first, and these will go into it.";
+            return;
+        }
+
+        var (placed, refused) = (new List<string>(), new List<string>());
+        foreach (var path in paths)
+        {
+            try
+            {
+                if (!File.Exists(path)) { refused.Add($"{Path.GetFileName(path)}: not a file"); continue; }
+
+                if (Destination(path) is not { } destination)
+                {
+                    refused.Add($"{Path.GetFileName(path)}: nothing here it could replace");
+                    continue;
+                }
+
+                placed.Add(Place(workspace.Directory, destination, path));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                refused.Add($"{Path.GetFileName(path)}: {ex.Message}");
+            }
+        }
+
+        Refresh();
+        Status = (placed.Count > 0 ? $"Put in place: {string.Join(", ", placed)}." : "")
+            + (refused.Count > 0 ? $" {refused.Count} not taken — {string.Join("; ", refused)}" : "");
+    }
+
+    /// The file in the workspace a dropped one is meant to become.
+    private WorkspaceFile? Destination(string path)
+    {
+        var format = Path.GetExtension(path).TrimStart('.');
+        if (Replaceable.OperationForFormat(format) is not { } operation) return null;
+
+        var dropped = Path.GetFileName(path);
+        if (Files.FirstOrDefault(f => string.Equals(f.Name, dropped, StringComparison.OrdinalIgnoreCase))
+            is { } exact)
+            return exact;
+
+        // The same name in another format the same operation takes — a WAV where an Ogg was
+        // written out. Only when one file answers to it: two would be a guess, and a guess here
+        // overwrites something.
+        var stem = Path.GetFileNameWithoutExtension(path);
+        var alike = Files
+            .Where(f => f.Operation == operation
+                && string.Equals(Path.GetFileNameWithoutExtension(f.Name), stem, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (alike.Count > 0) return alike.Count == 1 ? alike[0] : null;
+
+        // Nothing by that name: the one being looked at, if it is the same kind of thing. An
+        // image editor saving as 'export.png' is the case, and the file on show is the answer to
+        // "which one did you mean" that the person has already given by selecting it.
+        return SelectedFile is { } selected && selected.Operation == operation ? selected : null;
+    }
+
+    /// Writes the dropped file in, and answers what it landed as.
+    private static string Place(string directory, WorkspaceFile destination, string path)
+    {
+        var dropped = Path.GetExtension(path);
+        if (string.Equals(dropped, Path.GetExtension(destination.RelativePath), StringComparison.OrdinalIgnoreCase))
+        {
+            File.Copy(path, destination.FullPath, overwrite: true);
+            return destination.Name;
+        }
+
+        // Another format of the same kind. It goes in under its own extension and the manifest is
+        // pointed at it, rather than leaving Ogg bytes in a file called .wav: the importer reads
+        // the bytes and would not care, but everything a person reads afterwards would be lying.
+        var renamed = Path.ChangeExtension(destination.RelativePath, dropped);
+        File.Copy(path, Path.Combine(directory, renamed.Replace('/', Path.DirectorySeparatorChar)), overwrite: true);
+
+        var manifest = Workspace.Read(directory);
+        Workspace.Save(directory, manifest with
+        {
+            Operations = manifest.Operations
+                .Select(o => string.Equals(o.Source, destination.RelativePath, StringComparison.OrdinalIgnoreCase)
+                    ? o with { Source = renamed }
+                    : o)
+                .ToList(),
+        });
+
+        if (File.Exists(destination.FullPath)) File.Delete(destination.FullPath);
+        return renamed;
+    }
+
     /// Watches the workspace so an edit made elsewhere shows up without being asked for.
     ///
     /// A save is rarely one event — editors write, rename and touch — so the reaction is delayed
