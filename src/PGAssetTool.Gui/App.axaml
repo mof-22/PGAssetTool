@@ -4,5 +4,12 @@
              RequestedThemeVariant="Dark">
   <Application.Styles>
     <FluentTheme />
+
+    <!-- Inter carries no Japanese, so every weapon name in it fell through to whatever the system
+         picked — a different face per run of characters, and none of them chosen. Named here as a
+         chain: Inter for the Latin it does have, then Yu Gothic for everything it does not. -->
+    <Style Selector="Window">
+      <Setter Property="FontFamily" Value="Inter, Yu Gothic UI, Yu Gothic, Meiryo, sans-serif" />
+    </Style>
   </Application.Styles>
 </Application>

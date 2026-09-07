@@ -116,9 +116,22 @@ public partial class MainWindow : Window
     private static void OnTapped(object? sender, TappedEventArgs e)
     {
         if (e.Source is not Control control) return;
+        if (control.FindAncestorOfType<TreeViewItem>() is not { } row) return;
 
-        var row = control.FindAncestorOfType<TreeViewItem>();
-        if (row?.DataContext is TreeNode { HasChildren: true } node) node.IsExpanded = !node.IsExpanded;
+        switch (row.DataContext)
+        {
+            // The asset tree keeps its own expansion, because rebuilding it must not fold up what
+            // somebody had opened.
+            case TreeNode { HasChildren: true } node:
+                node.IsExpanded = !node.IsExpanded;
+                break;
+
+            // The manager's shelf is rebuilt from scratch on every refresh, so there is nothing on
+            // it worth remembering an expansion in; the row itself lasts as long as the answer does.
+            case ModFolder { Children.Count: > 0 }:
+                row.IsExpanded = !row.IsExpanded;
+                break;
+        }
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -134,11 +147,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.KeyModifiers != KeyModifiers.None) return;
-
-        // Whatever a bare key means to something being typed into, it means that. Both of the ones
-        // below are a letter and a space, which is exactly what a search box is for.
+        // Whatever a key means to something being typed into, it means that. Ctrl+A is the whole
+        // reason this is a handler rather than a key binding: as a binding the window took it
+        // before the search box could, and select-all stopped working while alpha toggled instead.
         if (FocusManager?.GetFocusedElement() is TextBox) return;
+
+        if (e is { Key: Key.A, KeyModifiers: KeyModifiers.Control })
+        {
+            model.ToggleAlphaCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.KeyModifiers != KeyModifiers.None) return;
 
         switch (e.Key)
         {
@@ -156,6 +177,19 @@ public partial class MainWindow : Window
                     view.Recentre();
                     e.Handled = true;
                 }
+                break;
+
+            // What Delete means depends on what is in front of you, and on both tabs it is the
+            // thing the tab's own button says: the workspace, or the mod. Both ask first, so the
+            // key reaches a question rather than a deletion.
+            case Key.Delete when model.Workspace == MainViewModel.EditorTab:
+                model.Editor.DeleteCommand.Execute(null);
+                e.Handled = true;
+                break;
+
+            case Key.Delete when model.Workspace == MainViewModel.ManagerTab:
+                model.Manager.RemoveCommand.Execute(null);
+                e.Handled = true;
                 break;
         }
     }
@@ -176,7 +210,24 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void FocusSearch() => this.FindControl<TextBox>("Search")?.Focus();
+    /// Hands the keyboard to whichever search the tab in front has.
+    ///
+    /// Two tabs have one and they are different searches — the weapons, and what is installed. The
+    /// editor has none, and moving the keyboard somewhere that is not a search box would be worse
+    /// than the shortcut doing nothing.
+    private void FocusSearch()
+    {
+        if (DataContext is not MainViewModel model) return;
+
+        var box = model.Workspace switch
+        {
+            MainViewModel.BrowseTab => this.FindControl<TextBox>("Search"),
+            MainViewModel.ManagerTab => this.FindControl<TextBox>("ShelfSearch"),
+            _ => null,
+        };
+
+        box?.Focus();
+    }
 
     /// Opens the folder extraction wrote to, or the root if nothing has been written yet.
     private void OnOpenOutput(object? sender, RoutedEventArgs e)

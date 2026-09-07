@@ -318,13 +318,30 @@ internal static class SelfTest
 
             foreach (var gesture in new[]
                      { "Ctrl+E", "Ctrl+Shift+E", "Ctrl+F", "Ctrl+R", "F5", "Ctrl+Shift+R",
-                       "Ctrl+Shift+A", "Ctrl+D1", "Ctrl+D2", "Ctrl+D3" })
+                       "Ctrl+D1", "Ctrl+D2", "Ctrl+D3" })
             {
                 var binding = registered.FirstOrDefault(b => b.Gesture?.ToString() == gesture);
                 if (binding is null) return Fail($"{gesture} is shown in the menu but not bound to anything");
                 if (binding.Command is null) return Fail($"{gesture} is bound to nothing that can run");
             }
+
+            // Alpha is deliberately not one of them. A key binding on the window is taken before
+            // the focused control sees it, so Ctrl+A as a binding took select-all away from every
+            // text box; it is handled with a look at what has the keyboard instead.
+            if (registered.Any(b => b.Gesture?.ToString() is "Ctrl+A"))
+                return Fail("Ctrl+A is a window binding again, which takes it from the search box");
+
             untouched.Close();
+
+            // The toggle answers for whichever pane is in front. Bound to the browse one wherever
+            // you were, it did nothing visible in the editor — which is where a texture is worked
+            // on, and so where the question comes up.
+            model.Workspace = MainViewModel.EditorTab;
+            if (model.Showing is not { } inEditor)
+                return Fail("the editor tab is in front and nothing is showing");
+            model.Workspace = MainViewModel.BrowseTab;
+            if (ReferenceEquals(inEditor, model.Showing))
+                return Fail("the browse and editor tabs are showing the same pane");
 
             // And the toggle has to survive being driven, since a two-way binding on a checkable
             // menu item was what turned the filter off as soon as the menu was opened.

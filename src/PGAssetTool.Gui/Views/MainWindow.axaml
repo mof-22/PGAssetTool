@@ -104,7 +104,6 @@
     <KeyBinding Gesture="Ctrl+R" Command="{Binding ReloadCommand}" />
     <KeyBinding Gesture="F5" Command="{Binding RescanWorkspacesCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding ToggleReplaceableOnlyCommand}" />
-    <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding ToggleAlphaCommand}" />
     <KeyBinding Gesture="Ctrl+D1" Command="{Binding ShowBrowseCommand}" />
     <KeyBinding Gesture="Ctrl+D2" Command="{Binding ShowEditorCommand}" />
     <KeyBinding Gesture="Ctrl+D3" Command="{Binding ShowManagerCommand}" />
@@ -140,11 +139,13 @@
                   IsChecked="{Binding ReplaceableOnly, Mode=OneWay}"
                   Command="{Binding ToggleReplaceableOnlyCommand}"
                   InputGesture="Ctrl+Shift+R" />
+        <!-- Whichever pane is in front, not the browse one: the editor shows pictures too, and the
+             question the toggle answers is about the picture being looked at. -->
         <MenuItem Header="Show _alpha" ToggleType="CheckBox"
-                  IsChecked="{Binding Preview.ShowAlpha, Mode=OneWay}"
-                  IsEnabled="{Binding Preview.CanToggleAlpha}"
+                  IsChecked="{Binding Showing.ShowAlpha, Mode=OneWay}"
+                  IsEnabled="{Binding Showing.CanToggleAlpha}"
                   Command="{Binding ToggleAlphaCommand}"
-                  InputGesture="Ctrl+Shift+A" />
+                  InputGesture="Ctrl+A" />
         <Separator />
         <MenuItem Header="_Browse" Command="{Binding ShowBrowseCommand}"
                   InputGesture="Ctrl+D1" />
@@ -411,8 +412,8 @@
               <!-- The same search the weapon list does, so a weapon is found by any of its names
                    in any language — and by what a mod says about itself, for one that was not made
                    from a weapon at all. -->
-              <TextBox DockPanel.Dock="Top" Text="{Binding FolderSearch}" Margin="0,0,0,6"
-                       Watermark="Search installed" />
+              <TextBox Name="ShelfSearch" DockPanel.Dock="Top" Text="{Binding FolderSearch}"
+                       Margin="0,0,0,6" Watermark="Search installed" />
               <TreeView ItemsSource="{Binding Folders}" SelectedItem="{Binding Folder}">
                 <TreeView.ItemTemplate>
                   <TreeDataTemplate x:DataType="vm:ModFolder" ItemsSource="{Binding Children}">

@@ -538,7 +538,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void ToggleReplaceableOnly() => ReplaceableOnly = !ReplaceableOnly;
 
     [RelayCommand]
-    private void ToggleAlpha() => Preview.ShowAlpha = !Preview.ShowAlpha;
+    private void ToggleAlpha()
+    {
+        // The pane in front. It used to be the browse one wherever you were, so the shortcut did
+        // nothing visible while the editor was open — and the editor is where a texture is being
+        // worked on, which is when the question comes up.
+        if (Showing is { CanToggleAlpha: true } preview) preview.ShowAlpha = !preview.ShowAlpha;
+    }
 
     [RelayCommand]
     private void ShowBrowse() => Workspace = BrowseTab;

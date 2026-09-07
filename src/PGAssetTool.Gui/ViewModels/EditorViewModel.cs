@@ -52,6 +52,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                     case nameof(PreviewViewModel.Camera):
                         if (Linked && !_pairing) other.Camera = pane.Camera;
                         break;
+
+                    // Alpha for the same reason as the rest: a comparison where one half honours
+                    // the channel and the other does not shows a difference that is not the mod.
+                    case nameof(PreviewViewModel.ShowAlpha):
+                        if (Linked && !_pairing) other.ShowAlpha = pane.ShowAlpha;
+                        break;
                 }
             };
         }
