@@ -160,8 +160,8 @@ serialized bytes back without understanding the class, which is how a `Material`
 `Transform` or a `Shader` gets changed at all. `addAsset` is the same write into a path id nothing
 is using.
 
-A manifest says `formatVersion` 2 only when it uses the last two, so a pack of the other operations
-stays readable by builds that predate them.
+A manifest says which `formatVersion` it was written for, and a pack from a later one is refused
+rather than half understood.
 
 ### Adding an asset
 

@@ -16,9 +16,6 @@ public static class PackOperations
 
     /// Puts an object into a bundle that had none. See PackOperation.NewId for why it needs one.
     public const string AddAsset = "addAsset";
-
-    /// Whether an operation needs the manifest to declare format version 2.
-    public static bool NeedsVersion2(string op) => op is ReplaceRaw or AddAsset;
 }
 
 /// Where a pointer lives and what it should be made to point at.
@@ -150,13 +147,9 @@ public sealed record PackManifest
     public const int CurrentFormatVersion = 2;
     public const string FileName = "pgmod.json";
 
-    /// Version 1 is what a pack of texture, mesh and audio replacements has always been. Version 2
-    /// added raw replacement and asset addition, and a build claims it only when it uses them: a
-    /// pack of the old operations stays readable by the builds that predate this, which is the
-    /// whole point of writing a version down.
-    public static int VersionFor(IEnumerable<PackOperation> operations)
-        => operations.Any(o => PackOperations.NeedsVersion2(o.Op)) ? 2 : 1;
-
+    /// What a pack claims to be. Always the current one: a build claiming an older format so that
+    /// older builds could still read it was a promise to packs that were never published, and the
+    /// version is still written down because reading one from a later build has to fail plainly.
     public int FormatVersion { get; init; } = CurrentFormatVersion;
     public required string Id { get; init; }
     public required string Name { get; init; }

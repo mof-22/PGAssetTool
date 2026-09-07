@@ -56,13 +56,10 @@ public static class PackFile
     /// built afterwards unreadable by every build before it, with no line in the diff to say so.
     /// Written out, it is a version byte, which is what it always was.
     ///
-    /// 2 signs the author's name along with the contents. 1 signed the contents alone, and is
-    /// still read: a pack somebody published then is not retrospectively suspect.
+    /// 2 signs the author's name along with the contents. 1 signed the contents alone and is no
+    /// longer read: this tool has not been published, so every pack that ever existed in that
+    /// shape was made by its author while building it, and none of them is worth a branch here.
     private const byte Format = 2;
-
-    /// The oldest shape this build will open. Nothing has been dropped yet, and the reason to
-    /// write it down is that dropping one is a decision about other people's files.
-    private const byte Oldest = 1;
 
     /// Fixed, and deliberately so: any build of this tool has to be able to open any pack. A key
     /// only the author knew would make a pack nobody else could install, which is a different
@@ -84,7 +81,7 @@ public static class PackFile
     public static byte[] Contents(string path)
     {
         var raw = File.ReadAllBytes(path);
-        return Split(raw) is var (_, _, payload) ? payload : raw;
+        return Split(raw) is var (_, payload) ? payload : raw;
     }
 
     /// Who built it and whether it still matches, without unpacking anything.
@@ -93,11 +90,11 @@ public static class PackFile
         try
         {
             var raw = File.ReadAllBytes(path);
-            if (Split(raw) is not var (version, header, payload)) return PackSeal.Plain;
+            if (Split(raw) is not var (header, payload)) return PackSeal.Plain;
 
             var publicKey = Convert.FromBase64String(header.PublicKey);
             var state = PackAuthor.Verifies(
-                    Signed(version, header.Author, payload),
+                    Signed(header.Author, payload),
                     Convert.FromBase64String(header.Signature), publicKey)
                 ? SealState.Signed
                 : SealState.Altered;
@@ -121,7 +118,7 @@ public static class PackFile
 
         var header = JsonSerializer.SerializeToUtf8Bytes(
             new Header(author, Convert.ToBase64String(signer.PublicKey),
-                Convert.ToBase64String(signer.Sign(Signed(Format, author, zip)))),
+                Convert.ToBase64String(signer.Sign(Signed(author, zip)))),
             Json);
 
         using var file = File.Create(path);
@@ -140,15 +137,14 @@ public static class PackFile
 
     /// Splits a protected pack into what it says about itself and what it holds. Null for a plain
     /// zip, which is every pack built before this existed and every one built with protection off.
-    private static (byte Version, Header Header, byte[] Payload)? Split(byte[] raw)
+    private static (Header Header, byte[] Payload)? Split(byte[] raw)
     {
         if (raw.Length < Magic.Length + 5 || !raw.AsSpan(0, Magic.Length).SequenceEqual(Magic)) return null;
 
-        // A version this build does not know is not a pack it can speak for. Refusing here rather
-        // than reading it anyway means a later format is a plain "not signed" to an older build,
-        // never a wrong answer about who wrote it.
-        var version = raw[Magic.Length];
-        if (version < Oldest || version > Format) return null;
+        // A shape this build does not know is not a pack it can speak for. Refusing here rather
+        // than reading it anyway means another format is a plain "not signed" to this build, never
+        // a wrong answer about who wrote it.
+        if (raw[Magic.Length] != Format) return null;
 
         var length = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(Magic.Length + 1));
         var at = Magic.Length + 1 + 4;
@@ -157,13 +153,13 @@ public static class PackFile
         var header = JsonSerializer.Deserialize<Header>(raw.AsSpan(at, length), Json);
         if (header is null) return null;
 
-        return (version, header, Scramble(raw[(at + length)..]));
+        return (header, Scramble(raw[(at + length)..]));
     }
 
     /// What the signature is taken over: the name in the header as well as the contents.
     ///
-    /// A name that is not signed is only a label. Format 1 signed the contents alone, so the
-    /// author's name could be rewritten in a pack that went on reading as genuinely signed, by
+    /// A name that is not signed is only a label. An earlier shape signed the contents alone, so
+    /// the author's name could be rewritten in a pack that went on reading as genuinely signed, by
     /// the genuine key, with the genuine fingerprint beside it — somebody else's name over work
     /// they did not put it to, or a name taken off work that was theirs. Nothing about the
     /// contents was at risk either way, which is exactly why it was easy to miss.
@@ -173,10 +169,8 @@ public static class PackFile
     ///
     /// The name is length-prefixed rather than run together with the payload, so that no two
     /// (name, contents) pairs can produce the same bytes to sign.
-    private static byte[] Signed(byte version, string author, byte[] payload)
+    private static byte[] Signed(string author, byte[] payload)
     {
-        if (version < 2) return payload;
-
         var name = Encoding.UTF8.GetBytes(author);
         var bytes = new byte[4 + name.Length + payload.Length];
 

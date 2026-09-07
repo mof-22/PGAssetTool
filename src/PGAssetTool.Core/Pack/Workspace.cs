@@ -48,7 +48,6 @@ public static class Workspace
     {
         var manifest = new PackManifest
         {
-            FormatVersion = PackManifest.VersionFor(operations),
             Id = id,
             Name = name,
             Author = author,

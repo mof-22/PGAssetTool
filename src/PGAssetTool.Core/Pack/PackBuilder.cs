@@ -66,7 +66,6 @@ public static class PackBuilder
         // the newer format, and should not ask for it.
         var packed = manifest with
         {
-            FormatVersion = PackManifest.VersionFor(kept),
             Operations = kept,
         };
 

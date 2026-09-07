@@ -44,23 +44,6 @@ public class AddedAssetTests
     }
 
     [Fact]
-    public void OnlyTheNewOperationsAskForTheNewFormat()
-    {
-        var old = new PackOperation
-        {
-            Op = PackOperations.ReplaceTexture,
-            Target = new AssetAddress("ecw_34", "Texture2D", "icon", 0, 1),
-            Source = "icon.png",
-        };
-
-        // A pack of the operations that always existed stays readable by the builds that predate
-        // this. Claiming version 2 for all of them would strand every one of those packs.
-        Assert.Equal(1, PackManifest.VersionFor([old]));
-        Assert.Equal(2, PackManifest.VersionFor([old, Add("s")]));
-        Assert.Equal(2, PackManifest.VersionFor([Repoint("s")]));
-    }
-
-    [Fact]
     public void APackFromALaterBuildIsRefusedRatherThanHalfUnderstood()
     {
         var ahead = new PackManifest { Id = "x", Name = "X", FormatVersion = 99 };

@@ -252,43 +252,6 @@ public sealed class ModStore
         return Path.Combine(into, $"{name}-{digest}{Path.GetExtension(sourcePath)}");
     }
 
-    /// Moves packs filed under the old digest-first name, and points the ledger at where they went.
-    ///
-    /// Renaming without the second half would leave every installed mod naming a file that is no
-    /// longer there, and with it no way to reapply or cleanly remove one.
-    public IReadOnlyList<string> TidyKeptPackNames()
-    {
-        if (!Directory.Exists(ModsDirectory)) return [];
-
-        var moved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in Directory.GetFiles(ModsDirectory, "*" + Pack.PackBuilder.Extension))
-        {
-            var name = Path.GetFileNameWithoutExtension(path);
-            if (name.Length < 10 || name[8] != '-') continue;
-            var digest = name[..8];
-            if (!digest.All(char.IsAsciiHexDigitLower)) continue;
-
-            var renamed = Path.Combine(
-                ModsDirectory, $"{name[9..]}-{digest}{Path.GetExtension(path)}");
-            if (File.Exists(renamed)) continue;
-
-            File.Move(path, renamed);
-            moved[Path.GetFullPath(path)] = renamed;
-        }
-
-        if (moved.Count == 0) return [];
-
-        string? Where(string path) => path.Length == 0 ? null : Path.GetFullPath(path);
-
-        var installed = Read();
-        if (installed.Exists(m => Where(m.PackPath) is { } at && moved.ContainsKey(at)))
-            Write(installed.Select(m => Where(m.PackPath) is { } at && moved.TryGetValue(at, out var to)
-                ? m with { PackPath = to }
-                : m));
-
-        return moved.Values.Select(Path.GetFileName).ToList()!;
-    }
-
     public bool HasBackup(CacheKind cache, string bundle, string hash) => File.Exists(BackupPathFor(cache, bundle, hash));
 
     public void Backup(CacheKind cache, string bundle, string hash, string livePath)

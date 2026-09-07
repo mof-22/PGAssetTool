@@ -150,8 +150,8 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- apply workspace/0819_some
 シリアライズされたバイトを書き戻します。`Material` や `Font` や `Transform` や `Shader` を変更
 できるのはこれのおかげです。`addAsset` は、誰も使っていない path id に対する同じ書き込みです。
 
-マニフェストが `formatVersion` 2 を名乗るのは下2つを使うときだけなので、それ以外の操作だけの
-パックは、この機能より前のビルドでも読めるままです。
+マニフェストには `formatVersion` が書かれていて、これより新しい形式のパックは、中途半端に
+読まれるのではなく拒否されます。
 
 ### アセットの新規追加
 
