@@ -240,6 +240,38 @@ public class PackTests : IDisposable
     }
 
     [Fact]
+    public void AComponentIsNotPackedAndSaysSoRatherThanBeingLeftOut()
+    {
+        // Dropping it quietly would be worse than refusing: the author would believe the change
+        // shipped and find out from the game.
+        var path = Path.Combine(_workspace, "behaviour.dat");
+        File.WriteAllText(path, "original");
+
+        var manifest = new PackManifest
+        {
+            Id = "test", Name = "Test",
+            Operations =
+            [
+                new PackOperation
+                {
+                    Op = PackOperations.ReplaceRaw,
+                    Target = new AssetAddress("ecw_6", "MonoBehaviour", "something", 0, 7),
+                    Source = "behaviour.dat",
+                    BaselineSha256 = Workspace.HashFile(path),
+                },
+            ],
+        };
+        File.WriteAllText(Path.Combine(_workspace, PackManifest.FileName), manifest.ToJson());
+        File.AppendAllText(path, "edited");
+
+        var refused = Assert.Throws<InvalidOperationException>(
+            () => PackBuilder.Build(_workspace, Path.Combine(_workspace, "out.pgmod")));
+
+        Assert.Contains("behaviour.dat", refused.Message);
+        Assert.False(File.Exists(Path.Combine(_workspace, "out.pgmod")));
+    }
+
+    [Fact]
     public void ADirectoryThatIsNotAWorkspaceIsNotSteppedOver()
     {
         // Present is not the same as somebody's. An empty folder left behind by a run that failed

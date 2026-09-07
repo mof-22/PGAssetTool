@@ -846,6 +846,11 @@ internal static class SelfTest
             // The workspace this run made a second time round is no longer wanted, which is the
             // case the button exists for. Deleted through it rather than around it, so the path a
             // person takes is the one under test — and it leaves this run's scratch behind it.
+            // Left until here, because it installs and removes once more of its own accord and
+            // everything above wants the game in a state it put it in.
+            if (AComponentIsRefusedAtBothEnds(model, written) is { } refusedProblem)
+                return Fail(refusedProblem);
+
             if (WorkspacesCanBeDeleted(model, secondary) is { } deleteProblem) return Fail(deleteProblem);
 
             var nowPreferences = File.Exists(theirSettings) ? File.ReadAllText(theirSettings) : null;
@@ -892,6 +897,120 @@ internal static class SelfTest
     /// drawn by — while still exercising every part that is new: an addition, a name that would
     /// otherwise collide, a path id that is already taken, and an existing asset repointed at
     /// something that did not exist when the pack was built.
+    /// A pack that names a component is refused at both ends: built here, and arriving from
+    /// somewhere else.
+    ///
+    /// Both are checked because they answer different questions. Refusing to build one stops this
+    /// tool being what makes it. Refusing to apply one is what actually holds, because a pack built
+    /// by something else never went past the first check — so the second is made to face exactly
+    /// that: a legitimate pack, opened afterwards, with the operation written into its manifest by
+    /// hand the way another tool would have written it.
+    ///
+    /// The rest of that pack still applies. A refusal that took everything down with it would make
+    /// the honest answer cost more than no answer, and authors would route around it.
+    private static string? AComponentIsRefusedAtBothEnds(MainViewModel model, string workspace)
+    {
+        var manifest = Core.Pack.Workspace.Read(workspace);
+        var bundle = manifest.Operations[0].Target.Container;
+        const string source = "selftest-refused.dat";
+
+        Core.Pack.PackOperation refused;
+
+        // Scoped, and put down before anything installs. A reader holds the bundle it has opened,
+        // and the install below writes to that same bundle.
+        using (var bundles = new Core.Assets.BundleSet(model.Game!))
+        {
+            var file = bundles.Open(bundle);
+            if (file.file.AssetInfos.FirstOrDefault(
+                    i => i.TypeId == (int)AssetsTools.NET.Extra.AssetClassID.MonoBehaviour) is not { } info)
+                return $"'{bundle}' holds no component to try this with";
+
+            File.WriteAllBytes(Path.Combine(workspace, source),
+                Core.Export.AssetExporter.ReadRaw(file, info));
+
+            refused = new Core.Pack.PackOperation
+            {
+                Op = Core.Pack.PackOperations.ReplaceRaw,
+                Target = new Core.Assets.AssetAddress(
+                    bundle, nameof(AssetsTools.NET.Extra.AssetClassID.MonoBehaviour),
+                    bundles.Context.Deserialize(file, info)?["m_Name"]?.AsString ?? "", 0, info.PathId),
+                Source = source,
+            };
+        }
+
+        // Built here: refused, and the pack is not written at all.
+        var output = Path.Combine(workspace, "refused.pgmod");
+        Core.Pack.Workspace.Save(workspace, manifest with
+        {
+            Operations = [.. manifest.Operations, refused],
+        });
+
+        try
+        {
+            Core.Pack.PackBuilder.Build(workspace, output);
+            return "a pack naming a component was built anyway";
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.WriteLine($"refused  building: {ex.Message}");
+            if (File.Exists(output)) return "the build was refused and still left a pack behind";
+        }
+        finally
+        {
+            Core.Pack.Workspace.Save(workspace, manifest);
+        }
+
+        // Arriving from somewhere else: a pack this tool did build, with the operation put into its
+        // manifest afterwards. Nothing here writes the container; it is opened as what it is.
+        Core.Pack.PackBuilder.Build(workspace, output);
+        using (var pack = System.IO.Compression.ZipFile.Open(
+                   output, System.IO.Compression.ZipArchiveMode.Update))
+        {
+            var entry = pack.GetEntry(Core.Pack.PackManifest.FileName)!;
+
+            string json;
+            using (var reading = new StreamReader(entry.Open())) json = reading.ReadToEnd();
+            entry.Delete();
+
+            var inside = Core.Pack.PackManifest.Parse(json);
+            using (var writing = new StreamWriter(
+                       pack.CreateEntry(Core.Pack.PackManifest.FileName).Open()))
+                writing.Write((inside with { Operations = [.. inside.Operations, refused] }).ToJson());
+
+            pack.CreateEntry(source);
+        }
+
+        // Installed the way anything is, so the reader is put down and picked up around it.
+        _ = model.InstallPacks([output]);
+        WaitWhile(() => model.Busy, 300_000);
+        Console.WriteLine($"refused  applying: {model.Status}");
+
+        var said = model.Status;
+
+        // Removed through the manager, which is what closes the reader for a write.
+        model.Manager.Refresh();
+        model.Manager.Selection.Clear();
+        foreach (var row in model.Manager.Mods.Where(m => m.Mod.Id == manifest.Id))
+            model.Manager.Selection.Add(row);
+
+        if (model.Manager.Chosen.Count > 0)
+        {
+            model.Manager.RemoveCommand.Execute(null);
+            if (model.Manager.Asking is not null) model.Manager.ProceedCommand.Execute(null);
+            WaitWhile(() => model.Manager.Busy || model.Manager.Asking is not null, 180_000);
+        }
+
+        File.Delete(output);
+        File.Delete(Path.Combine(workspace, source));
+
+        if (!said.Contains("behave", StringComparison.OrdinalIgnoreCase))
+            return $"a component operation was not turned away on its way in: {said}";
+        if (said.Contains("0 applied", StringComparison.Ordinal))
+            return $"one refused operation took the rest of the pack down with it: {said}";
+
+        return null;
+    }
+
     private static string? AddAnAsset(MainViewModel model, string workspace, out Added? added)
     {
         added = null;

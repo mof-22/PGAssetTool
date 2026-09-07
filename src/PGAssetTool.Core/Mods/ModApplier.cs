@@ -234,6 +234,21 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         }
     }
 
+    /// Whether an operation names a class this tool will not write, from what the pack says about
+    /// it rather than from the asset — the target is refused before anything is opened.
+    private static bool Refuses(PackOperation operation, out string why)
+    {
+        why = "";
+        if (!Enum.TryParse<AssetClassID>(operation.Target.Class, out var cls)) return false;
+        if (Replaceable.CanWriteBack(cls)) return false;
+
+        // The file it would have been written from, when the asset has no name of its own — which
+        // components generally do not, so the target's name would be an empty pair of quotes.
+        why = Replaceable.WhyRefused(
+            cls, operation.Target.Name.Length > 0 ? operation.Target.Name : operation.Source);
+        return true;
+    }
+
     private bool EditBundle(
         InstalledMod mod, string live, string output, IEnumerable<PackOperation> operations,
         ZipArchive archive, string staging, List<AppliedOperation> applied, List<string> failed,
@@ -255,6 +270,10 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
         foreach (var operation in ordered.Where(o => o.Op != PackOperations.AddAsset))
         {
+            // Asked before the asset is read, and asked here rather than only where packs are
+            // built: a pack that arrives from somewhere else has never been past that check.
+            if (Refuses(operation, out var why)) { failed.Add($"{mod.Id}: {why}"); continue; }
+
             var info = index.Resolve(operation.Target, editor.File, out var byPathId);
             if (info is null) { failed.Add($"{mod.Id}: {operation.Target} not found"); continue; }
 
@@ -328,6 +347,10 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
         foreach (var operation in additions)
         {
+            // Adding one is writing one. Asked here as well, because additions are handled before
+            // everything else and never reach the loop that asks below.
+            if (Refuses(operation, out var why)) { failed.Add($"{mod.Id}: {why}"); continue; }
+
             if (operation.NewId is not { Length: > 0 } newId)
             {
                 failed.Add($"{mod.Id}: {operation.Target} adds an asset without saying what to call it");

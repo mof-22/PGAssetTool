@@ -31,6 +31,11 @@ public static class PackBuilder
     public static string OutputFor(string workspace, PackManifest manifest)
         => Path.Combine(workspace, FileNameFor(manifest));
 
+    /// Whether an operation names a class this tool will not write back.
+    private static bool Refused(PackOperation operation)
+        => Enum.TryParse<AssetsTools.NET.Extra.AssetClassID>(operation.Target.Class, out var cls)
+            && !Replaceable.CanWriteBack(cls);
+
     private static string Sanitise(string name)
     {
         var invalid = Path.GetInvalidFileNameChars();
@@ -57,6 +62,12 @@ public static class PackBuilder
         if (changed.Count == 0)
             throw new InvalidOperationException(
                 $"Nothing in '{workspace}' differs from what was exported, so there is no change to pack.");
+
+        // Said now rather than dropped quietly. A file left out of a pack without a word is a
+        // change the author believes they shipped, and they find out from the game.
+        if (changed.FirstOrDefault(Refused) is { } refused)
+            throw new InvalidOperationException(Replaceable.WhyRefused(
+                Enum.Parse<AssetsTools.NET.Extra.AssetClassID>(refused.Target.Class), refused.Source));
 
         // The baseline hash is a working-directory concern; it says nothing to whoever applies the pack.
         var kept = changed.Select(o => o with { BaselineSha256 = null }).ToList();

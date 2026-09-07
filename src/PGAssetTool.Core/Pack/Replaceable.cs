@@ -30,6 +30,29 @@ public static class Replaceable
     /// The classes something can be written back to.
     public static IReadOnlySet<AssetClassID> Classes { get; } = Kinds.Select(k => k.Class).ToHashSet();
 
+    /// Classes this tool will not write, whatever the operation and whatever the format.
+    ///
+    /// A `MonoBehaviour` is a component: the game's own configuration of how a thing *behaves*.
+    /// This tool exists to change how things look and sound, and behaviour is a different question
+    /// with different consequences — it reaches other players, where a texture does not.
+    ///
+    /// Enforced at both ends deliberately. Refusing at build stops this tool being what makes such
+    /// a pack; refusing at apply is what matters, because a pack built by something else arrives
+    /// here anyway and is turned away on its way in.
+    ///
+    /// Everything a component holds is still written out and readable. What is refused is writing
+    /// it back, which is the part with a consequence.
+    private static readonly AssetClassID[] Refused = [AssetClassID.MonoBehaviour];
+
+    /// Whether this tool will write an asset of this class back at all, in any format.
+    public static bool CanWriteBack(AssetClassID cls) => !Refused.Contains(cls);
+
+    /// Said the same way wherever it is said, so the answer does not depend on which door it was
+    /// asked at.
+    public static string WhyRefused(AssetClassID cls, string what)
+        => $"'{what}' is a {cls}, which this tool does not write back. It changes how things look "
+            + "and sound; a component decides how they behave.";
+
     /// The operation to run for a file, by its extension without the dot.
     public static string? OperationForFormat(string format)
         => string.Equals(format, RawFormat, StringComparison.OrdinalIgnoreCase)

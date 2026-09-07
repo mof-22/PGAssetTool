@@ -62,4 +62,35 @@ public class ReplaceableTests
         Assert.Contains(PackOperations.ReplaceAudio, reachable);
         Assert.Equal(Replaceable.Classes.Count, reachable.Count);
     }
+
+    [Fact]
+    public void AComponentIsNotWrittenBackInAnyFormat()
+    {
+        // The raw route is what makes every other class writable, so the only thing standing
+        // between a component and the game is this answer. It is asked at three doors — converting,
+        // building and applying — and all three ask it here.
+        Assert.False(Replaceable.CanWriteBack(AssetClassID.MonoBehaviour));
+
+        Assert.True(Replaceable.CanWriteBack(AssetClassID.Texture2D));
+        Assert.True(Replaceable.CanWriteBack(AssetClassID.Mesh));
+        Assert.True(Replaceable.CanWriteBack(AssetClassID.AudioClip));
+
+        // The classes a mod legitimately reaches through the raw route stay reachable: a material,
+        // a shader, a font, and the objects a prefab is built out of.
+        foreach (var cls in new[]
+                 {
+                     AssetClassID.Material, AssetClassID.Shader, AssetClassID.Font,
+                     AssetClassID.GameObject, AssetClassID.Transform, AssetClassID.TextMesh,
+                 })
+            Assert.True(Replaceable.CanWriteBack(cls), $"{cls} should still be writable");
+    }
+
+    [Fact]
+    public void TheRefusalSaysWhichFileAndWhy()
+    {
+        var said = Replaceable.WhyRefused(AssetClassID.MonoBehaviour, "weapon_thing.dat");
+
+        Assert.Contains("weapon_thing.dat", said);
+        Assert.Contains("behave", said);
+    }
 }

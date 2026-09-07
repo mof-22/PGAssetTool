@@ -67,6 +67,12 @@ public sealed class AssetExporter(BundleSet bundles)
             if (Reproduces(field, raw)) return results;
         }
 
+        // The bytes are the only way anything of this class goes back, so for a class that does not
+        // go back they are a file with nothing to do — one an author would reasonably take for an
+        // invitation, and find out otherwise at the far end. The dump above still says what is in
+        // it; see Replaceable for which classes those are and why.
+        if (!Pack.Replaceable.CanWriteBack(cls)) return results;
+
         var rawPath = stem + ".dat";
         File.WriteAllBytes(rawPath, raw);
         results.Add(new ExportedAsset(rawPath, cls, name, "dat", new FileInfo(rawPath).Length, address));

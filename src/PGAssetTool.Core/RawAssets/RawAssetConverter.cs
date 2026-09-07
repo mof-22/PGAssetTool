@@ -189,6 +189,9 @@ public sealed class RawAssetConverter(BundleSet bundles, CabIndex cabs)
         string bundle, AssetsFileInstance file, AssetFileInfo info, byte[] bytes)
     {
         var cls = (AssetClassID)info.TypeId;
+        if (!Replaceable.CanWriteBack(cls))
+            throw new NotSupportedException(Replaceable.WhyRefused(cls, source.Name));
+
         info.SetNewData(bytes);
 
         try
@@ -225,6 +228,9 @@ public sealed class RawAssetConverter(BundleSet bundles, CabIndex cabs)
                 + "against a different version of the game.");
 
         var cls = inferred.Candidates[0];
+        if (!Replaceable.CanWriteBack(cls))
+            throw new NotSupportedException(Replaceable.WhyRefused(cls, source.Name));
+
         var info = AssetFileInfo.Create(file.file, source.PathId, (int)cls, null!, preferEditor: false);
         info.SetNewData(bytes);
         var field = bundles.Context.Deserialize(file, info)
