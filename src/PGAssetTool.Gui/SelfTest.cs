@@ -508,6 +508,18 @@ internal static class SelfTest
             if (dressed == 0)
                 return Fail($"'{skinMesh.Label}' came up grey, with nothing worked out to put on it");
 
+            // What this mesh is actually drawn with comes first. Everything else stays on the list,
+            // because putting another skin's paint on a mesh is what the list is for — but a weapon
+            // reaches thirty textures and two of them answer the question somebody has.
+            Console.WriteLine("skins    first offered: " + string.Join(", ",
+                model.Preview.TextureChoices.Skip(1).Take(3).Select(t => t.Name)));
+
+            // The first entry is "(automatic)"; the ones this mesh's own renderers name follow it.
+            var head = model.Preview.TextureChoices.Skip(1).Take(dressed).ToList();
+            if (head.Any(c => !inside.Any(n => n.Label == c.Name && n.PathId == c.PathId)))
+                return Fail("the textures at the top of the list are not the ones on the mesh: "
+                    + string.Join(", ", head.Select(c => c.Name)));
+
             // Read once. Opening and closing the row again must not pile the same rows up under it.
             var read = withModel.Children.Count;
             withModel.IsExpanded = false;

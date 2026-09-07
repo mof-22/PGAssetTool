@@ -699,11 +699,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// the weapon's are part of a resolved tree and this is what has been learned since.
     private readonly List<MeshTextures> _alsoTextured = [];
 
+    /// What the game draws this mesh with, from the weapon's own answer or from one worked out
+    /// since. Null for a mesh nothing was found for.
+    private MeshTextures? Slots(long meshPathId)
+        => _tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == meshPathId)
+            ?? _alsoTextured.FirstOrDefault(m => m.MeshPathId == meshPathId);
+
     private IReadOnlyList<PreviewImage?>? TexturesFor(long meshPathId)
     {
-        if ((_tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == meshPathId)
-             ?? _alsoTextured.FirstOrDefault(m => m.MeshPathId == meshPathId)) is not { } slots)
-            return null;
+        if (Slots(meshPathId) is not { } slots) return null;
 
         return slots.BySubMesh.Select(node =>
         {
@@ -864,24 +868,39 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Built from the tree as it stands, so it is built again when the tree grows: a skin's own
     /// model is read when its row is opened, and its textures are exactly the ones somebody wants
     /// on the mesh they have just been given.
-    private void OfferTextures()
+    /// <param name="forMesh">
+    /// The mesh being looked at, whose own textures go to the top. Every texture the weapon reaches
+    /// stays on the list — trying another skin's paint on a mesh is the point of the list existing
+    /// — but a weapon reaches thirty of them and only two or three are this mesh's, so the ones
+    /// that answer the obvious question come first and the rest follow.
+    /// </param>
+    private void OfferTextures(long forMesh = 0)
     {
         // Emptying the list empties the box bound to it, which writes a null back through the
         // selection. What was on the mesh goes back on it.
         var wearing = Preview.ChosenTexture;
 
-        Preview.TextureChoices.Clear();
-        Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0));
-
-        if (Detail is null) return;
+        var mine = Slots(forMesh)?.BySubMesh
+            .Where(n => n is not null)
+            .Select(n => (n!.Bundle, n.PathId))
+            .ToHashSet() ?? [];
 
         var seen = new HashSet<(string, long)>();
-        foreach (var node in AllNodes(Detail.Roots))
+        var found = new List<TextureChoice>();
+
+        foreach (var node in AllNodes(Detail?.Roots ?? []))
         {
             if (node.Class != AssetClassID.Texture2D || node.Bundle.Length == 0) continue;
             if (!seen.Add((node.Bundle, node.PathId))) continue;
-            Preview.TextureChoices.Add(new TextureChoice(node.Label, node.Bundle, node.PathId));
+            found.Add(new TextureChoice(node.Label, node.Bundle, node.PathId));
         }
+
+        Preview.TextureChoices.Clear();
+        Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0));
+
+        // Stable within each half, so the order the tree is in survives the sorting.
+        foreach (var choice in found.OrderByDescending(c => mine.Contains((c.Bundle, c.PathId))))
+            Preview.TextureChoices.Add(choice);
 
         if (wearing is not null && Preview.TextureChoices.Contains(wearing))
             Preview.ChosenTexture = wearing;
@@ -931,6 +950,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         Preview.Show(picture, $"{node.Label}   @ {node.Bundle}", node.AlphaIsCoverage);
                         break;
                     case UnityMesh mesh:
+                        // Reordered before it is shown, so the choice this mesh is remembered with
+                        // lands in a list that already holds it.
+                        OfferTextures(node.PathId);
                         Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(node.PathId),
                             subject: $"{node.Bundle}:{node.PathId}");
                         break;
