@@ -894,18 +894,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             .Select(n => (n!.Bundle, n.PathId))
             .ToHashSet() ?? [];
 
-        // A skin that repaints rather than replaces is paint cut for the weapon's own geometry, so
-        // its textures are the next most likely answer after the ones already on the mesh: they are
-        // what this mesh is going to be seen wearing in the game. A skin that brings its own model
-        // is not, and neither is any of this for a mesh that arrived with one, whose UVs are its
-        // own — so those keep the plain order.
+        // A skin's materials are what the game hands the weapon's own renderers, so the textures
+        // they use are the next most likely answer after the ones already on the mesh: they are
+        // what this geometry is going to be seen wearing.
+        //
+        // Every skin that has any, and not only the ones with no model of their own. A skin that
+        // replaces the weapon keeps its materials inside the model, which is why most of those
+        // resolve to nothing out here and cost nothing — but some resolve both, and paint that
+        // lands on this geometry is worth offering whether or not the skin has other geometry too.
+        // None of it applies to a mesh that arrived with a skin of its own, whose UVs are its own,
+        // so those keep the plain order.
         HashSet<(string, long)> paint = [];
         if (forMesh != 0 && !_fromSkinModel.Contains(forMesh))
             paint = (_tree?.Skins ?? [])
-                .Where(s => s.Model is null)
                 .SelectMany(s => s.Materials)
-                .SelectMany(m => m.Textures)
-                .Select(t => (t.Bundle, t.PathId))
+                .SelectMany(m => m.Textures.Select(m.Locate))
                 .ToHashSet();
 
         var seen = new HashSet<(string, long)>();

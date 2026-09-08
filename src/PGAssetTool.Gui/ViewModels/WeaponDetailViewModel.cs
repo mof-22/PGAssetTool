@@ -169,8 +169,7 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
 
                     foreach (var texture in material.Textures)
                         into.With(new TreeNode(texture.Name, material.Bundle, AssetClassID.Texture2D,
-                            texture.PathId,
-                            texture.Bundle.Length > 0 ? texture.Bundle : material.Bundle));
+                            texture.PathId, material.Locate(texture).Bundle));
                 }
                 skins.With(node);
             }

@@ -20,7 +20,18 @@ public sealed record WeaponSkinView(
 /// per skin every time a weapon is selected, and it is wanted only when one is being exported.
 public sealed record SkinModel(string AssetPath, string Bundle);
 
-public sealed record SkinMaterial(string Path, string Bundle, string Name, IReadOnlyList<AssetNode> Textures);
+public sealed record SkinMaterial(string Path, string Bundle, string Name, IReadOnlyList<AssetNode> Textures)
+{
+    /// Where one of this material's textures actually lives.
+    ///
+    /// The walk names a bundle only for the textures it had to cross a file to reach; one sitting
+    /// in the same file as the material is recorded with none, and the material's own is then the
+    /// answer. Asked in more than one place — the tree files a texture under this name and the
+    /// preview looks the same texture up again by it — and the two answers drifting apart is not
+    /// something either end can see, so the rule lives here rather than at each of them.
+    public (string Bundle, long PathId) Locate(AssetNode texture)
+        => (texture.Bundle.Length > 0 ? texture.Bundle : Bundle, texture.PathId);
+}
 
 /// The textures a mesh is drawn with, in submesh order: entry i belongs to submesh i, and a null
 /// entry is a material slot whose texture could not be found.

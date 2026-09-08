@@ -211,27 +211,34 @@ internal static class SelfTest
                         return Fail($"'{node.Label}' has a texture but drew in flat grey");
 
                     // The list a weapon's own mesh is offered comes in three bands: what it is
-                    // already drawn with, then the paint a repainting skin would put on it — the
-                    // same geometry, so it is what this mesh will be seen wearing in the game —
-                    // then everything else the weapon reaches. Ordering alone is a weak signal,
-                    // so the worn ones are marked as well and the marks have to be the right ones.
+                    // already drawn with, then the paint a skin would put on this same geometry —
+                    // what the mesh will be seen wearing in the game — then everything else the
+                    // weapon reaches. Ordering alone is a weak signal, so the worn ones are marked
+                    // as well and the marks have to be the right ones.
                     var own = detail.Tree.MeshTextures
                         .FirstOrDefault(m => m.MeshPathId == node.PathId)?.BySubMesh
                         .Where(t => t is not null).Select(t => (t!.Bundle, t.PathId)).ToHashSet() ?? [];
-                    var repaint = detail.Tree.Skins
-                        .Where(s => s.Model is null)
-                        .SelectMany(s => s.Materials)
-                        .SelectMany(m => m.Textures)
-                        .Select(t => (t.Bundle, t.PathId))
-                        .ToHashSet();
+                    // Read off the tree rather than out of the model the ordering is built from, so
+                    // the two ends have to agree on where a texture is. They did not: a texture
+                    // sitting in the same file as the material naming it carries no bundle of its
+                    // own, the tree filled that in from the material and the ordering did not, and
+                    // every skin's own paint quietly failed to match and stayed in the tail.
+                    var paint = new HashSet<(string, long)>();
+                    void Painted(TreeNode n)
+                    {
+                        if (n.Class == AssetClassID.Texture2D) paint.Add((n.Bundle, n.PathId));
+                        foreach (var child in n.Children) Painted(child);
+                    }
+                    if (detail.Roots.FirstOrDefault(r => r.Label == "Skins") is { } skinRoot)
+                        Painted(skinRoot);
 
                     var choices = model.Preview.TextureChoices.Skip(1).ToList();
                     var bands = choices
-                        .Select(c => c.Worn ? 0 : repaint.Contains((c.Bundle, c.PathId)) ? 1 : 2)
+                        .Select(c => c.Worn ? 0 : paint.Contains((c.Bundle, c.PathId)) ? 1 : 2)
                         .ToList();
 
                     Console.WriteLine($"         offered {choices.Count}: {bands.Count(b => b == 0)} worn, "
-                        + $"{bands.Count(b => b == 1)} a repainting skin's, {bands.Count(b => b == 2)} other");
+                        + $"{bands.Count(b => b == 1)} a skin's paint, {bands.Count(b => b == 2)} other");
 
                     for (var i = 1; i < bands.Count; i++)
                         if (bands[i] < bands[i - 1])
@@ -242,6 +249,10 @@ internal static class SelfTest
 
                     if (own.Count > 0 && !bands.Contains(0))
                         return Fail($"'{node.Label}' is drawn with textures and none of them is marked");
+
+                    // An order nothing ever moves in passes every check above it.
+                    if (paint.Count > 0 && !bands.Contains(1) && !bands.Contains(0))
+                        return Fail("this weapon's skins paint it and none of that paint was brought up");
 
                     // Wearing a texture chosen by hand is how a skin gets tried on a model the
                     // automatic answer knows nothing about. It silently did nothing: the choice
@@ -491,6 +502,38 @@ internal static class SelfTest
             if (skins.Children.All(s => s.Children.Count == 0 && s.Unread is null))
                 return Fail("no skin reached anything at all");
 
+            // The weapon's own mesh, on a weapon whose skins are a mixture: some only repaint it,
+            // some bring a model of their own, and several do both. Everything any of them paints
+            // with lands on this geometry, so the question is not whether the skin has other
+            // geometry as well — asking it that way left four of this weapon's skins in the tail.
+            var ownMesh = model.Detail!.Roots
+                .SelectMany(r => r.Children).SelectMany(g => g.Children)
+                .FirstOrDefault(n => n.Class == AssetsTools.NET.Extra.AssetClassID.Mesh
+                    && n.Label.StartsWith("ultimatum", StringComparison.OrdinalIgnoreCase));
+            if (ownMesh is null) return Fail("#416's own mesh is not in the tree");
+
+            var painted = new HashSet<(string, long)>();
+            void Paints(TreeNode n)
+            {
+                if (n.Class == AssetsTools.NET.Extra.AssetClassID.Texture2D) painted.Add((n.Bundle, n.PathId));
+                foreach (var child in n.Children) Paints(child);
+            }
+            Paints(skins);
+
+            model.Preview.Clear();
+            model.Detail.SelectedNode = ownMesh;
+            WaitWhile(() => model.Preview.Mesh is null, 60_000);
+
+            var order = model.Preview.TextureChoices.Skip(1).ToList();
+            bool Likely(TextureChoice c) => c.Worn || painted.Contains((c.Bundle, c.PathId));
+
+            Console.WriteLine($"skins    on '{ownMesh.Label}' the first offered are "
+                + string.Join(", ", order.Take(5).Select(c => c.Worn ? $"[{c.Name}]" : c.Name)));
+
+            var stray = order.FindIndex(c => !Likely(c));
+            if (stray >= 0 && order.FindLastIndex(Likely) > stray)
+                return Fail($"'{order[stray].Name}' is offered above a skin's own paint");
+
             // A skin that replaces the weapon rather than repainting it has nothing under it until
             // its row is opened, because reading every such model on every click in the weapon list
             // is a walk per skin nobody asked for. Opening one asks for that one.
@@ -533,6 +576,9 @@ internal static class SelfTest
                 is not { } skinMesh)
                 skinMesh = inside.First(c => c.Class == AssetsTools.NET.Extra.AssetClassID.Mesh);
 
+            // Emptied first, or the wait below is satisfied by the model already in the pane and
+            // everything after it reads the last mesh's answers while this one is still arriving.
+            model.Preview.Clear();
             model.Detail!.SelectedNode = skinMesh;
             WaitWhile(() => model.Preview.Mesh is null, 60_000);
 
