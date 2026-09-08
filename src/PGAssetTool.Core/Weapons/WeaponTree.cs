@@ -20,7 +20,16 @@ public sealed record WeaponSkinView(
 /// per skin every time a weapon is selected, and it is wanted only when one is being exported.
 public sealed record SkinModel(string AssetPath, string Bundle);
 
-public sealed record SkinMaterial(string Path, string Bundle, string Name, IReadOnlyList<AssetNode> Textures)
+/// <param name="Main">
+/// The texture in the material's main slot — the skin itself, as opposed to the gloss, noise and
+/// mask maps beside it. Null for a material that binds no texture at all.
+///
+/// The distinction is the material's, not a guess from the name: a mask is a mask because of the
+/// slot it is bound to, and the game's own naming is not consistent enough to read it any other
+/// way. Weapon834 alone has GlossTexture, Gloss2, Noisemap_2 and 'Wawes 1' among its skins.
+/// </param>
+public sealed record SkinMaterial(
+    string Path, string Bundle, string Name, IReadOnlyList<AssetNode> Textures, AssetNode? Main)
 {
     /// Where one of this material's textures actually lives.
     ///
@@ -199,8 +208,12 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 
         var info = file.file.GetAssetInfo(pathId);
         var material = info is null ? null : bundles.Context.Deserialize(file, info);
-        if (material is null) return null;
+        return material is null ? null : MainTextureIn(file, bundle, material);
+    }
 
+    /// The texture a material binds to its main slot, wherever that texture lives.
+    private AssetNode? MainTextureIn(AssetsFileInstance file, string bundle, AssetTypeValueField material)
+    {
         // _MainTex first; some materials only bind another slot, and showing that beats showing
         // nothing at all.
         var slots = material["m_SavedProperties"]["m_TexEnvs"]["Array"].Children;
@@ -267,7 +280,10 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 .Where(n => n.Class == AssetClassID.Texture2D)
                 .ToList();
 
-            materials.Add(new SkinMaterial(full, bundle, name, textures));
+            var field = bundles.Context.Deserialize(file, info);
+            var main = field is null ? null : MainTextureIn(file, bundle, field);
+
+            materials.Add(new SkinMaterial(full, bundle, name, textures, main));
         }
 
         return materials;

@@ -218,27 +218,31 @@ internal static class SelfTest
                     var own = detail.Tree.MeshTextures
                         .FirstOrDefault(m => m.MeshPathId == node.PathId)?.BySubMesh
                         .Where(t => t is not null).Select(t => (t!.Bundle, t.PathId)).ToHashSet() ?? [];
-                    // Read off the tree rather than out of the model the ordering is built from, so
-                    // the two ends have to agree on where a texture is. They did not: a texture
-                    // sitting in the same file as the material naming it carries no bundle of its
-                    // own, the tree filled that in from the material and the ordering did not, and
-                    // every skin's own paint quietly failed to match and stayed in the tail.
-                    var paint = new HashSet<(string, long)>();
-                    void Painted(TreeNode n)
+                    var mains = detail.Tree.Skins
+                        .SelectMany(s => s.Materials)
+                        .Where(m => m.Main is not null)
+                        .Select(m => m.Locate(m.Main!))
+                        .ToHashSet();
+
+                    // Every texture the tree files under the skins, read off the rows rather than
+                    // out of the model the ordering is built from — so what the ordering brings up
+                    // has to be something the tree agrees is there, at the same address.
+                    var painted = new HashSet<(string, long)>();
+                    void Paints(TreeNode n)
                     {
-                        if (n.Class == AssetClassID.Texture2D) paint.Add((n.Bundle, n.PathId));
-                        foreach (var child in n.Children) Painted(child);
+                        if (n.Class == AssetClassID.Texture2D) painted.Add((n.Bundle, n.PathId));
+                        foreach (var child in n.Children) Paints(child);
                     }
                     if (detail.Roots.FirstOrDefault(r => r.Label == "Skins") is { } skinRoot)
-                        Painted(skinRoot);
+                        Paints(skinRoot);
 
                     var choices = model.Preview.TextureChoices.Skip(1).ToList();
                     var bands = choices
-                        .Select(c => c.Worn ? 0 : paint.Contains((c.Bundle, c.PathId)) ? 1 : 2)
+                        .Select(c => c.Worn ? 0 : mains.Contains((c.Bundle, c.PathId)) ? 1 : 2)
                         .ToList();
 
                     Console.WriteLine($"         offered {choices.Count}: {bands.Count(b => b == 0)} worn, "
-                        + $"{bands.Count(b => b == 1)} a skin's paint, {bands.Count(b => b == 2)} other");
+                        + $"{bands.Count(b => b == 1)} a skin, {bands.Count(b => b == 2)} other");
 
                     for (var i = 1; i < bands.Count; i++)
                         if (bands[i] < bands[i - 1])
@@ -250,9 +254,16 @@ internal static class SelfTest
                     if (own.Count > 0 && !bands.Contains(0))
                         return Fail($"'{node.Label}' is drawn with textures and none of them is marked");
 
-                    // An order nothing ever moves in passes every check above it.
-                    if (paint.Count > 0 && !bands.Contains(1) && !bands.Contains(0))
-                        return Fail("this weapon's skins paint it and none of that paint was brought up");
+                    // The address check, and the one the spelling bug failed: a texture in the same
+                    // file as the material naming it carries no bundle of its own, and while the
+                    // tree filled that in from the material the ordering did not, so every skin
+                    // failed to match anything and the whole band stayed empty.
+                    var brought = choices.Where((_, i) => bands[i] == 1).ToList();
+                    if (brought.FirstOrDefault(c => !painted.Contains((c.Bundle, c.PathId))) is { } odd)
+                        return Fail($"'{odd.Name}' was brought up as a skin and the tree files no such row");
+
+                    if (mains.Count > 0 && brought.Count == 0 && !bands.Contains(0))
+                        return Fail("this weapon's skins paint it and none of them was brought up");
 
                     // Wearing a texture chosen by hand is how a skin gets tried on a model the
                     // automatic answer knows nothing about. It silently did nothing: the choice
@@ -512,27 +523,31 @@ internal static class SelfTest
                     && n.Label.StartsWith("ultimatum", StringComparison.OrdinalIgnoreCase));
             if (ownMesh is null) return Fail("#416's own mesh is not in the tree");
 
-            var painted = new HashSet<(string, long)>();
-            void Paints(TreeNode n)
-            {
-                if (n.Class == AssetsTools.NET.Extra.AssetClassID.Texture2D) painted.Add((n.Bundle, n.PathId));
-                foreach (var child in n.Children) Paints(child);
-            }
-            Paints(skins);
+            var looks = model.Detail.Tree.Skins
+                .SelectMany(s => s.Materials)
+                .Where(m => m.Main is not null)
+                .Select(m => m.Locate(m.Main!))
+                .ToHashSet();
 
             model.Preview.Clear();
             model.Detail.SelectedNode = ownMesh;
             WaitWhile(() => model.Preview.Mesh is null, 60_000);
 
             var order = model.Preview.TextureChoices.Skip(1).ToList();
-            bool Likely(TextureChoice c) => c.Worn || painted.Contains((c.Bundle, c.PathId));
+            bool Likely(TextureChoice c) => c.Worn || looks.Contains((c.Bundle, c.PathId));
 
             Console.WriteLine($"skins    on '{ownMesh.Label}' the first offered are "
-                + string.Join(", ", order.Take(5).Select(c => c.Worn ? $"[{c.Name}]" : c.Name)));
+                + string.Join(", ", order.Where(Likely).Select(c => c.Worn ? $"[{c.Name}]" : c.Name)));
 
+            // Six of this weapon's eight skins have a material out here and one of those is what it
+            // already wears, so five rows should come up — and the gloss, noise and mask maps those
+            // same materials bind should not, which is the difference between five rows and twelve.
             var stray = order.FindIndex(c => !Likely(c));
             if (stray >= 0 && order.FindLastIndex(Likely) > stray)
-                return Fail($"'{order[stray].Name}' is offered above a skin's own paint");
+                return Fail($"'{order[stray].Name}' is offered above a skin");
+
+            if (order.Count(Likely) < 4)
+                return Fail($"#416 has eight skins and only {order.Count(Likely)} came up");
 
             // A skin that replaces the weapon rather than repainting it has nothing under it until
             // its row is opened, because reading every such model on every click in the weapon list
@@ -613,6 +628,26 @@ internal static class SelfTest
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             if (withModel.Children.Count != read)
                 return Fail($"opening it again read it again: {read} -> {withModel.Children.Count}");
+
+            // A skin can paint the weapon and bring a model of its own, and such a row arrives with
+            // the paint already beneath it. Whether the model had been read was inferred from
+            // whether the row had anything under it at all, so exactly these skins — the ones with
+            // the most to show — never had their model read, and opening the row showed the paint
+            // and nothing else.
+            if (skins.Children.FirstOrDefault(s => s.Unread is not null && !ReferenceEquals(s, withModel)
+                    && s.Children.Count > 0) is { } both)
+            {
+                var painted = CountRows(both.Children);
+                both.IsExpanded = true;
+                WaitWhile(() => CountRows(both.Children) == painted, 60_000);
+
+                Console.WriteLine($"skins    '{both.Label}' paints the weapon and brings a model: "
+                    + $"{painted} -> {CountRows(both.Children)} rows");
+
+                if (!both.Children.SelectMany(c => c.Children)
+                        .Any(g => g.Class == AssetsTools.NET.Extra.AssetClassID.Mesh))
+                    return Fail($"'{both.Label}' brings its own model and opening it read no mesh");
+            }
 
             if (!Select(model, 16)) return Fail("selecting #16 resolved nothing");
 

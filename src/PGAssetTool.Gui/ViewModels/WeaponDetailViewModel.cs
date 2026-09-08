@@ -38,6 +38,14 @@ public sealed partial class TreeNode(
     /// the row can be opened whether or not it has anything under it yet.
     public SkinModel? Unread { get; init; }
 
+    /// Whether the model behind this row has been asked for.
+    ///
+    /// Kept apart from whether the row has anything under it, which is what used to stand in for
+    /// it. A skin can bring a model *and* paint the weapon, and such a row arrives with the paint
+    /// already beneath it — so "it has children, it must have been read" was wrong for exactly the
+    /// skins that have the most to show, and their models were never read at all.
+    public bool ModelRead { get; set; }
+
     public bool HasChildren => Children.Count > 0 || Unread is not null;
 
     public string Icon => Class switch
@@ -87,7 +95,12 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
                 row.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName != nameof(TreeNode.IsExpanded)) return;
-                    if (row is { IsExpanded: true, Children.Count: 0 }) NodeOpened?.Invoke(row);
+                    if (row is not { IsExpanded: true, ModelRead: false }) return;
+
+                    // Marked before the reading starts rather than after: it is asynchronous, and
+                    // a row can be closed and opened again while the first read is still running.
+                    row.ModelRead = true;
+                    NodeOpened?.Invoke(row);
                 };
             }
 

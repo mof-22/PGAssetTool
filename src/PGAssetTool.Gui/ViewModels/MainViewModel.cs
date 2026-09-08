@@ -894,21 +894,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             .Select(n => (n!.Bundle, n.PathId))
             .ToHashSet() ?? [];
 
-        // A skin's materials are what the game hands the weapon's own renderers, so the textures
-        // they use are the next most likely answer after the ones already on the mesh: they are
-        // what this geometry is going to be seen wearing.
+        // A skin's materials are what the game hands the weapon's own renderers, so the skin each
+        // of them paints with is the next most likely answer after what is already on the mesh:
+        // it is what this geometry is going to be seen wearing.
         //
-        // Every skin that has any, and not only the ones with no model of their own. A skin that
-        // replaces the weapon keeps its materials inside the model, which is why most of those
-        // resolve to nothing out here and cost nothing — but some resolve both, and paint that
-        // lands on this geometry is worth offering whether or not the skin has other geometry too.
-        // None of it applies to a mesh that arrived with a skin of its own, whose UVs are its own,
-        // so those keep the plain order.
+        // The main slot only. A skin material also binds gloss, noise and mask maps, and those
+        // outnumber the skins themselves — bringing all of them up buries the eight answers
+        // somebody is looking for among fifteen they are not. They stay on the list below.
+        //
+        // Every skin that has a material out here, not only the ones with no model of their own:
+        // a skin that replaces the weapon keeps its materials inside the model, so most of those
+        // resolve to nothing and cost nothing, but several resolve both. None of this applies to a
+        // mesh that arrived with a skin of its own, whose UVs are its own, so those keep the plain
+        // order.
         HashSet<(string, long)> paint = [];
         if (forMesh != 0 && !_fromSkinModel.Contains(forMesh))
             paint = (_tree?.Skins ?? [])
                 .SelectMany(s => s.Materials)
-                .SelectMany(m => m.Textures.Select(m.Locate))
+                .Where(m => m.Main is not null)
+                .Select(m => m.Locate(m.Main!))
                 .ToHashSet();
 
         var seen = new HashSet<(string, long)>();
