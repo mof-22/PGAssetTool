@@ -298,10 +298,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 Preview.Clear();
                 _tree = tree;
 
-                // What was learned about the last weapon's skins says nothing about this one's.
-                _alsoTextured.Clear();
-                _fromSkinModel.Clear();
-
+                // What was learned about the last weapon's skins goes with the tree it was learned
+                // into: every row carries its own, and the rows are about to be thrown away.
                 Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview, NodeOpened = ReadModel };
                 Status = $"{value.Name} — {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}";
             }
@@ -695,25 +693,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
     /// geometry and the thing being judged — how a texture sits on the model — is invisible.
-    /// Meshes whose textures were worked out after the weapon was: a skin's own model, read when
-    /// somebody opened its row. Kept beside the weapon's own rather than merged into them, because
-    /// the weapon's are part of a resolved tree and this is what has been learned since.
-    private readonly List<MeshTextures> _alsoTextured = [];
+    /// What the game draws the mesh on this row with. Null for a row nothing was found for.
+    ///
+    /// The row's own answer first, and only then the weapon's. A skin's model can point at the
+    /// weapon's own mesh rather than carrying a copy, so the same asset is on the tree twice under
+    /// two sets of materials, and the weapon's answer is right for only one of them.
+    private MeshTextures? SlotsFor(TreeNode node)
+        => node.Within?.Wearing ?? _tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == node.PathId);
 
-    /// The meshes that arrived with a skin of their own, rather than being the weapon's own
-    /// geometry. Kept apart because a repainting skin's paint is cut for the weapon's UVs and means
-    /// nothing on one of these, so it is not worth recommending there.
-    private readonly HashSet<long> _fromSkinModel = [];
-
-    /// What the game draws this mesh with, from the weapon's own answer or from one worked out
-    /// since. Null for a mesh nothing was found for.
-    private MeshTextures? Slots(long meshPathId)
-        => _tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == meshPathId)
-            ?? _alsoTextured.FirstOrDefault(m => m.MeshPathId == meshPathId);
-
-    private IReadOnlyList<PreviewImage?>? TexturesFor(long meshPathId)
+    private IReadOnlyList<PreviewImage?>? TexturesFor(MeshTextures? slots)
     {
-        if (Slots(meshPathId) is not { } slots) return null;
+        if (slots is null) return null;
 
         return slots.BySubMesh.Select(node =>
         {
@@ -776,13 +766,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // Which texture belongs on which part is decided by the renderers, and they are in
                 // what was just walked — so it is asked before the filter takes them out again.
                 // Without this a skin's own model came up grey and somebody had to guess.
-                if (_resolver is { } resolver)
-                    foreach (var slots in await Task.Run(() => resolver.TexturesFor(model.Bundle, walked)))
-                        if (_alsoTextured.All(m => m.MeshPathId != slots.MeshPathId))
-                            _alsoTextured.Add(slots);
-
-                foreach (var mesh in walked.Where(a => a.Class == AssetClassID.Mesh))
-                    _fromSkinModel.Add(mesh.PathId);
+                var dressing = _resolver is { } resolver
+                    ? await Task.Run(() => resolver.TexturesFor(model.Bundle, walked))
+                    : [];
 
                 var found = walked
                     .Where(a => !ReplaceableOnly || Replaceable.Supports(a.Class))
@@ -804,7 +790,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                             asset.Name.Length > 0 ? asset.Name : $"(unnamed {asset.PathId})",
                             asset.Bundle.Length > 0 ? asset.Bundle : model.Bundle,
                             asset.Class, asset.PathId,
-                            asset.Bundle.Length > 0 ? asset.Bundle : model.Bundle));
+                            asset.Bundle.Length > 0 ? asset.Bundle : model.Bundle)
+                        {
+                            // Every row carries which model it came out of, and a mesh carries what
+                            // that model draws it with — the row is the only place either can be
+                            // asked once two models point at the same asset.
+                            Within = new ModelSource(model.AssetPath, asset.Class == AssetClassID.Mesh
+                                ? dressing.FirstOrDefault(d => d.MeshPathId == asset.PathId)
+                                : null),
+                        });
 
                     node.With(into);
                 }
@@ -878,18 +872,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// model is read when its row is opened, and its textures are exactly the ones somebody wants
     /// on the mesh they have just been given.
     /// <param name="forMesh">
-    /// The mesh being looked at, which decides the order. Every texture the weapon reaches stays on
+    /// The row being looked at, which decides the order. Every texture the weapon reaches stays on
     /// the list — trying another skin's paint on a mesh is the point of the list existing — but a
     /// weapon reaches thirty of them, so they come in three bands: what this mesh is already drawn
     /// with, then the paint that would go on it, then everything else.
     /// </param>
-    private void OfferTextures(long forMesh = 0)
+    private void OfferTextures(TreeNode? forMesh = null)
     {
         // Emptying the list empties the box bound to it, which writes a null back through the
         // selection. What was on the mesh goes back on it.
         var wearing = Preview.ChosenTexture;
 
-        var mine = Slots(forMesh)?.BySubMesh
+        var mine = (forMesh is null ? null : SlotsFor(forMesh))?.BySubMesh
             .Where(n => n is not null)
             .Select(n => (n!.Bundle, n.PathId))
             .ToHashSet() ?? [];
@@ -910,7 +904,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // that arrived with a skin of its own, whose UVs are its own, so those keep the plain
         // order.
         HashSet<(string, long)> paint = [];
-        if (forMesh != 0 && !_fromSkinModel.Contains(forMesh))
+        if (forMesh is { Within: null })
             paint = (_tree?.Skins ?? [])
                 .Where(s => s.Model is null)
                 .SelectMany(s => s.Materials)
@@ -993,9 +987,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     case UnityMesh mesh:
                         // Reordered before it is shown, so the choice this mesh is remembered with
                         // lands in a list that already holds it.
-                        OfferTextures(node.PathId);
-                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(node.PathId),
-                            subject: $"{node.Bundle}:{node.PathId}");
+                        OfferTextures(node);
+                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(SlotsFor(node)),
+                            // The model it was reached through is part of which model this is: two
+                            // rows can stand for the same asset, and an angle turned to on one of
+                            // them is not the angle the other was left at.
+                            subject: node.Within is { } within
+                                ? $"{within.Path}/{node.Bundle}:{node.PathId}"
+                                : $"{node.Bundle}:{node.PathId}");
                         break;
                     case PreviewSound sound:
                         Preview.Show(sound, $"{node.Label}   @ {node.Bundle}");

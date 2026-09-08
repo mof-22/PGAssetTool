@@ -557,6 +557,8 @@ internal static class SelfTest
             if (order.Count(Likely) != 4)
                 return Fail($"#416 has four skins that repaint it and {order.Count(Likely)} came up");
 
+            var plain = order.Where(c => c.Worn).Select(c => c.Name).ToHashSet();
+
             // A skin that replaces the weapon rather than repainting it has nothing under it until
             // its row is opened, because reading every such model on every click in the weapon list
             // is a walk per skin nobody asked for. Opening one asks for that one.
@@ -655,6 +657,57 @@ internal static class SelfTest
                 if (!both.Children.SelectMany(c => c.Children)
                         .Any(g => g.Class == AssetsTools.NET.Extra.AssetClassID.Mesh))
                     return Fail($"'{both.Label}' brings its own model and opening it read no mesh");
+            }
+
+            // A skin's model can point straight at the weapon's own mesh rather than carrying a
+            // copy of it, so the same asset stands in the tree twice under two sets of materials.
+            // Asked by path id, the answer found was whichever came first — the weapon's — and the
+            // skin's row came up wearing the paint it was made to replace.
+            TreeNode? twice = null;
+            foreach (var skin in skins.Children.Where(s => s.Unread is not null))
+            {
+                if (!skin.ModelRead)
+                {
+                    var had = CountRows(skin.Children);
+                    skin.IsExpanded = true;
+                    WaitWhile(() => CountRows(skin.Children) == had, 60_000);
+                }
+
+                twice = skin.Children.SelectMany(c => c.Children).FirstOrDefault(
+                    c => c.Class == AssetsTools.NET.Extra.AssetClassID.Mesh && c.PathId == ownMesh.PathId);
+                if (twice is not null) break;
+            }
+
+            if (twice is null) Console.WriteLine("skins    no skin of #416 shares the weapon's own mesh");
+            else
+            {
+                model.Preview.Clear();
+                model.Detail.SelectedNode = twice;
+                WaitWhile(() => model.Preview.Mesh is null, 60_000);
+
+                var instead = model.Preview.TextureChoices.Where(c => c.Worn).Select(c => c.Name).ToList();
+                Console.WriteLine($"skins    the weapon's own mesh under a skin of its own wears "
+                    + $"{(instead.Count == 0 ? "nothing" : string.Join(", ", instead))}, "
+                    + $"not {string.Join(", ", plain)}");
+
+                if (instead.Count == 0)
+                    return Fail("the same mesh under a skin's own model came up with nothing on it");
+                if (instead.Any(plain.Contains))
+                    return Fail("the same mesh under a skin's own model came up in the weapon's paint");
+
+                // And the weapon's own row is untouched by having gone there. Keyed by path id,
+                // opening that skin marked this mesh as one that arrived with a skin of its own,
+                // and the weapon's own row stopped offering the weapon's own skins.
+                model.Preview.Clear();
+                model.Detail.SelectedNode = ownMesh;
+                WaitWhile(() => model.Preview.Mesh is null, 60_000);
+
+                var back = model.Preview.TextureChoices.Skip(1).ToList();
+                if (back.Count(Likely) != 4)
+                    return Fail($"after a trip to the skin's row, '{ownMesh.Label}' leads with "
+                        + $"{back.Count(Likely)} of its four skins");
+                if (!back.Any(c => c.Worn && plain.Contains(c.Name)))
+                    return Fail($"after a trip to the skin's row, '{ownMesh.Label}' is not in its own paint");
             }
 
             if (!Select(model, 16)) return Fail("selecting #16 resolved nothing");

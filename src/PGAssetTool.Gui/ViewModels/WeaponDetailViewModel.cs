@@ -7,6 +7,16 @@ using PGAssetTool.Core.Weapons;
 
 namespace PGAssetTool.Gui.ViewModels;
 
+/// <param name="Path">
+/// Which model this row came out of, so two rows standing for the same asset under two models are
+/// two things to remember an angle and a texture for rather than one.
+/// </param>
+/// <param name="Wearing">
+/// What this row's mesh is drawn with inside that model, worked out while it was being read. Null
+/// for a row that is not a mesh, and for a mesh whose materials led nowhere.
+/// </param>
+public sealed record ModelSource(string Path, MeshTextures? Wearing);
+
 /// One row in the tree. Only the leaves stand for something that can be looked at or replaced.
 public sealed partial class TreeNode(
     string label, string? detail = null, AssetClassID? cls = null, long pathId = 0, string bundle = "",
@@ -37,6 +47,16 @@ public sealed partial class TreeNode(
     /// selected, and most of them are never opened. So it is read when somebody opens the row, and
     /// the row can be opened whether or not it has anything under it yet.
     public SkinModel? Unread { get; init; }
+
+    /// The model this row was read out of, when it is not the weapon's own.
+    ///
+    /// A skin's model can point straight at the weapon's own mesh rather than carrying a copy of
+    /// it — #416's Ultimative Snowfall does — so the same Mesh asset stands in the tree twice,
+    /// under two different sets of materials. Which of the two a row means is the row's own
+    /// business and cannot be got back from a path id: asked that way, the skin's row came up
+    /// wearing the weapon's paint, and opening it stopped the weapon's own row from offering the
+    /// weapon's skins.
+    public ModelSource? Within { get; init; }
 
     /// Whether the model behind this row has been asked for.
     ///
