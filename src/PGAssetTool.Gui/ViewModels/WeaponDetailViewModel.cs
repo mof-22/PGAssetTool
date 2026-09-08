@@ -40,13 +40,19 @@ public sealed partial class TreeNode(
     /// Two-way bound to the row, so clicking one and expanding it are the same gesture.
     [ObservableProperty] private bool _isExpanded;
 
+    /// The skin this row stands for, when it stands for one.
+    ///
+    /// Opening such a row shows the weapon wearing it, which needs the skin's own materials — and
+    /// for the ones that bring a model, the place to read that model from.
+    public WeaponSkinView? Skin { get; init; }
+
     /// A model this row stands for whose contents have not been read yet.
     ///
     /// A skin that brings its own model is recorded as a place rather than as what is in it:
     /// reading the closure of every skin would be a bundle walk per skin every time a weapon was
     /// selected, and most of them are never opened. So it is read when somebody opens the row, and
     /// the row can be opened whether or not it has anything under it yet.
-    public SkinModel? Unread { get; init; }
+    public SkinModel? Unread => Skin?.Model;
 
     /// The model this row was read out of, when it is not the weapon's own.
     ///
@@ -57,6 +63,11 @@ public sealed partial class TreeNode(
     /// wearing the weapon's paint, and opening it stopped the weapon's own row from offering the
     /// weapon's skins.
     public ModelSource? Within { get; init; }
+
+    /// Which mesh under this row is the thing the model is of, once it has been read. A skin's
+    /// model carries the player's arms the same way the weapon's does, so the same question has to
+    /// be asked of it and is answered the same way. See WeaponResolver.MainMesh.
+    public AssetNode? Body { get; set; }
 
     /// Whether the model behind this row has been asked for.
     ///
@@ -75,6 +86,10 @@ public sealed partial class TreeNode(
         AssetClassID.AudioClip => "🔊",
         AssetClassID.Material => "🎨",
         AssetClassID.GameObject => "📦",
+        // A skin that replaces the weapon is a model, not a folder of paint, and which of the two
+        // a skin is decides everything about working on it.
+        _ when Unread is not null => "📦",
+
         // What it holds, not what has been read out of it. A skin that brings its own model has
         // nothing beneath it until somebody opens the row, and drawing those two as an empty row
         // said the skins with the most in them were the ones with nothing.
@@ -107,23 +122,25 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
     /// owns the bundles and the lock around them; this only says which row was opened.
     public Action<TreeNode>? NodeOpened { get; set; }
 
-    /// Watches the rows that stand for something unread, so opening one asks for it — once.
+    /// Watches the skin rows, so opening one asks to be shown it — once.
+    ///
+    /// Every skin, not only the ones with a model to read: opening a skin that repaints the weapon
+    /// has something to show too, and it is the same thing seen from the other side.
     private void Watch(IEnumerable<TreeNode> nodes)
     {
         foreach (var node in nodes)
         {
-            if (node.Unread is not null)
+            if (node.Skin is not null)
             {
                 var row = node;
                 row.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName != nameof(TreeNode.IsExpanded)) return;
-                    if (row is not { IsExpanded: true, ModelRead: false }) return;
 
-                    // Marked before the reading starts rather than after: it is asynchronous, and
-                    // a row can be closed and opened again while the first read is still running.
-                    row.ModelRead = true;
-                    NodeOpened?.Invoke(row);
+                    // Every time it is opened. Showing the weapon in this skin is worth doing
+                    // again — somebody closing a row and opening it is asking to see it again —
+                    // and reading the model behind it is what happens only once, guarded there.
+                    if (row.IsExpanded) NodeOpened?.Invoke(row);
                 };
             }
 
@@ -189,7 +206,7 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
                 // needs — so without this there was nothing of such a skin to look at at all.
                 var node = new TreeNode(skin.DisplayName ?? skin.Record.Id, skin.Record.Id)
                 {
-                    Unread = skin.Model,
+                    Skin = skin,
                 };
 
                 foreach (var material in skin.Materials)

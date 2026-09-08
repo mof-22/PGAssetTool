@@ -117,6 +117,8 @@ internal static class SelfTest
             Console.WriteLine($"weapons  {model.Weapons.Count}");
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
+            if (WhichMeshIsTheWeapon(model) is { } wrongMesh) return Fail(wrongMesh);
+
             model.Search = "beretta";
             Console.WriteLine($"search   'beretta' -> {model.Weapons.Count}");
 
@@ -152,7 +154,7 @@ internal static class SelfTest
                 // Cleared first, or the wait below would pass instantly on the previous asset.
                 model.Preview.Clear();
                 detail.SelectedNode = node;
-                WaitWhile(() => model.Preview.Nothing is not null, 30_000);
+                Arrived(model, node);
 
                 if (model.Preview.Nothing is { } why) return Fail($"{want} '{node.Label}': {why}");
                 Console.WriteLine($"preview  {model.Preview.Caption}");
@@ -309,7 +311,7 @@ internal static class SelfTest
             {
                 model.Preview.Clear();
                 detail.SelectedNode = icon;
-                WaitWhile(() => model.Preview.Nothing is not null, 30_000);
+                Arrived(model, icon);
 
                 if (model.Preview.Nothing is { } why) return Fail($"icon '{icon.Label}': {why}");
                 Console.WriteLine($"preview  {model.Preview.Caption}");
@@ -325,7 +327,7 @@ internal static class SelfTest
 
                 detail.SelectedNode = detail.Roots[0];
                 detail.SelectedNode = icon;
-                WaitWhile(() => model.Preview.Nothing is not null, 30_000);
+                Arrived(model, icon);
 
                 Console.WriteLine($"         after turning it off, the next picture kept it off: "
                     + $"{!model.Preview.ShowAlpha}");
@@ -505,6 +507,13 @@ internal static class SelfTest
             // A skin is worth a row only if what it changes can be reached from it.
             if (!Select(model, 416)) return Fail("selecting #416 resolved nothing");
 
+            // Landing on the weapon, not on the tree. Nobody opens a weapon to read a list of
+            // seventy-five objects, and which of its meshes is the weapon is not a question they
+            // should have to answer by clicking.
+            if (model.Detail?.SelectedNode is not { Class: AssetsTools.NET.Extra.AssetClassID.Mesh } landed
+                || landed.PathId != model.Detail.Tree.MainMesh?.PathId)
+                return Fail($"selecting #416 came up on '{model.Detail?.SelectedNode?.Label ?? "nothing"}'");
+
             if (SkinsAreOffered(model, scratch) is { } skinProblem) return Fail(skinProblem);
 
             var skins = model.Detail?.Roots.FirstOrDefault(r => r.Label == "Skins");
@@ -538,7 +547,7 @@ internal static class SelfTest
 
             model.Preview.Clear();
             model.Detail.SelectedNode = ownMesh;
-            WaitWhile(() => model.Preview.Mesh is null, 60_000);
+            Arrived(model, ownMesh);
 
             var order = model.Preview.TextureChoices.Skip(1).ToList();
             bool Likely(TextureChoice c) => c.Worn || looks.Contains((c.Bundle, c.PathId));
@@ -558,6 +567,24 @@ internal static class SelfTest
                 return Fail($"#416 has four skins that repaint it and {order.Count(Likely)} came up");
 
             var plain = order.Where(c => c.Worn).Select(c => c.Name).ToHashSet();
+
+            // Opening a skin shows the weapon wearing it. One that only repaints has no model to
+            // open, so what there is to see is the weapon's own geometry in this skin's paint —
+            // and it has to survive the model landing, which puts back what that mesh last wore.
+            if (skins.Children.FirstOrDefault(s => s.Unread is null && s.Children.Count > 0) is { } repaint)
+            {
+                model.Preview.Clear();
+                repaint.IsExpanded = false;
+                repaint.IsExpanded = true;
+                Arrived(model, ownMesh);
+
+                var put = model.Preview.ChosenTexture;
+                Console.WriteLine($"skins    opening '{repaint.Label}' put "
+                    + $"{put?.Name ?? "nothing"} on '{ownMesh.Label}'");
+
+                if (put is null || !looks.Contains((put.Bundle, put.PathId)))
+                    return Fail($"opening '{repaint.Label}' did not put a skin on the weapon");
+            }
 
             // A skin that replaces the weapon rather than repainting it has nothing under it until
             // its row is opened, because reading every such model on every click in the weapon list
@@ -605,7 +632,7 @@ internal static class SelfTest
             // everything after it reads the last mesh's answers while this one is still arriving.
             model.Preview.Clear();
             model.Detail!.SelectedNode = skinMesh;
-            WaitWhile(() => model.Preview.Mesh is null, 60_000);
+            Arrived(model, skinMesh);
 
             var dressed = model.Preview.MeshTextures?.Count(t => t is not null) ?? 0;
             Console.WriteLine($"skins    '{skinMesh.Label}' came up wearing {dressed} texture(s)");
@@ -683,7 +710,7 @@ internal static class SelfTest
             {
                 model.Preview.Clear();
                 model.Detail.SelectedNode = twice;
-                WaitWhile(() => model.Preview.Mesh is null, 60_000);
+                Arrived(model, twice);
 
                 var instead = model.Preview.TextureChoices.Where(c => c.Worn).Select(c => c.Name).ToList();
                 Console.WriteLine($"skins    the weapon's own mesh under a skin of its own wears "
@@ -700,7 +727,7 @@ internal static class SelfTest
                 // and the weapon's own row stopped offering the weapon's own skins.
                 model.Preview.Clear();
                 model.Detail.SelectedNode = ownMesh;
-                WaitWhile(() => model.Preview.Mesh is null, 60_000);
+                Arrived(model, ownMesh);
 
                 var back = model.Preview.TextureChoices.Skip(1).ToList();
                 if (back.Count(Likely) != 4)
@@ -2088,6 +2115,78 @@ internal static class SelfTest
             + $"editing {texture.Source}");
         return directory;
     }
+
+    /// Whether selecting a weapon lands on the weapon rather than on the player's hands.
+    ///
+    /// Swept across the catalogue rather than asked of one, because what makes this hard is how
+    /// little the weapons have in common: the early ones are not named after their own meshes
+    /// (#30 Guerilla Rifle is SVD_2_mesh), some keep their art in a shared bundle rather than
+    /// their own, and a few are called one thing and painted with another. A rule can be made to
+    /// fit any handful of them and still be wrong about the rest.
+    ///
+    /// The name of the arms is the oracle here and deliberately not the answer: what is being
+    /// checked is that the tool arrives at the same place without being told it. It is allowed one
+    /// last-resort use of that name for the weapons nothing else separates, so a sweep that came
+    /// back perfect would be checking nothing — hence the count, which says how much of the answer
+    /// is coming from the data.
+    private static string? WhichMeshIsTheWeapon(MainViewModel model)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var (looked, arms, byData, missing) = (0, 0, 0, new List<string>());
+        TreeNode? last = null;
+
+        // Every twenty-third, which is a spread across the whole catalogue rather than a run of
+        // neighbours — weapons near each other in the list were made at the same time and share
+        // whatever convention was in fashion then.
+        foreach (var item in model.Weapons.Where((_, i) => i % 23 == 0))
+        {
+            model.Selected = item;
+            if (!WaitWhile(() => model.Detail?.Tree.Record.GameNumber != item.Record.GameNumber, 60_000))
+                return $"#{item.Record.GameNumber} never resolved";
+
+            var tree = model.Detail!.Tree;
+            var meshes = tree.PrefabAssets.Count(a => a.Class == AssetsTools.NET.Extra.AssetClassID.Mesh);
+            if (meshes == 0) continue;
+
+            looked++;
+            if (tree.MainMesh is not { } body) { missing.Add($"#{item.Record.GameNumber}"); continue; }
+
+            if (string.Equals(body.Name, PGAssetTool.Core.Weapons.WeaponResolver.Arms, StringComparison.OrdinalIgnoreCase))
+                arms++;
+            else if (meshes > 1 && tree.PrefabAssets.Any(
+                         a => string.Equals(a.Name, PGAssetTool.Core.Weapons.WeaponResolver.Arms, StringComparison.OrdinalIgnoreCase)))
+                byData++;
+
+            last = model.Detail.SelectedNode;
+        }
+
+        // Each selection puts a decode on the queue, and the queue is served in order — so waiting
+        // for the last one is waiting for all of them. Left running, they land under whatever the
+        // next check is doing and it reads them instead of its own.
+        if (last is not null) Arrived(model, last);
+
+        Console.WriteLine($"model    {looked} weapons swept in {clock.ElapsedMilliseconds}ms: "
+            + $"{byData} picked out from beside the arms, {arms} landed on them");
+
+        if (looked < 20) return $"only {looked} weapons had a mesh to choose between";
+        if (missing.Count > 0) return $"no model was worked out for {string.Join(", ", missing)}";
+        if (arms > 0) return $"{arms} of {looked} weapons come up showing the player's hands";
+        if (byData < looked / 2) return $"only {byData} of {looked} were told apart from their arms";
+
+        return null;
+    }
+
+    /// Waits for the preview to be showing this row, rather than merely showing something.
+    ///
+    /// A selection is read and decoded on a queue, so at any moment the pane may still be holding
+    /// what was selected before it. Waiting for "anything at all" was satisfied by the previous
+    /// row, and every check after it read the wrong asset's answers — which only started happening
+    /// when the tool began showing a weapon's model the moment the weapon is picked, putting one
+    /// more of those in flight. The caption is the one thing that says which row landed.
+    private static bool Arrived(MainViewModel model, TreeNode node)
+        => WaitWhile(
+            () => !model.Preview.Caption.StartsWith($"{node.Label}   @ ", StringComparison.Ordinal),
+            60_000);
 
     private static bool Select(MainViewModel model, int number)
     {

@@ -300,8 +300,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 // What was learned about the last weapon's skins goes with the tree it was learned
                 // into: every row carries its own, and the rows are about to be thrown away.
-                Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview, NodeOpened = ReadModel };
+                Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview, NodeOpened = OpenSkin };
                 Status = $"{value.Name} — {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}";
+
+                // Straight to the weapon itself. The tree opens on seventy-odd rows and the one
+                // thing everybody has come to see is the gun, dressed as the game dresses it —
+                // waiting to be found among the meshes is a click that always has the same answer.
+                Detail.SelectedNode = WeaponMesh();
             }
             finally
             {
@@ -616,7 +621,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_tree is null) return;
 
         Preview.Clear();
-        Detail = new WeaponDetailViewModel(_tree, value) { NodeSelected = ShowPreview, NodeOpened = ReadModel };
+        Detail = new WeaponDetailViewModel(_tree, value) { NodeSelected = ShowPreview, NodeOpened = OpenSkin };
     }
 
     /// Changing the language means every name in the catalogs, so the game is read again.
@@ -693,6 +698,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
     /// geometry and the thing being judged — how a texture sits on the model — is invisible.
+    /// A texture to put on the next mesh shown, if it is on the list when that mesh arrives.
+    ///
+    /// Set rather than applied, because it takes effect after the model does: showing a mesh puts
+    /// back the texture that mesh was last left wearing, so a choice made before it lands is
+    /// undone by it.
+    private TextureChoice? _asked;
+
+    /// The row standing for one of the meshes that were walked. Null if the filter took it out.
+    private static TreeNode? RowFor(IEnumerable<TreeNode> rows, AssetNode? mesh)
+        => mesh is null
+            ? null
+            : AllNodes(rows).FirstOrDefault(n => n.Class == AssetClassID.Mesh && n.PathId == mesh.PathId);
+
+    /// The weapon's own model. Rows read out of a skin's model are left out: those are that skin.
+    private TreeNode? WeaponMesh()
+        => Detail is not { } detail || _tree is null
+            ? null
+            : RowFor(AllNodes(detail.Roots).Where(n => n.Within is null), _tree.MainMesh);
+
     /// What the game draws the mesh on this row with. Null for a row nothing was found for.
     ///
     /// The row's own answer first, and only then the weapon's. A skin's model can point at the
@@ -736,10 +760,48 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// several of which bring a model, and walking every one of them to fill rows nobody opens
     /// would be paid on every click in the weapon list. Walking one when it is asked for is paid by
     /// whoever asked.
-    private async void ReadModel(TreeNode node)
+    private async void OpenSkin(TreeNode node)
     {
-        if (node.Unread is not { } model) return;
+        if (node.Skin is not { } skin) return;
 
+        // Read once; shown every time. The reading is what a second opening must not repeat.
+        if (skin.Model is { } model && !node.ModelRead)
+        {
+            node.ModelRead = true;
+            await ReadModel(node, model);
+        }
+
+        // Its own model if it brought one, and the weapon's own if it did not — a skin that only
+        // repaints is seen on the weapon's geometry, because that is where the game puts it.
+        if (skin.Model is null)
+        {
+            _asked = skin.Materials.FirstOrDefault(m => m.Main is not null) is { Main: { } main } holder
+                ? new TextureChoice(main.Name, holder.Locate(main).Bundle, main.PathId)
+                : null;
+
+            Show(WeaponMesh());
+        }
+        else
+        {
+            // Worked out the same way for the model a skin brought as for the weapon's own, which
+            // matters because a skin's model carries the arms too. Named after the skin where the
+            // model is the skin's own, and after the weapon where it turns out to point back at
+            // the weapon's mesh; both happen on #416.
+            Show(RowFor(node.Children, node.Body));
+        }
+    }
+
+    /// Selects a row, and shows it again if it is already the one selected.
+    private void Show(TreeNode? node)
+    {
+        if (Detail is not { } detail || node is null) return;
+
+        if (ReferenceEquals(detail.SelectedNode, node)) ShowPreview(node);
+        else detail.SelectedNode = node;
+    }
+
+    private async Task ReadModel(TreeNode node, SkinModel model)
+    {
         try
         {
             await _reading.WaitAsync();
@@ -769,6 +831,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 var dressing = _resolver is { } resolver
                     ? await Task.Run(() => resolver.TexturesFor(model.Bundle, walked))
                     : [];
+
+                node.Body = WeaponResolver.MainMesh(model.Bundle, walked, dressing,
+                    node.Skin?.Record.Id ?? "", _tree?.Record.Slug ?? "");
 
                 var found = walked
                     .Where(a => !ReplaceableOnly || Replaceable.Supports(a.Class))
@@ -995,6 +1060,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                             subject: node.Within is { } within
                                 ? $"{within.Path}/{node.Bundle}:{node.PathId}"
                                 : $"{node.Bundle}:{node.PathId}");
+
+                        // After the model, which puts back whatever this mesh was last wearing.
+                        // Taken whether or not it was found, so it cannot arrive on the next one.
+                        if (_asked is { } asked
+                            && Preview.TextureChoices.FirstOrDefault(c => c == asked) is { } onTheList)
+                            Preview.ChosenTexture = onTheList;
+                        _asked = null;
                         break;
                     case PreviewSound sound:
                         Preview.Show(sound, $"{node.Label}   @ {node.Bundle}");

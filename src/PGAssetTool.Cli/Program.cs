@@ -442,6 +442,8 @@ Console.WriteLine();
 if (tree.Icon is not null)
     Console.WriteLine($"  Icon     {tree.Icon.TextureName} @ {tree.Icon.Container}");
 Console.WriteLine($"  Prefab   Weapons/{record.PrefabName} @ {tree.PrefabBundle ?? "?"}");
+if (tree.MainMesh is { } body)
+    Console.WriteLine($"  Model    {body.Name}   (the prefab holds the player's arms as well)");
 foreach (var group in tree.PrefabAssets.GroupBy(a => a.Class).OrderByDescending(g => g.Count()))
 {
     Console.WriteLine($"    {group.Key} ({group.Count()})");

@@ -58,7 +58,8 @@ public sealed record WeaponTree(
     IReadOnlyList<RelatedAsset> Related,
     IconLocation? Icon,
     IReadOnlyList<string> UnresolvedReasons,
-    IReadOnlyList<MeshTextures> MeshTextures);
+    IReadOnlyList<MeshTextures> MeshTextures,
+    AssetNode? MainMesh);
 
 /// Assembles everything belonging to one weapon. Resolution happens on demand: the catalogs plus
 /// the single bundle holding the prefab are enough, so nothing is precomputed.
@@ -121,9 +122,69 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         if (icon is null && !record.IsHidden)
             unresolved.Add($"no icon texture named '{record.Slug}{IconResolver.Suffix}'");
 
+        var dressing = prefabBundle is null ? [] : TexturesForMeshes(prefabBundle, assets);
+
         return new WeaponTree(
             record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved,
-            prefabBundle is null ? [] : TexturesForMeshes(prefabBundle, assets));
+            dressing,
+            prefabBundle is null ? null : MainMesh(prefabBundle, assets, dressing, record.Slug, record.PrefabName));
+    }
+
+    /// Which of a model's meshes is the thing it is a model of.
+    ///
+    /// Every weapon's prefab holds the player's arms as well as the gun. They are the same class in
+    /// the same bundle, and the name is no help: the early weapons' meshes are not named after the
+    /// weapon at all — #1 is 'pixlgun_mesh', #5 Heavy Machine Gun is 'Machinegun_Mesh',
+    /// #30 Guerilla Rifle is 'SVD_2_mesh' — while the arms are named the same in all of them, which
+    /// is a rule about the arms rather than about the weapon and would break the moment it moved.
+    ///
+    /// So it is decided by what each mesh is drawn with: the one wearing a texture that belongs to
+    /// this weapon is the weapon, and the arms wear one shared by every weapon in the game.
+    ///
+    /// A texture belongs to the weapon if it is bundled with it or named after it, and it takes
+    /// only one of the two. Neither holds on its own — #1045 Pulling Sucker Gun keeps its map in a
+    /// shared bundle and #2 Shotgun's map is not named after the weapon either — but nothing the
+    /// arms wear satisfies either one, which is the point: their texture is shared, so it is
+    /// neither in one weapon's bundle nor named for one. The mesh's own name is kept as a second
+    /// voice, worth something when it agrees and outweighed when it does not, and having anything
+    /// to wear breaks a tie between two meshes neither of which is dressed from here.
+    ///
+    /// <param name="named">Names the thing might be called after, best first.</param>
+    /// The first-person arms, which every weapon's prefab carries under this name.
+    public const string Arms = "Arms_Mesh";
+
+    public static AssetNode? MainMesh(
+        string bundle, IReadOnlyList<AssetNode> assets, IReadOnlyList<MeshTextures> dressing,
+        params string[] named)
+    {
+        var meshes = assets.Where(a => a.Class == AssetClassID.Mesh).ToList();
+        if (meshes.Count <= 1) return meshes.FirstOrDefault();
+
+        // Stable, so meshes that score the same keep the order the walk found them in — except
+        // that between two the data cannot tell apart, the arms lose. That is the one place a name
+        // is trusted outright, and it is a name the game gives every weapon rather than one it
+        // gives this weapon: 84 of 85 sampled across the catalogue carry a mesh called exactly
+        // this. It settles the handful the tests above cannot, where a weapon is called one thing
+        // and its art another — #1081 Hammer Sword is 'class_knight_hammer' wearing
+        // 'brave_lion_map' out of a shared bundle, and nothing about it says which mesh is a sword.
+        return meshes
+            .OrderByDescending(Score)
+            .ThenBy(m => string.Equals(m.Name, Arms, StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .First();
+
+        bool Called(string what)
+            => named.Any(n => n.Length > 0 && what.Contains(n, StringComparison.OrdinalIgnoreCase));
+
+        int Score(AssetNode mesh)
+        {
+            var worn = dressing.FirstOrDefault(d => d.MeshPathId == mesh.PathId)?.BySubMesh
+                .Where(t => t is not null).ToList() ?? [];
+
+            var its = worn.Any(t => Called(t!.Name)
+                || string.Equals(t.Bundle, bundle, StringComparison.OrdinalIgnoreCase));
+
+            return (its ? 4 : 0) + (Called(mesh.Name) ? 2 : 0) + (worn.Count > 0 ? 1 : 0);
+        }
     }
 
     /// Which textures each mesh in the weapon is actually drawn with.
