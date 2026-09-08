@@ -210,6 +210,39 @@ internal static class SelfTest
                     if (slots?.Any(s => s is not null) == true && coloured == 0)
                         return Fail($"'{node.Label}' has a texture but drew in flat grey");
 
+                    // The list a weapon's own mesh is offered comes in three bands: what it is
+                    // already drawn with, then the paint a repainting skin would put on it — the
+                    // same geometry, so it is what this mesh will be seen wearing in the game —
+                    // then everything else the weapon reaches. Ordering alone is a weak signal,
+                    // so the worn ones are marked as well and the marks have to be the right ones.
+                    var own = detail.Tree.MeshTextures
+                        .FirstOrDefault(m => m.MeshPathId == node.PathId)?.BySubMesh
+                        .Where(t => t is not null).Select(t => (t!.Bundle, t.PathId)).ToHashSet() ?? [];
+                    var repaint = detail.Tree.Skins
+                        .Where(s => s.Model is null)
+                        .SelectMany(s => s.Materials)
+                        .SelectMany(m => m.Textures)
+                        .Select(t => (t.Bundle, t.PathId))
+                        .ToHashSet();
+
+                    var choices = model.Preview.TextureChoices.Skip(1).ToList();
+                    var bands = choices
+                        .Select(c => c.Worn ? 0 : repaint.Contains((c.Bundle, c.PathId)) ? 1 : 2)
+                        .ToList();
+
+                    Console.WriteLine($"         offered {choices.Count}: {bands.Count(b => b == 0)} worn, "
+                        + $"{bands.Count(b => b == 1)} a repainting skin's, {bands.Count(b => b == 2)} other");
+
+                    for (var i = 1; i < bands.Count; i++)
+                        if (bands[i] < bands[i - 1])
+                            return Fail($"'{choices[i].Name}' is offered below something less likely to be wanted");
+
+                    if (choices.Any(c => c.Worn != own.Contains((c.Bundle, c.PathId))))
+                        return Fail("what the list marks as worn is not what the mesh is drawn with");
+
+                    if (own.Count > 0 && !bands.Contains(0))
+                        return Fail($"'{node.Label}' is drawn with textures and none of them is marked");
+
                     // Wearing a texture chosen by hand is how a skin gets tried on a model the
                     // automatic answer knows nothing about. It silently did nothing: the choice
                     // carried its picture, filling that in made a different value, and the combo
@@ -519,6 +552,13 @@ internal static class SelfTest
             if (head.Any(c => !inside.Any(n => n.Label == c.Name && n.PathId == c.PathId)))
                 return Fail("the textures at the top of the list are not the ones on the mesh: "
                     + string.Join(", ", head.Select(c => c.Name)));
+
+            // And nothing else is promoted here. A repainting skin's paint is cut for the weapon's
+            // own geometry, so on a mesh that arrived with a skin of its own it is no better an
+            // answer than anything else on the list — only the marked ones come first.
+            if (model.Preview.TextureChoices.Any(
+                    c => c.Worn && !inside.Any(n => n.Label == c.Name && n.PathId == c.PathId)))
+                return Fail("something outside the skin's own model is marked as worn on it");
 
             // Read once. Opening and closing the row again must not pile the same rows up under it.
             var read = withModel.Children.Count;

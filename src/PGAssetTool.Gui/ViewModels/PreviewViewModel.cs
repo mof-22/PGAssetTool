@@ -245,5 +245,20 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 /// started with. Picking a skin appeared to do nothing at all.
 public sealed record TextureChoice(string Name, string Bundle, long PathId)
 {
+    /// True for a texture the mesh in front of you is actually drawn with, which the list marks so
+    /// the two or three that answer the obvious question are findable without reading the order.
+    ///
+    /// Outside equality on purpose, which is why this record writes its own. The same texture is a
+    /// different answer to this question for each mesh, so the list is rebuilt with the flag turned
+    /// over as somebody moves between them — and if that made it a different value, the selection
+    /// carried across the rebuild would stop matching and the model would undress itself. What
+    /// identifies a texture is where it is, not how it is being shown.
+    public bool Worn { get; init; }
+
+    public bool Equals(TextureChoice? other)
+        => other is not null && Name == other.Name && Bundle == other.Bundle && PathId == other.PathId;
+
+    public override int GetHashCode() => HashCode.Combine(Name, Bundle, PathId);
+
     public override string ToString() => Name;
 }

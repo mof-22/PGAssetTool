@@ -300,6 +300,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 // What was learned about the last weapon's skins says nothing about this one's.
                 _alsoTextured.Clear();
+                _fromSkinModel.Clear();
 
                 Detail = new WeaponDetailViewModel(tree, ReplaceableOnly) { NodeSelected = ShowPreview, NodeOpened = ReadModel };
                 Status = $"{value.Name} — {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}";
@@ -699,6 +700,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// the weapon's are part of a resolved tree and this is what has been learned since.
     private readonly List<MeshTextures> _alsoTextured = [];
 
+    /// The meshes that arrived with a skin of their own, rather than being the weapon's own
+    /// geometry. Kept apart because a repainting skin's paint is cut for the weapon's UVs and means
+    /// nothing on one of these, so it is not worth recommending there.
+    private readonly HashSet<long> _fromSkinModel = [];
+
     /// What the game draws this mesh with, from the weapon's own answer or from one worked out
     /// since. Null for a mesh nothing was found for.
     private MeshTextures? Slots(long meshPathId)
@@ -774,6 +780,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     foreach (var slots in await Task.Run(() => resolver.TexturesFor(model.Bundle, walked)))
                         if (_alsoTextured.All(m => m.MeshPathId != slots.MeshPathId))
                             _alsoTextured.Add(slots);
+
+                foreach (var mesh in walked.Where(a => a.Class == AssetClassID.Mesh))
+                    _fromSkinModel.Add(mesh.PathId);
 
                 var found = walked
                     .Where(a => !ReplaceableOnly || Replaceable.Supports(a.Class))
@@ -869,10 +878,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// model is read when its row is opened, and its textures are exactly the ones somebody wants
     /// on the mesh they have just been given.
     /// <param name="forMesh">
-    /// The mesh being looked at, whose own textures go to the top. Every texture the weapon reaches
-    /// stays on the list — trying another skin's paint on a mesh is the point of the list existing
-    /// — but a weapon reaches thirty of them and only two or three are this mesh's, so the ones
-    /// that answer the obvious question come first and the rest follow.
+    /// The mesh being looked at, which decides the order. Every texture the weapon reaches stays on
+    /// the list — trying another skin's paint on a mesh is the point of the list existing — but a
+    /// weapon reaches thirty of them, so they come in three bands: what this mesh is already drawn
+    /// with, then the paint that would go on it, then everything else.
     /// </param>
     private void OfferTextures(long forMesh = 0)
     {
@@ -885,6 +894,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             .Select(n => (n!.Bundle, n.PathId))
             .ToHashSet() ?? [];
 
+        // A skin that repaints rather than replaces is paint cut for the weapon's own geometry, so
+        // its textures are the next most likely answer after the ones already on the mesh: they are
+        // what this mesh is going to be seen wearing in the game. A skin that brings its own model
+        // is not, and neither is any of this for a mesh that arrived with one, whose UVs are its
+        // own — so those keep the plain order.
+        HashSet<(string, long)> paint = [];
+        if (forMesh != 0 && !_fromSkinModel.Contains(forMesh))
+            paint = (_tree?.Skins ?? [])
+                .Where(s => s.Model is null)
+                .SelectMany(s => s.Materials)
+                .SelectMany(m => m.Textures)
+                .Select(t => (t.Bundle, t.PathId))
+                .ToHashSet();
+
         var seen = new HashSet<(string, long)>();
         var found = new List<TextureChoice>();
 
@@ -892,18 +915,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (node.Class != AssetClassID.Texture2D || node.Bundle.Length == 0) continue;
             if (!seen.Add((node.Bundle, node.PathId))) continue;
-            found.Add(new TextureChoice(node.Label, node.Bundle, node.PathId));
+            found.Add(new TextureChoice(node.Label, node.Bundle, node.PathId)
+            {
+                Worn = mine.Contains((node.Bundle, node.PathId)),
+            });
         }
 
         Preview.TextureChoices.Clear();
         Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0));
 
-        // Stable within each half, so the order the tree is in survives the sorting.
-        foreach (var choice in found.OrderByDescending(c => mine.Contains((c.Bundle, c.PathId))))
+        // Stable within each band, so the order the tree is in survives the sorting.
+        foreach (var choice in found.OrderBy(c => c.Worn ? 0 : paint.Contains((c.Bundle, c.PathId)) ? 1 : 2))
             Preview.TextureChoices.Add(choice);
 
-        if (wearing is not null && Preview.TextureChoices.Contains(wearing))
-            Preview.ChosenTexture = wearing;
+        // The instance out of the new list rather than the one that was selected: they are the same
+        // texture, but only the new one knows whether it is worn on the mesh now in front of you.
+        if (wearing is not null && Preview.TextureChoices.FirstOrDefault(c => c == wearing) is { } again)
+            Preview.ChosenTexture = again;
     }
 
     private static IEnumerable<TreeNode> AllNodes(IEnumerable<TreeNode> nodes)
