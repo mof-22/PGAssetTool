@@ -255,6 +255,11 @@ public sealed record TextureChoice(string Name, string Bundle, long PathId)
     /// identifies a texture is where it is, not how it is being shown.
     public bool Worn { get; init; }
 
+    /// True for one of this weapon's skins — what a skin material puts in its main slot, rather
+    /// than the gloss or mask bound beside it. Lit fainter than what is worn, and never both at
+    /// once: the skin the mesh already has on is worn, and saying it twice says nothing.
+    public bool Skin { get; init; }
+
     public bool Equals(TextureChoice? other)
         => other is not null && Name == other.Name && Bundle == other.Bundle && PathId == other.PathId;
 

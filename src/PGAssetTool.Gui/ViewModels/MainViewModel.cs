@@ -902,14 +902,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // outnumber the skins themselves — bringing all of them up buries the eight answers
         // somebody is looking for among fifteen they are not. They stay on the list below.
         //
-        // Every skin that has a material out here, not only the ones with no model of their own:
-        // a skin that replaces the weapon keeps its materials inside the model, so most of those
-        // resolve to nothing and cost nothing, but several resolve both. None of this applies to a
-        // mesh that arrived with a skin of its own, whose UVs are its own, so those keep the plain
+        // And only the skins that repaint this weapon rather than replacing it. A skin bringing a
+        // model of its own is a different object wearing its own paint, whatever that paint
+        // resolves to out here — one of this weapon's brings a model that is a copy of the
+        // weapon's own mesh, which is why its materials resolve at all, and it still belongs with
+        // the skins that replace rather than the ones that repaint. None of this applies to a mesh
+        // that arrived with a skin of its own, whose UVs are its own, so those keep the plain
         // order.
         HashSet<(string, long)> paint = [];
         if (forMesh != 0 && !_fromSkinModel.Contains(forMesh))
             paint = (_tree?.Skins ?? [])
+                .Where(s => s.Model is null)
                 .SelectMany(s => s.Materials)
                 .Where(m => m.Main is not null)
                 .Select(m => m.Locate(m.Main!))
@@ -922,9 +925,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (node.Class != AssetClassID.Texture2D || node.Bundle.Length == 0) continue;
             if (!seen.Add((node.Bundle, node.PathId))) continue;
+
+            var worn = mine.Contains((node.Bundle, node.PathId));
             found.Add(new TextureChoice(node.Label, node.Bundle, node.PathId)
             {
-                Worn = mine.Contains((node.Bundle, node.PathId)),
+                Worn = worn,
+                Skin = !worn && paint.Contains((node.Bundle, node.PathId)),
             });
         }
 
@@ -932,7 +938,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0));
 
         // Stable within each band, so the order the tree is in survives the sorting.
-        foreach (var choice in found.OrderBy(c => c.Worn ? 0 : paint.Contains((c.Bundle, c.PathId)) ? 1 : 2))
+        foreach (var choice in found.OrderBy(c => c.Worn ? 0 : c.Skin ? 1 : 2))
             Preview.TextureChoices.Add(choice);
 
         // The instance out of the new list rather than the one that was selected: they are the same

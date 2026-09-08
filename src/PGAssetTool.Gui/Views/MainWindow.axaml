@@ -26,7 +26,11 @@
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <!-- White over whatever is behind it rather than a colour of its own: the same band has to read
-         as lifted both in the dropdown and in the closed box, and those are not the same shade. -->
+         as lifted both in the dropdown and in the closed box, and those are not the same shade.
+         Two weights, and a row is never given both — what is worn is one of the skins. -->
+    <Style Selector="Border.skin">
+      <Setter Property="Background" Value="#10FFFFFF" />
+    </Style>
     <Style Selector="Border.worn">
       <Setter Property="Background" Value="#26FFFFFF" />
     </Style>
@@ -47,11 +51,13 @@
           <ComboBox ItemsSource="{Binding TextureChoices}" SelectedItem="{Binding ChosenTexture}"
                     IsVisible="{Binding HasMesh}" HorizontalAlignment="Stretch" Margin="0,0,0,4">
             <ComboBox.ItemTemplate>
-              <!-- Lit for the textures this mesh is already drawn with. The list is ordered so they
-                   come first, but an order only says something once you have read the whole list;
-                   this says it at a glance, and keeps saying it once one is picked. -->
+              <!-- Lit for the textures this mesh is already drawn with, and fainter for the rest of
+                   this weapon's skins. The list is ordered so those come first, but an order only
+                   says something once you have read the whole list; this says it at a glance, and
+                   keeps saying it once one is picked. -->
               <DataTemplate DataType="vm:TextureChoice">
-                <Border Classes.worn="{Binding Worn}" CornerRadius="3" Padding="5,1" Margin="-5,-1">
+                <Border Classes.worn="{Binding Worn}" Classes.skin="{Binding Skin}"
+                        CornerRadius="3" Padding="5,1" Margin="-5,-1">
                   <TextBlock Text="{Binding Name}" />
                 </Border>
               </DataTemplate>

@@ -219,6 +219,7 @@ internal static class SelfTest
                         .FirstOrDefault(m => m.MeshPathId == node.PathId)?.BySubMesh
                         .Where(t => t is not null).Select(t => (t!.Bundle, t.PathId)).ToHashSet() ?? [];
                     var mains = detail.Tree.Skins
+                        .Where(s => s.Model is null)
                         .SelectMany(s => s.Materials)
                         .Where(m => m.Main is not null)
                         .Select(m => m.Locate(m.Main!))
@@ -250,6 +251,11 @@ internal static class SelfTest
 
                     if (choices.Any(c => c.Worn != own.Contains((c.Bundle, c.PathId))))
                         return Fail("what the list marks as worn is not what the mesh is drawn with");
+
+                    // The marks are what the order is made of, so they have to say the same thing.
+                    if (choices.Where((_, i) => bands[i] == 1).Any(c => !c.Skin)
+                        || choices.Any(c => c.Skin && c.Worn))
+                        return Fail("the list is ordered by one answer and lit by another");
 
                     if (own.Count > 0 && !bands.Contains(0))
                         return Fail($"'{node.Label}' is drawn with textures and none of them is marked");
@@ -524,6 +530,7 @@ internal static class SelfTest
             if (ownMesh is null) return Fail("#416's own mesh is not in the tree");
 
             var looks = model.Detail.Tree.Skins
+                .Where(s => s.Model is null)
                 .SelectMany(s => s.Materials)
                 .Where(m => m.Main is not null)
                 .Select(m => m.Locate(m.Main!))
@@ -539,15 +546,16 @@ internal static class SelfTest
             Console.WriteLine($"skins    on '{ownMesh.Label}' the first offered are "
                 + string.Join(", ", order.Where(Likely).Select(c => c.Worn ? $"[{c.Name}]" : c.Name)));
 
-            // Six of this weapon's eight skins have a material out here and one of those is what it
-            // already wears, so five rows should come up — and the gloss, noise and mask maps those
-            // same materials bind should not, which is the difference between five rows and twelve.
+            // Four of this weapon's eight skins repaint it and one of those is what it already
+            // wears, so four rows come up. The other four bring a model of their own and stay
+            // down, and so do the gloss, noise and mask maps the repainting four bind beside their
+            // own paint — between them that is eleven rows this list does not lead with.
             var stray = order.FindIndex(c => !Likely(c));
             if (stray >= 0 && order.FindLastIndex(Likely) > stray)
                 return Fail($"'{order[stray].Name}' is offered above a skin");
 
-            if (order.Count(Likely) < 4)
-                return Fail($"#416 has eight skins and only {order.Count(Likely)} came up");
+            if (order.Count(Likely) != 4)
+                return Fail($"#416 has four skins that repaint it and {order.Count(Likely)} came up");
 
             // A skin that replaces the weapon rather than repainting it has nothing under it until
             // its row is opened, because reading every such model on every click in the weapon list
