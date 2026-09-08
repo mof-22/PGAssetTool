@@ -55,7 +55,10 @@ public sealed partial class TreeNode(
         AssetClassID.AudioClip => "🔊",
         AssetClassID.Material => "🎨",
         AssetClassID.GameObject => "📦",
-        _ => Children.Count > 0 ? "📁" : "·",
+        // What it holds, not what has been read out of it. A skin that brings its own model has
+        // nothing beneath it until somebody opens the row, and drawing those two as an empty row
+        // said the skins with the most in them were the ones with nothing.
+        _ => HasChildren ? "📁" : "·",
     };
 
     public TreeNode With(TreeNode child)
