@@ -184,6 +184,25 @@ internal static class SelfTest
                     var again = PGAssetTool.Core.Import.Audio.WaveFile.Parse(wave, "the preview");
                     if (again.Frames != clip.Frames)
                         return Fail($"the wave handed to the player holds {again.Frames} of {clip.Frames} frames");
+
+                    // The waveform draws a line at where the clip has got to, which needs the
+                    // speaker to say two things: which clip is sounding, and how far through it is.
+                    // Two waveforms are on the page in the editor and one of them is silent.
+                    model.Preview.PlayOrStop();
+                    var sounding = ReferenceEquals(Audio.Speaker.Sounding, clip);
+                    var start = Audio.Speaker.Through;
+                    Thread.Sleep(60);
+                    var later = Audio.Speaker.Through;
+                    model.Preview.PlayOrStop();
+
+                    Console.WriteLine($"         playing: this clip {sounding}, "
+                        + $"through {start:0.000} -> {later:0.000}, stopped {!Audio.Speaker.IsPlaying}");
+
+                    if (!sounding) return Fail("the speaker does not say which clip it is playing");
+                    if (later <= start) return Fail("the playing position did not move");
+                    if (Audio.Speaker.IsPlaying) return Fail("stopping did not stop it");
+                    if (Audio.Speaker.Sounding is not null)
+                        return Fail("a stopped speaker still names a clip");
                 }
 
                 if (want == AssetClassID.Mesh && model.Preview.Mesh is { } mesh)
@@ -222,6 +241,24 @@ internal static class SelfTest
                     var own = detail.Tree.MeshTextures
                         .FirstOrDefault(m => m.MeshPathId == node.PathId)?.BySubMesh
                         .Where(t => t is not null).Select(t => (t!.Bundle, t.PathId)).ToHashSet() ?? [];
+                    // A named angle puts the model back somewhere exact, which turning by hand is a
+                    // poor way to reach — and it leaves the framing alone, because how close in
+                    // somebody has come is theirs and which way it faces is the question here.
+                    model.Preview.Camera = new Camera(Yaw: 2.2f, Pitch: -0.4f, Distance: 3f, Roll: 1.1f);
+                    if (model.Preview.Views.FirstOrDefault(v => v.Name == "Top") is { } top)
+                    {
+                        model.Preview.LookCommand.Execute(top);
+                        var looking = model.Preview.Camera;
+
+                        Console.WriteLine($"         the Top preset: yaw {looking.Yaw:0.00} "
+                            + $"pitch {looking.Pitch:0.00} roll {looking.Roll:0.00} distance {looking.Distance:0.00}");
+
+                        if (Math.Abs(looking.Pitch - MathF.PI / 2) > 0.001f || Math.Abs(looking.Yaw) > 0.001f)
+                            return Fail($"the Top preset came out at {looking.Yaw}, {looking.Pitch}");
+                        if (looking.Roll != 0) return Fail("a named angle left the model tilted");
+                        if (looking.Distance != 3f) return Fail("a named angle threw away the framing");
+                    }
+
                     var mains = detail.Tree.Skins
                         .Where(s => s.Model is null)
                         .SelectMany(s => s.Materials)
@@ -878,8 +915,13 @@ internal static class SelfTest
             // has to leave it as it found it, and the only way to know that is to have looked
             // first — an earlier version of this left a mod behind every time the workspace it
             // happened to pick changed, and nothing noticed for days.
-            var wasInstalled = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read()
-                .Select(m => m.Id).ToHashSet();
+            var theirs = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
+            var wasInstalled = theirs.Select(m => m.Id).ToHashSet();
+
+            // Their on-or-off state as well as their presence. Turning a mod on now turns off
+            // whatever else writes the same assets, and the author's own mods are within reach of
+            // that — so being left installed is no longer the whole of leaving them alone.
+            var wasEnabled = theirs.Where(m => m.Enabled).Select(m => m.Id).ToHashSet();
 
             // A second workspace, so what gets tested is the batch. Building and applying six packs
             // one at a time is six trips through the same controls, and — because applying is a
@@ -940,6 +982,8 @@ internal static class SelfTest
                 return Fail($"this run installed {string.Join(", ", strays)} and has no plan to remove them");
 
             Console.WriteLine($"batch    installed: {string.Join(", ", installed.Select(m => m.Id))}");
+
+            if (OneModStandsAsideForAnother(model, written) is { } rivalProblem) return Fail(rivalProblem);
 
             // The same install a pack dropped on the window takes: a file, straight to the applier,
             // with no workspace behind it. That is how somebody else's mod gets in, and it is the
@@ -1040,6 +1084,8 @@ internal static class SelfTest
             if (model.Manager.Bundles.All(b => b.State != PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
                 return Fail("the bundle just written was not attributed to the mod that wrote it");
             if (model.Manager.GameIsRunning) return Fail("the game should not be running during a self-test");
+
+            if (TilesArrangeTwoWays(model) is { } orderProblem) return Fail(orderProblem);
 
             // One first. Turning it off restores its bundles; the confirmation is what stands
             // between a click and the game being rewritten.
@@ -1185,6 +1231,15 @@ internal static class SelfTest
             if (kept.Where(File.Exists).ToList() is { Count: > 0 } still)
                 return Fail($"shift-removing left {string.Join(", ", still.Select(Path.GetFileName))} behind");
             Console.WriteLine($"manager  and the {kept.Count} kept pack file(s) went with them");
+
+            var now = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
+            var switched = now
+                .Where(m => wasInstalled.Contains(m.Id) && m.Enabled != wasEnabled.Contains(m.Id))
+                .Select(m => m.Name)
+                .ToList();
+
+            if (switched.Count > 0)
+                return Fail($"this run turned {string.Join(", ", switched)} on or off, and they are not its own");
 
             var left = model.Manager.Mods.Select(m => m.Mod.Id).Where(id => !wasInstalled.Contains(id)).ToList();
             Console.WriteLine($"manager  installed before this run: {wasInstalled.Count}, left behind by it: {left.Count}");
@@ -2238,6 +2293,92 @@ internal static class SelfTest
         Console.WriteLine($"batch    a second workspace at {Path.GetFileName(directory)}, "
             + $"editing {texture.Source}");
         return directory;
+    }
+
+    /// The manager's tiles come in the order they were installed, or in the order the items are.
+    ///
+    /// One answers "what did I just do" and the other "what have I got for this weapon", and both
+    /// get asked. Sorted where the tiles are chosen rather than where the rows are read, so changing
+    /// it rearranges what is already in hand.
+    private static string? TilesArrangeTwoWays(MainViewModel model)
+    {
+        if (model.Manager.Shown.Count < 2) return null;
+
+        model.Manager.Order = ModOrder.Installed;
+        var byTime = model.Manager.Shown.Select(r => r.Mod.Id).ToList();
+
+        model.Manager.Order = ModOrder.Item;
+        var byItem = model.Manager.Shown.Select(r => r.Mod.Id).ToList();
+
+        Console.WriteLine($"manager  {byItem.Count} tiles, by item: "
+            + string.Join(", ", model.Manager.Shown.Select(r => r.Mod.Subject?.Number.ToString() ?? "-")));
+
+        if (byTime.Count != byItem.Count || byTime.ToHashSet().Count != byItem.ToHashSet().Count)
+            return "rearranging the tiles changed which of them there are";
+
+        var numbers = model.Manager.Shown.Select(r => r.Mod.Subject?.Number ?? int.MaxValue).ToList();
+        for (var i = 1; i < numbers.Count; i++)
+            if (numbers[i] < numbers[i - 1])
+                return $"by item, #{numbers[i]} is listed after #{numbers[i - 1]}";
+
+        model.Manager.Order = ModOrder.Installed;
+        return null;
+    }
+
+    /// Turning one mod on turns off whatever else writes the same assets, and says which.
+    ///
+    /// Two of those do not both take effect: the reconcile applies them in the order they were
+    /// installed and the last one wins without a word, so which of two skins for a weapon was
+    /// actually running was a question the manager could not answer.
+    private static string? OneModStandsAsideForAnother(MainViewModel model, string workspace)
+    {
+        var store = new PGAssetTool.Core.Mods.ModStore(model.Game!);
+        var mine = store.Read().FirstOrDefault(m => m.Id == PackIdentity);
+        if (mine is null) return $"'{PackIdentity}' is not installed to stand aside";
+
+        // A second pack out of the same workspace: the same operations under another name, which
+        // is the shape two skins for one weapon have.
+        var manifest = Core.Pack.Workspace.Read(workspace);
+        var rival = Path.Combine(workspace, "rival.pgmod");
+
+        Core.Pack.Workspace.Save(workspace, manifest with { Id = PackIdentity + "-rival", Name = "Self test rival" });
+        try
+        {
+            Core.Pack.PackBuilder.Build(workspace, rival);
+        }
+        finally
+        {
+            Core.Pack.Workspace.Save(workspace, manifest);
+        }
+
+        var applier = new PGAssetTool.Core.Mods.ModApplier(model.Game!, store);
+        applier.Install(rival, "self-test");
+
+        try
+        {
+            applier.SetEnabled(PackIdentity + "-rival", true);
+
+            Console.WriteLine("exclude  turning the rival on stood down: "
+                + (applier.Displaced.Count == 0 ? "nothing" : string.Join(", ", applier.Displaced)));
+
+            var after = store.Read();
+            if (after.FirstOrDefault(m => m.Id == PackIdentity) is not { Enabled: false })
+                return "a mod writing the same assets was left on beside the one just turned on";
+            if (applier.Displaced.Count == 0)
+                return "it was turned off without saying so";
+
+            // And a mod that shares nothing is left alone: the point is the assets, not the weapon.
+            if (after.FirstOrDefault(m => m.Id == PackIdentityB) is { Enabled: false })
+                return "a mod writing different assets was turned off as well";
+        }
+        finally
+        {
+            applier.Remove(PackIdentity + "-rival");
+            applier.SetEnabled(PackIdentity, true);
+            try { File.Delete(rival); } catch (IOException) { }
+        }
+
+        return null;
     }
 
     /// Whether the weapon a selection lands on can actually be decoded.

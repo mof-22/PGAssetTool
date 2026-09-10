@@ -80,9 +80,10 @@ between yours and the game's. The pack's name, author, version, description and 
 here. Several workspaces can be selected and built and installed together.
 
 **Manager** — what is installed. Packs are filed by the item they change and the look they change,
-in a shelf on the left that also searches; the tiles show each pack's own picture. It reads the game
-itself rather than only its own records, so a bundle changed by something else is visible before
-anyone installs over it.
+in a shelf on the left that also searches; the tiles show each pack's own picture, newest last or
+arranged by item. Turning one on turns off anything else writing the same assets, and says which.
+It reads the game itself rather than only its own records, so a bundle changed by something else is
+visible before anyone installs over it.
 
 ---
 
@@ -119,6 +120,9 @@ With a model in front of you:
 | Middle button + drag | Move it in the frame |
 | Wheel | Closer and further |
 | `R` | Straighten it up |
+
+Named angles sit under the model — Front, Top, Left and the rest — for when the same view is wanted
+twice. They turn the model and leave how close in you are alone.
 
 And in the Manager, `Ctrl` with the wheel resizes the tiles, and holding `Shift` turns **Remove**
 into **Remove and delete**, which throws the kept pack file away as well.

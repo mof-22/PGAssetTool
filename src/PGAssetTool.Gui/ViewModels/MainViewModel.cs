@@ -47,7 +47,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         };
         Manager.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(ManagerViewModel.ConfirmChanges) or nameof(ManagerViewModel.TileSize))
+            if (e.PropertyName is nameof(ManagerViewModel.ConfirmChanges) or nameof(ManagerViewModel.TileSize)
+                or nameof(ManagerViewModel.Order))
                 Remember();
         };
     }
@@ -191,6 +192,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Editor.Linked = _settings.LinkedPreviews;
         Manager.ConfirmChanges = _settings.ConfirmChanges;
         Manager.TileSize = _settings.TileSize;
+        Manager.Order = (ModOrder)_settings.ModOrder;
         ProtectPacks = _settings.ProtectPacks;
         _loading = false;
 
@@ -717,7 +719,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Author = Author.Trim(), GameDirectory = GameDirectory.Trim(),
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
-            TileSize = Manager.TileSize, ProtectPacks = ProtectPacks,
+            TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
         };
         try { _settings.Save(SettingsHome); }
         catch (IOException) { }

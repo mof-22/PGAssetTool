@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Threading;
 using PGAssetTool.Core.Preview;
 
 namespace PGAssetTool.Gui.Controls;
@@ -61,5 +62,52 @@ public sealed class WaveformView : Control
 
             context.DrawLine(wave, new Point(x + 0.5, top), new Point(x + 0.5, bottom));
         }
+
+        // Where the clip has got to, and only for the clip that is actually sounding: the editor
+        // puts two of these on the page and one of them is silent.
+        if (!ReferenceEquals(Audio.Speaker.Sounding, sound)) return;
+
+        var at = width * Audio.Speaker.Through;
+        context.DrawLine(
+            new Pen(new SolidColorBrush(Color.FromRgb(0xff, 0xd0, 0x66)), 1.5),
+            new Point(at, 0), new Point(at, height));
+    }
+
+    /// Redraws while something is playing, and stops as soon as nothing is.
+    ///
+    /// Driven from the speaker rather than run all the time: a waveform is on the page whenever a
+    /// sound is selected, and a timer ticking behind every one of those would be a redraw a frame
+    /// for a line that is not moving.
+    private DispatcherTimer? _following;
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Audio.Speaker.Changed += Follow;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        Audio.Speaker.Changed -= Follow;
+        _following?.Stop();
+        _following = null;
+    }
+
+    private void Follow()
+    {
+        InvalidateVisual();
+        if (!Audio.Speaker.IsPlaying || _following is not null) return;
+
+        _following = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) =>
+        {
+            InvalidateVisual();
+            if (Audio.Speaker.IsPlaying) return;
+
+            _following?.Stop();
+            _following = null;
+        });
+
+        _following.Start();
     }
 }

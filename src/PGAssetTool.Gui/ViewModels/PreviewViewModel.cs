@@ -94,7 +94,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     private void Play()
     {
         if (Sound is not { } sound) return;
-        try { Audio.Speaker.Play(sound.ToWave(), TimeSpan.FromSeconds(sound.Seconds)); }
+        try { Audio.Speaker.Play(sound.ToWave(), TimeSpan.FromSeconds(sound.Seconds), sound); }
         catch (Exception ex) { Caption = $"{ex.Message}  (while playing the clip)"; }
     }
 
@@ -189,6 +189,30 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Changed();
     }
 
+    /// The angles worth having a name for, so a model can be put back to one of them in a click.
+    ///
+    /// Turning by hand is how a model is looked at, and it is a poor way to arrive anywhere exact —
+    /// comparing a change against the original, or taking the same picture of two weapons, wants
+    /// the same angle twice rather than nearly. Distance and pivot are left as they are: those are
+    /// where somebody has framed the thing, and a named angle is about which way it faces.
+    public IReadOnlyList<ViewPreset> Views { get; } =
+    [
+        new("Default", 0.7f, 0.35f),
+        new("Front", 0f, 0f),
+        new("Back", MathF.PI, 0f),
+        new("Left", -MathF.PI / 2, 0f),
+        new("Right", MathF.PI / 2, 0f),
+        new("Top", 0f, MathF.PI / 2),
+        new("Bottom", 0f, -MathF.PI / 2),
+    ];
+
+    [RelayCommand]
+    private void Look(ViewPreset? preset)
+    {
+        if (preset is null) return;
+        Camera = Camera with { Yaw = preset.Yaw, Pitch = preset.Pitch, Roll = 0f };
+    }
+
     /// Going back to the automatic answer is immediate; anything else waits for its picture, which
     /// the shell reads and hands back through Wear.
     partial void OnChosenTextureChanged(TextureChoice? value)
@@ -243,6 +267,13 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 /// from the one in the list the combo box was showing. The combo box, asked to select something it
 /// did not have, selected nothing instead, and the model went straight back to the texture it
 /// started with. Picking a skin appeared to do nothing at all.
+/// A named way of facing a model. Yaw and pitch only: the rest of the camera is the framing, which
+/// belongs to whoever set it.
+public sealed record ViewPreset(string Name, float Yaw, float Pitch)
+{
+    public override string ToString() => Name;
+}
+
 public sealed record TextureChoice(string Name, string Bundle, long PathId)
 {
     /// True for a texture the mesh in front of you is actually drawn with, which the list marks so

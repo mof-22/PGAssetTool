@@ -29,23 +29,46 @@ public static class Speaker
     /// good enough for a key that means "play, or stop if it is still playing", and wrong only in
     /// the moment either answer would do.
     private static DateTime _until = DateTime.MinValue;
+    private static TimeSpan _length;
 
     public static bool IsPlaying => DateTime.UtcNow < _until;
 
-    public static void Play(byte[] wave, TimeSpan length)
+    /// Which clip is playing, as whatever the caller handed over to identify it. The editor puts
+    /// two waveforms on the page and only one of them is making a sound.
+    public static object? Sounding { get; private set; }
+
+    /// How far through the clip is, from 0 at the start to 1 at the end. Zero when nothing plays.
+    ///
+    /// Arithmetic from the length rather than a question put to Windows, for the same reason the
+    /// end is: PlaySound says nothing about where it has got to, and asking would mean the much
+    /// larger waveOut interface for a line that has to be somewhere near right, not exact.
+    public static double Through => IsPlaying && _length > TimeSpan.Zero
+        ? 1 - (_until - DateTime.UtcNow) / _length
+        : 0;
+
+    /// Raised when a clip starts or stops, so a drawing of one can follow it.
+    public static event Action? Changed;
+
+    public static void Play(byte[] wave, TimeSpan length, object? source = null)
     {
         Stop();
         _pinned = GCHandle.Alloc(wave, GCHandleType.Pinned);
         if (PlaySound(_pinned.AddrOfPinnedObject(), IntPtr.Zero, Memory | Async | NoDefault))
-            _until = DateTime.UtcNow + length;
+        {
+            (_until, _length, Sounding) = (DateTime.UtcNow + length, length, source);
+            Changed?.Invoke();
+        }
         else
+        {
             Stop();
+        }
     }
 
     public static void Stop()
     {
         PlaySound(IntPtr.Zero, IntPtr.Zero, 0);
         if (_pinned.IsAllocated) _pinned.Free();
-        _until = DateTime.MinValue;
+        (_until, _length, Sounding) = (DateTime.MinValue, TimeSpan.Zero, null);
+        Changed?.Invoke();
     }
 }

@@ -63,6 +63,23 @@
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
+          <!-- Named angles, for when the same view is wanted twice: comparing a change against the
+               original, or taking the same picture of two weapons. Turning by hand is how a model
+               is looked at and a poor way to arrive anywhere exact. -->
+          <ItemsControl ItemsSource="{Binding Views}" IsVisible="{Binding HasMesh}" Margin="0,0,0,4">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:ViewPreset">
+                <Button Content="{Binding Name}" Margin="0,0,4,4" Padding="8,3" FontSize="11"
+                        Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).LookCommand}"
+                        CommandParameter="{Binding}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
           <CheckBox Content="Show alpha" IsChecked="{Binding ShowAlpha}"
                     IsVisible="{Binding CanToggleAlpha}" Margin="0,0,0,4" />
           <!-- Nothing plays until asked: moving down a weapon's six sounds would otherwise set six
@@ -461,6 +478,14 @@
                         ToolTip.Tip="Takes the mod out of the game. Hold shift to delete its pack as well." />
                 <Button Content="Reapply all" Command="{Binding ReapplyCommand}" />
                 <Button Content="Check every bundle" Command="{Binding CheckEverythingCommand}" />
+                <ComboBox ItemsSource="{Binding Orders}" SelectedItem="{Binding Order}" MinWidth="130"
+                          ToolTip.Tip="What the tiles are arranged by.">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate DataType="vm:ModOrder">
+                      <TextBlock Text="{Binding Converter={x:Static vm:ModOrderName.Instance}}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
               </StackPanel>
 
               <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Classes="dim"

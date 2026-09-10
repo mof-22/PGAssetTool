@@ -78,8 +78,70 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             if (index < 0) throw new KeyNotFoundException($"No mod with id '{id}' is installed.");
             mods[index] = mods[index] with { Enabled = enabled };
         }
+
+        if (enabled) Displaced = StandAside(mods, ids);
+
         store.Write(mods);
         return Reconcile();
+    }
+
+    /// What the last turning-on turned off, so the caller can say so. Names, not ids.
+    public IReadOnlyList<string> Displaced { get; private set; } = [];
+
+    /// Turns off whatever else was writing the same assets as the mods just turned on.
+    ///
+    /// Two mods that write the same texture do not both take effect; the reconcile applies them in
+    /// the order they were installed and the last one wins, silently. Which of two skins for one
+    /// weapon a player is actually running was then a question the manager could not answer, and
+    /// turning one on appeared to do nothing at all.
+    ///
+    /// Judged on the assets themselves rather than on the item they belong to. Two mods for one
+    /// weapon that touch nothing in common — a new model and a new shop icon, say — are a
+    /// combination worth having, and the whole point of this is that the ones which cannot stand
+    /// together are exactly the ones that write over each other.
+    ///
+    /// Read out of the packs at the moment it is asked rather than kept in the ledger. It is a
+    /// handful of small files, read once per turning-on, against a reconcile that rewrites every
+    /// bundle the mods touch — and reading them is what makes the answer true for a mod installed
+    /// before any of this existed.
+    private List<string> StandAside(List<InstalledMod> mods, IReadOnlyList<string> ids)
+    {
+        var claimed = ids
+            .SelectMany(id => Writes(mods.FirstOrDefault(m => m.Id == id)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (claimed.Count == 0) return [];
+
+        var displaced = new List<string>();
+        for (var i = 0; i < mods.Count; i++)
+        {
+            if (!mods[i].Enabled || ids.Contains(mods[i].Id)) continue;
+            if (!Writes(mods[i]).Any(claimed.Contains)) continue;
+
+            displaced.Add(mods[i].Name);
+            mods[i] = mods[i] with { Enabled = false };
+        }
+
+        return displaced;
+    }
+
+    /// Every asset a mod writes, as a name that means the same thing in two different packs.
+    private static IEnumerable<string> Writes(InstalledMod? mod)
+    {
+        if (mod is null || !File.Exists(mod.PackPath)) return [];
+
+        try
+        {
+            return PackBuilder.ReadManifest(mod.PackPath).Operations
+                .Select(o => $"{o.Target.Container}:{o.Target.Class}:{o.Target.Name}:{o.Target.PathId}")
+                .ToList();
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            // A pack that will not open cannot be shown to overlap with anything, and refusing to
+            // turn a mod on because another one is unreadable would be the wrong way round.
+            return [];
+        }
     }
 
     public ReconcileResult Remove(string id) => Remove([id]);

@@ -102,6 +102,26 @@ public sealed record ModDetails(
 /// What a request needs confirming before it happens.
 public sealed record Confirmation(string Title, string Body, Func<Task> Proceed);
 
+/// What the manager arranges its tiles by. The names are what the picker shows.
+public enum ModOrder
+{
+    Installed,
+    Item,
+}
+
+/// Names the orders for the picker. A converter rather than a wrapper record, so the property the
+/// picker is bound to is the value itself and nothing has to be matched back to it afterwards.
+public sealed class ModOrderName : Avalonia.Data.Converters.IValueConverter
+{
+    public static ModOrderName Instance { get; } = new();
+
+    public object Convert(object? value, Type type, object? parameter, System.Globalization.CultureInfo culture)
+        => value is ModOrder.Item ? "By item" : "Newest last";
+
+    public object ConvertBack(object? value, Type type, object? parameter, System.Globalization.CultureInfo culture)
+        => Avalonia.Data.BindingOperations.DoNothing;
+}
+
 /// One level of the shelf the installed mods are arranged on: a weapon, or one of its looks.
 ///
 /// The arrangement is the one on disk — a folder per weapon, a folder per skin inside it — because
@@ -210,7 +230,18 @@ public sealed partial class ManagerViewModel : ObservableObject
 
         Selection.Clear();
         Shown.Clear();
-        foreach (var row in Mods.Where(r => Folder is null || Folder.Holds(r.Mod))) Shown.Add(row);
+
+        var rows = Mods.Where(r => Folder is null || Folder.Holds(r.Mod));
+
+        // Sorted here rather than where the rows are built, so changing the order is a rearranging
+        // of what is already read and not a trip back to the ledger and the bundles.
+        rows = Order == ModOrder.Item
+            ? rows.OrderBy(r => r.Mod.Subject?.Number ?? int.MaxValue)
+                .ThenBy(r => r.Mod.Subject?.Id ?? "", StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => r.Mod.InstalledAt)
+            : rows.OrderBy(r => r.Mod.InstalledAt);
+
+        foreach (var row in rows) Shown.Add(row);
 
         // Followed by id rather than by row. Every refresh builds new rows around new records — a
         // mod that has just been turned off is a different value from the one that was selected —
@@ -326,6 +357,17 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// Skips the confirmation for routine changes. Never skips the warning about the game running.
     [ObservableProperty] private bool _confirmChanges = true;
 
+    /// What the tiles are arranged by.
+    ///
+    /// Installed order is where somebody left off; item order is where a mod is in the game. Which
+    /// one is wanted depends on whether the question is "what did I just do" or "what have I got
+    /// for this weapon", and both get asked.
+    [ObservableProperty] private ModOrder _order;
+
+    partial void OnOrderChanged(ModOrder value) => Show();
+
+    public IReadOnlyList<ModOrder> Orders { get; } = [ModOrder.Installed, ModOrder.Item];
+
     /// What the selected pack says about itself, read from the pack rather than from the ledger.
     [ObservableProperty] private ModDetails? _details;
 
@@ -394,8 +436,19 @@ public sealed partial class ManagerViewModel : ObservableObject
     }
 
 
+    /// Turning one on turns off whatever else was writing the same assets, and says which.
+    ///
+    /// Without that the two both apply and the later install silently wins, so a player had no way
+    /// to know which of two skins for one weapon they were actually running.
     [RelayCommand]
-    private void Enable() => Ask("Turn on", ids => Applier().SetEnabled(ids, true));
+    private void Enable()
+    {
+        var applier = Applier();
+        Ask("Turn on", ids => applier.SetEnabled(ids, true),
+            afterwards: () => applier.Displaced.Count == 0
+                ? ""
+                : $"  Turned off {string.Join(", ", applier.Displaced)}, which wrote the same assets.");
+    }
 
     [RelayCommand]
     private void Disable() => Ask("Turn off", ids => Applier().SetEnabled(ids, false));

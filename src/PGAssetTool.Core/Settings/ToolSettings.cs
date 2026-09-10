@@ -64,6 +64,11 @@ public sealed record ToolSettings
     /// once and meant to stay set.
     public int TileSize { get; init; } = 112;
 
+    /// What the manager arranges its tiles by: 0 is the order they were installed in, 1 is by the
+    /// item each one is for. Held as a number because this file is the tool's own and the name of
+    /// an ordering is a thing the interface decides, not the settings.
+    public int ModOrder { get; init; }
+
     /// Whether a newly extracted workspace builds a signed, scrambled pack by default. Off, because
     /// a plain zip is easier to look inside and most packs never leave the machine that made them.
     public bool ProtectPacks { get; init; }
