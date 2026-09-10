@@ -2370,24 +2370,35 @@ internal static class SelfTest
         }
 
         var applier = new PGAssetTool.Core.Mods.ModApplier(model.Game!, store);
-        applier.Install(rival, "self-test");
 
         try
         {
-            applier.SetEnabled(PackIdentity + "-rival", true);
+            // Installing is the usual way a mod comes to be on, and it used to be the one route
+            // that claimed nothing: two skins for one weapon arrived both enabled, both writing the
+            // same texture, and only one of them was in the game.
+            applier.Install(rival, "self-test");
 
-            Console.WriteLine("exclude  turning the rival on stood down: "
+            Console.WriteLine("exclude  installing the rival stood down: "
                 + (applier.Displaced.Count == 0 ? "nothing" : string.Join(", ", applier.Displaced)));
 
             var after = store.Read();
             if (after.FirstOrDefault(m => m.Id == PackIdentity) is not { Enabled: false })
-                return "a mod writing the same assets was left on beside the one just turned on";
+                return "a mod writing the same assets was left on beside the one just installed";
             if (applier.Displaced.Count == 0)
                 return "it was turned off without saying so";
 
             // And a mod that shares nothing is left alone: the point is the assets, not the weapon.
             if (after.FirstOrDefault(m => m.Id == PackIdentityB) is { Enabled: false })
                 return "a mod writing different assets was turned off as well";
+
+            // The other way round, through the toggle rather than the install.
+            applier.SetEnabled(PackIdentity, true);
+
+            Console.WriteLine("exclude  turning the first one back on stood down: "
+                + (applier.Displaced.Count == 0 ? "nothing" : string.Join(", ", applier.Displaced)));
+
+            if (store.Read().FirstOrDefault(m => m.Id == PackIdentity + "-rival") is not { Enabled: false })
+                return "turning a mod on left the rival that writes the same assets on as well";
         }
         finally
         {
