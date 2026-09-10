@@ -406,6 +406,28 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// 2300 of them, which is a deliberate act rather than the cost of opening a tab.
     public void Refresh() => Load(everything: false);
 
+    /// Notices the game being started or closed while the tool is open.
+    ///
+    /// The buttons on this tab, and what the editor will let through, both turn on whether the game
+    /// holds its bundles open — and that was read once, when the tab last did a full refresh. Start
+    /// the game afterwards and everything went on offering to write to it; close it and everything
+    /// went on refusing.
+    ///
+    /// The cheap question is asked on a timer and the expensive one only when the answer moves: a
+    /// refresh re-reads the ledger and every bundle a mod claims, which is not a thing to do every
+    /// couple of seconds, and leaving the status line disagreeing with the buttons would be its own
+    /// small lie.
+    public void NoticeTheGame()
+    {
+        if (Busy || _game() is not { } game) return;
+
+        var running = GameProcess.IsRunning(game);
+        if (running == GameIsRunning) return;
+
+        GameIsRunning = running;
+        Refresh();
+    }
+
     [RelayCommand]
     private void CheckEverything() => Load(everything: true);
 

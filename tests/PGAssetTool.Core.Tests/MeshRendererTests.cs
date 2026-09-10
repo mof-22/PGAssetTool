@@ -681,29 +681,31 @@ public class MeshRendererTests
     }
 
     [Fact]
-    public void WithNoTiltADragIsNothingMoreThanAYawAndAPitch()
+    public void ADragIsNothingMoreThanAYawAndAPitch()
     {
         var start = new Camera(Yaw: 0.2f, Pitch: 0.3f);
 
         Assert.Equal(start.Turned(0.1f, 0.2f), start.Dragged(0.1f, 0.2f));
+        Assert.Equal(start.Rolled(1.1f).Turned(0.1f, 0.2f), start.Rolled(1.1f).Dragged(0.1f, 0.2f));
     }
 
     [Fact]
-    public void AQuarterTurnOfTiltSwapsWhichWayADragTurnsTheModel()
+    public void ATiltDoesNotChangeWhichWayADragTurnsTheModel()
     {
-        // Yaw is about the world's up axis and pitch about the camera's right. Tilt the view a
-        // quarter turn and neither of those lies along the screen any more: the axis a downward
-        // drag now works is the one a sideways drag worked before. Feeding the drag in unchanged
-        // is what made dragging up spin the model sideways.
-        var tilted = new Camera(Yaw: 0.2f, Pitch: 0.3f).Rolled(MathF.PI / 2);
+        // A turntable turns about one axis and tilting your head does not change which. The drag
+        // used to be taken out of the roll and split between yaw and pitch so that it followed the
+        // picture; it reads well for a small drag and does not hold together, because yaw and pitch
+        // do not commute — and once the pitch stopped at the poles, a sideways drag could run into
+        // that stop and spend what was left of itself spinning the model about the vertical.
+        var upright = new Camera(Yaw: 0.2f, Pitch: 0.3f);
+        var tilted = upright.Rolled(MathF.PI / 2);
 
-        var down = tilted.Dragged(0, 0.25f);
-        Assert.Equal(tilted.Pitch, down.Pitch, 4);
-        Assert.NotEqual(tilted.Yaw, down.Yaw, 4);
+        Assert.Equal(upright.Dragged(0.25f, 0).Yaw, tilted.Dragged(0.25f, 0).Yaw, 5);
+        Assert.Equal(upright.Dragged(0, 0.25f).Pitch, tilted.Dragged(0, 0.25f).Pitch, 5);
 
-        var across = tilted.Dragged(0.25f, 0);
-        Assert.Equal(tilted.Yaw, across.Yaw, 4);
-        Assert.NotEqual(tilted.Pitch, across.Pitch, 4);
+        // And each direction keeps to its own angle.
+        Assert.Equal(tilted.Pitch, tilted.Dragged(0.25f, 0).Pitch, 5);
+        Assert.Equal(tilted.Yaw, tilted.Dragged(0, 0.25f).Yaw, 5);
     }
 
     [Fact]

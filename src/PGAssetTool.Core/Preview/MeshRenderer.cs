@@ -39,21 +39,22 @@ public sealed record Camera(
 
     /// Turns the model by a drag across the screen: rightwards and downwards, in radians.
     ///
-    /// The drag is taken out of the roll before it is used. Yaw goes about the world's up axis and
-    /// pitch about the camera's right, and a rolled view has neither of those lying along the screen
-    /// any more — so feeding the drag straight in meant that after a quarter turn of tilt, dragging
-    /// up span the model sideways. Undoing the roll first asks the question the drag actually means:
-    /// which way did the cursor go across the picture as it now stands.
+    /// Sideways is always the turntable's own axis and up-and-down is always the pitch, whatever
+    /// the view is tilted to. That is what a turntable is: the platter turns about one axis that
+    /// does not move, and tilting your head does not change which axis that is.
+    ///
+    /// The drag used to be taken out of the roll first and split between yaw and pitch, so that it
+    /// followed the picture as it stood. It reads well for a small drag and it does not hold
+    /// together: yaw and pitch do not commute, so the same drag applied in pieces does not arrive
+    /// where it does applied whole, and the model wanders as you work it. Once the pitch was stopped
+    /// at the poles it became plainly wrong — a sideways drag turned partly into a pitch, ran into
+    /// the stop, and what was left of it went on turning the model about the vertical while the
+    /// cursor moved horizontally. Nothing about that is recoverable by adjusting the mixture.
     ///
     /// Sideways and yaw agree in sign because the picture is no longer mirrored: dragging right
     /// walks the viewer round towards the model's own right, which is the side of the screen that
-    /// side is now drawn on. Both halves of that flipped together, so the drag still takes the
-    /// model with it — cursor right turns the near face right, as it always did.
-    public Camera Dragged(float right, float down)
-    {
-        var (c, s) = (MathF.Cos(Roll), MathF.Sin(Roll));
-        return Turned(c * right - s * down, s * right + c * down);
-    }
+    /// side is now drawn on.
+    public Camera Dragged(float right, float down) => Turned(right, down);
 
     /// Pitch stops at straight up and straight down, which is what makes this a turntable.
     ///

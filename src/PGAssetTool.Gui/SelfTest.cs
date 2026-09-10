@@ -965,9 +965,11 @@ internal static class SelfTest
 
             // The whole loop, for both at once: build, install, and come back with the game read
             // again. Only files that differ are packed, so this is also what says the edits landed.
+            var applying = System.Diagnostics.Stopwatch.StartNew();
             model.Editor.PackAndApplyCommand.Execute(null);
             WaitWhile(() => model.Busy, 300_000);
             Console.WriteLine($"batch    {model.Status}");
+            Console.WriteLine($"timing   build and apply took {applying.ElapsedMilliseconds}ms");
 
             if (model.Status.Contains("failed") && !model.Status.Contains("0 failed"))
                 return Fail($"applying reported failures: {model.Status}");
@@ -1166,24 +1168,40 @@ internal static class SelfTest
             if (multi < 1) return Fail("no list in the manager accepts more than one row");
             Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
 
+            var turning = System.Diagnostics.Stopwatch.StartNew();
             model.Manager.ProceedCommand.Execute(null);
             // The manager reports its own busy state; the shell is not involved in this one.
             WaitWhile(() => model.Manager.Busy || model.Manager.Asking is not null, 180_000);
             Console.WriteLine($"manager  {model.Manager.Status}");
+            Console.WriteLine($"timing   turning one mod off took {turning.ElapsedMilliseconds}ms");
 
             var mineNow = model.Manager.Mods.First(m => m.Mod.Id == PackIdentity);
             if (mineNow.Enabled) return Fail("the mod is still on after being turned off");
             if (model.Manager.Mods.Single(m => m.Mod.Id == PackIdentityB).Enabled is false)
                 return Fail("turning one mod off also turned off the other");
 
-            // Only this mod's own bundles. Anything else installed and still on is supposed to be
-            // left written — asserting the whole game went vanilla passed only for as long as this
-            // test happened to be the only thing installed.
-            var mineBundles = mineNow.Mod.TouchedBundles.Keys.ToHashSet();
-            if (model.Manager.Bundles.Any(b =>
-                    mineBundles.Contains(b.Bundle)
-                    && b.State == PGAssetTool.Core.Mods.BundleState.ChangedByThisTool))
-                return Fail("turning it off left one of its own bundles changed");
+            // Only the bundles that were this mod's alone. Anything else installed and still on is
+            // supposed to be left written, and a bundle two mods share is still written after one
+            // of them goes — asserting the whole game went vanilla passed only for as long as this
+            // test was the only thing installed, and asserting on every bundle it touched passed
+            // only for as long as nothing else touched the same ones. The author now has three
+            // dozen mods on, several of them in the bundle this test writes to.
+            var alsoWritten = model.Manager.Mods
+                .Where(m => m.Mod.Enabled && m.Mod.Id != PackIdentity)
+                .SelectMany(m => m.Mod.TouchedBundles.Keys)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var mineAlone = mineNow.Mod.TouchedBundles.Keys
+                .Where(b => !alsoWritten.Contains(b))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            Console.WriteLine($"manager  {mineAlone.Count} of {mineNow.Mod.TouchedBundles.Count} "
+                + "of its bundles are its alone and have to go back");
+
+            if (model.Manager.Bundles.FirstOrDefault(b =>
+                    mineAlone.Contains(b.Bundle)
+                    && b.State == PGAssetTool.Core.Mods.BundleState.ChangedByThisTool) is { } stillChanged)
+                return Fail($"turning it off left '{stillChanged.Bundle}', which nothing else writes, changed");
 
             // The packs are kept beside the tool, so deleting a workspace cannot strand one.
             var kept = model.Manager.Mods.Where(m => mine.Contains(m.Mod.Id))

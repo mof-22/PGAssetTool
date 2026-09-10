@@ -65,7 +65,27 @@ public partial class MainWindow : Window
 
             // A file watcher fires on its own thread; everything it leads to touches the UI.
             model.Editor.Settled += () => Avalonia.Threading.Dispatcher.UIThread.Post(model.Editor.Refresh);
+
+            // Whether the game is running decides what half this window offers will do, and it was
+            // read only when the manager last refreshed — so starting the game after that left
+            // every button still offering to write to it.
+            _watchingTheGame?.Stop();
+            _watchingTheGame = new Avalonia.Threading.DispatcherTimer(
+                TimeSpan.FromSeconds(2), Avalonia.Threading.DispatcherPriority.Background,
+                (_, _) => model.Manager.NoticeTheGame());
+            _watchingTheGame.Start();
         };
+    }
+
+    /// Polls whether the game is running. Stopped when the window goes, or a closed window would
+    /// keep a model alive and keep asking Windows about processes on its behalf.
+    private Avalonia.Threading.DispatcherTimer? _watchingTheGame;
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _watchingTheGame?.Stop();
+        _watchingTheGame = null;
+        base.OnClosed(e);
     }
 
     private static void OnDragOver(object? sender, DragEventArgs e)

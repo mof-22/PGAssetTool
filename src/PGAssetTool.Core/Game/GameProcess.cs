@@ -40,10 +40,67 @@ public static class GameProcess
         return null;
     }
 
+    /// Whether the game is running, asked cheaply enough to ask often.
+    ///
+    /// Find reads the module path of every process on the machine, which is the only way to be sure
+    /// when nothing is known about the name — and far too much work to repeat on a timer, which is
+    /// what noticing the game being started while the tool is open takes. The executable's name
+    /// comes from the installation, so the candidates narrow to the processes carrying that name
+    /// before anything is read at all, and there are usually none.
+    ///
+    /// Falls back to the full sweep when the installation has no executable to name, so the answer
+    /// is never less certain than it was — only arrived at faster when it can be.
     public static bool IsRunning(GameInstallation game)
     {
-        using var found = Find(game);
-        return found is not null;
+        if (ExecutableName(game) is not { } name)
+        {
+            using var swept = Find(game);
+            return swept is not null;
+        }
+
+        var root = Path.GetFullPath(game.RootDirectory).TrimEnd(Path.DirectorySeparatorChar);
+        var running = false;
+
+        foreach (var process in Process.GetProcessesByName(name))
+        {
+            try
+            {
+                running |= process.MainModule?.FileName is { } path
+                    && path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception)
+            {
+                // Not ours to query, and so not the game — the same reasoning as in Find.
+            }
+
+            process.Dispose();
+        }
+
+        return running;
+    }
+
+    /// The game's executable, without its extension, read once per installation.
+    private static readonly Dictionary<string, string?> Named = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string? ExecutableName(GameInstallation game)
+    {
+        lock (Named)
+        {
+            var root = Path.GetFullPath(game.RootDirectory);
+            if (Named.TryGetValue(root, out var known)) return known;
+
+            string? name = null;
+            try
+            {
+                name = Directory.EnumerateFiles(root, "*.exe")
+                    .Select(Path.GetFileNameWithoutExtension)
+                    .FirstOrDefault(f => f is not null
+                        && !f.StartsWith("Unity", StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+
+            return Named[root] = name;
+        }
     }
 
     /// Ends the game and waits for it to go.
