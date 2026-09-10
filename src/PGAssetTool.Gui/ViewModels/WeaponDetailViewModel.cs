@@ -171,15 +171,15 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
             .OrderBy(g => Rank(g.Key))
             .ThenBy(g => g.Key.ToString(), StringComparer.Ordinal);
 
+        // Closed. Selecting a weapon used to unfold it into thirty-odd rows across four groups, and
+        // the thing anybody had come for — the model — is shown in the pane on its own now. What
+        // the tree is for is going looking, and going looking starts from a list of what there is.
         var prefab = new TreeNode(tree.Record.PrefabName, $"{tree.PrefabAssets.Count} objects",
-            AssetClassID.GameObject) { IsExpanded = true };
+            AssetClassID.GameObject);
 
         foreach (var group in byClass)
         {
-            var node = new TreeNode(group.Key.ToString(), $"{group.Count()}")
-            {
-                IsExpanded = Replaceable.Supports(group.Key),
-            };
+            var node = new TreeNode(group.Key.ToString(), $"{group.Count()}");
             foreach (var asset in group.OrderBy(a => a.Name, StringComparer.Ordinal))
                 node.With(new TreeNode(
                     asset.Name.Length > 0 ? asset.Name : $"(unnamed {asset.PathId})",

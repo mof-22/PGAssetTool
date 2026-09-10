@@ -113,6 +113,35 @@ public static class PackBuilder
         return full;
     }
 
+    /// Clears out what this workspace built before under another name.
+    ///
+    /// A pack is named after the mod, so renaming the mod builds a second file beside the first and
+    /// leaves the old one in the folder to be picked up and handed out by mistake — with the same
+    /// id, so installing it would look like an update of the same mod under its old name.
+    ///
+    /// Only this workspace's own output goes, and only by id. A pack that arrived in the folder
+    /// some other way — downloaded, dropped in to look at — carries a different id and is somebody
+    /// else's file. Anything that will not open is left where it is for the same reason.
+    private static void Supersede(string workspace, string keep, string id)
+    {
+        if (id.Length == 0 || !Directory.Exists(workspace)) return;
+
+        foreach (var other in Directory.EnumerateFiles(workspace, "*" + Extension))
+        {
+            if (string.Equals(Path.GetFullPath(other), Path.GetFullPath(keep), StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            try
+            {
+                if (ReadManifest(other).Id == id) File.Delete(other);
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException
+                                          or System.Text.Json.JsonException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
     /// Whether an operation names a class this tool will not write back.
     private static bool Refused(PackOperation operation)
         => Enum.TryParse<AssetsTools.NET.Extra.AssetClassID>(operation.Target.Class, out var cls)
@@ -190,6 +219,7 @@ public static class PackBuilder
         }
 
         PackFile.Write(outputPath, bytes.ToArray(), signer, packed.Author);
+        Supersede(workspace, outputPath, packed.Id);
 
         return new PackResult(outputPath, packed.Operations.Count, new FileInfo(outputPath).Length, unchanged);
     }

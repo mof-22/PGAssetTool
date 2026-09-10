@@ -167,7 +167,7 @@
                   IsChecked="{Binding Showing.ShowAlpha, Mode=OneWay}"
                   IsEnabled="{Binding Showing.CanToggleAlpha}"
                   Command="{Binding ToggleAlphaCommand}"
-                  InputGesture="Ctrl+A" />
+                  InputGesture="Shift+A" />
         <Separator />
         <MenuItem Header="_Browse" Command="{Binding ShowBrowseCommand}"
                   InputGesture="Ctrl+D1" />

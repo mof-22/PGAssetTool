@@ -514,6 +514,15 @@ internal static class SelfTest
                 || landed.PathId != model.Detail.Tree.MainMesh?.PathId)
                 return Fail($"selecting #416 came up on '{model.Detail?.SelectedNode?.Label ?? "nothing"}'");
 
+            // And it does not unfold the tree to do it. Seventy-odd rows across four groups is a
+            // list to go looking in, not a thing to be handed; what somebody came for is in the
+            // pane. Whatever the tree opens to reach the selected row is the tree's own business.
+            var opened = CountRows(model.Detail.Roots.Where(r => r.IsExpanded));
+            Console.WriteLine($"tree     selecting #416 leaves {opened} of "
+                + $"{CountRows(model.Detail.Roots)} rows unfolded");
+            if (opened > 8)
+                return Fail($"selecting #416 unfolded {opened} rows");
+
             if (SkinsAreOffered(model, scratch) is { } skinProblem) return Fail(skinProblem);
 
             var skins = model.Detail?.Roots.FirstOrDefault(r => r.Label == "Skins");
@@ -573,17 +582,21 @@ internal static class SelfTest
             // and it has to survive the model landing, which puts back what that mesh last wore.
             if (skins.Children.FirstOrDefault(s => s.Unread is null && s.Children.Count > 0) is { } repaint)
             {
+                // Selecting it, not opening it. Going down a weapon's eight skins to see what each
+                // looks like is the ordinary thing to do here, and it used to unfold every one of
+                // them into its materials and textures on the way past.
                 model.Preview.Clear();
-                repaint.IsExpanded = false;
-                repaint.IsExpanded = true;
+                model.Detail.SelectedNode = repaint;
                 Arrived(model, ownMesh);
 
                 var put = model.Preview.ChosenTexture;
-                Console.WriteLine($"skins    opening '{repaint.Label}' put "
+                Console.WriteLine($"skins    picking '{repaint.Label}' put "
                     + $"{put?.Name ?? "nothing"} on '{ownMesh.Label}'");
 
                 if (put is null || !looks.Contains((put.Bundle, put.PathId)))
-                    return Fail($"opening '{repaint.Label}' did not put a skin on the weapon");
+                    return Fail($"picking '{repaint.Label}' did not put a skin on the weapon");
+                if (repaint.IsExpanded)
+                    return Fail($"picking '{repaint.Label}' unfolded it as well");
             }
 
             // A skin that replaces the weapon rather than repainting it has nothing under it until
@@ -836,6 +849,14 @@ internal static class SelfTest
 
             var marked = model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath).Edited;
             Console.WriteLine($"editor   after an outside edit, marked as edited: {marked}");
+
+            // And it comes to the top. A workspace holds thirty files and the mod is three of
+            // them; finding those three again after every save was most of the work.
+            var listed = model.Editor.Files.Select(f => f.Edited).ToList();
+            Console.WriteLine($"editor   {listed.Count(e => e)} edited of {listed.Count}, "
+                + $"first is '{model.Editor.Files[0].Name}'");
+            if (listed.LastIndexOf(true) > listed.IndexOf(false))
+                return Fail("an edited file is listed below an untouched one");
             if (!marked) return Fail("an edit made outside the tool was not noticed");
 
             // Alpha in these textures is usually emission rather than coverage, so an author can
@@ -846,6 +867,8 @@ internal static class SelfTest
             if (TheViewOutlivesAReading(model, texture) is { } viewProblem) return Fail(viewProblem);
 
             if (TwoModelsKeepTheirOwnViews(model, texture) is { } swapProblem) return Fail(swapProblem);
+
+            if (TwoWorkspacesKeepTheirOwnViews(model, texture) is { } twiceProblem) return Fail(twiceProblem);
 
             if (DroppedFilesLand(model, texture) is { } dropProblem) return Fail(dropProblem);
 
@@ -1694,6 +1717,78 @@ internal static class SelfTest
         model.Editor.SelectedFile = back;
         WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
         return null;
+    }
+
+    /// Two extractions of the same weapon are two workspaces, not one.
+    ///
+    /// The view a model was last left at was remembered against the file's path inside its
+    /// workspace — and every extraction of one weapon has the same paths inside it. So two
+    /// workspaces of the same weapon were one model as far as the memory was concerned: the angle
+    /// found in the first turned up in the second, and going to a workspace of anything else threw
+    /// it away. Which of the two an author saw depended on which they had opened last.
+    private static string? TwoWorkspacesKeepTheirOwnViews(MainViewModel model, Core.Pack.WorkspaceFile back)
+    {
+        var first = model.Editor.SelectedWorkspace;
+        if (first is null) return "nothing is selected to extract a second copy of";
+
+        // A second extraction of the weapon already open, which is what an author doing two takes
+        // on one gun ends up with. Named whatever the extractor names it — the first one has been
+        // renamed by this point — so it is found by being the one that was not there before.
+        var before = model.Editor.Workspaces.Select(w => w.Directory).ToHashSet();
+
+        model.ExtractWeaponCommand.Execute(null);
+        WaitWhile(() => model.Busy, 300_000);
+        model.Editor.Rescan(model.WorkspaceRoot);
+
+        var second = model.Editor.Workspaces.FirstOrDefault(w => !before.Contains(w.Directory));
+        if (second is null)
+            return $"extracting the same weapon again made no second workspace: {model.Status}";
+
+        try
+        {
+            var turned = new Camera(Yaw: 0.77f, Pitch: 0.33f, Distance: 1.9f);
+
+            if (Model(model, first) is not { } mine) return $"'{first.Name}' has no model to look at";
+            model.Editor.Edited.Camera = turned;
+
+            if (Model(model, second) is not { } theirs)
+                return $"'{second.Name}' has no model to look at";
+
+            Console.WriteLine($"editor   two takes on one weapon: '{mine.Name}' in {first.Name} at "
+                + $"{turned.Yaw:0.00}, the same file in {second.Name} at "
+                + $"{model.Editor.Edited.Camera.Yaw:0.00}");
+
+            if (model.Editor.Edited.Camera == turned)
+                return "a second workspace of the same weapon opened at the first one's angle";
+
+            // And back, to be sure the first one kept its own rather than merely not lending it.
+            if (Model(model, first) is null) return "the first workspace stopped showing its model";
+            if (model.Editor.Edited.Camera != turned)
+                return $"the first workspace came back at {model.Editor.Edited.Camera}, not {turned}";
+        }
+        finally
+        {
+            model.Editor.SelectedWorkspace = first;
+            model.Editor.SelectedFile = model.Editor.Files.FirstOrDefault(f => f.RelativePath == back.RelativePath);
+            WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+
+            try { Directory.Delete(second.Directory, recursive: true); } catch (IOException) { }
+            model.Editor.Rescan(model.WorkspaceRoot);
+        }
+
+        return null;
+    }
+
+    /// Selects a workspace's first model and waits for it to arrive. Null if it has none.
+    private static Core.Pack.WorkspaceFile? Model(MainViewModel model, WorkspaceItem workspace)
+    {
+        model.Editor.SelectedWorkspace = workspace;
+        if (model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".glb")) is not { } mesh) return null;
+
+        model.Editor.Edited.Clear();
+        model.Editor.SelectedFile = mesh;
+        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+        return model.Editor.Edited.Mesh is null ? null : mesh;
     }
 
     /// Files dropped on the window reach the file in the workspace they were meant for.

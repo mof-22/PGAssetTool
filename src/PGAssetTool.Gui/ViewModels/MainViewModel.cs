@@ -1040,6 +1040,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private async void ShowPreview(TreeNode? node)
     {
+        // A skin row stands for a look rather than for an asset, so selecting one shows the weapon
+        // wearing it. It used to have to be opened for that, which also unfolded it — and going
+        // down a weapon's eight skins to see what they look like is the ordinary thing to do here.
+        if (node is { Skin: not null }) { OpenSkin(node); return; }
+
         if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh or AssetClassID.AudioClip))
         {
             Preview.Clear(node?.Class is null ? null : $"No preview for {node.Class}.");

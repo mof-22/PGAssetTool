@@ -346,6 +346,45 @@ public class PackTests : IDisposable
     }
 
     [Fact]
+    public void RenamingAModLeavesOneBuiltPackBehindIt()
+    {
+        // The file is named after the mod, so a rename builds a second one beside the first — with
+        // the same id, so installing the stale one would read as an update of the same mod under a
+        // name its author had already moved on from.
+        WriteWorkspace("textures/b.png");
+        Edit("textures/b.png");
+
+        var manifest = Workspace.Read(_workspace);
+        PackBuilder.Build(_workspace, PackBuilder.OutputFor(_workspace, manifest));
+
+        var renamed = manifest with { Name = "Something Else" };
+        File.WriteAllText(Path.Combine(_workspace, PackManifest.FileName), renamed.ToJson());
+        PackBuilder.Build(_workspace, PackBuilder.OutputFor(_workspace, renamed));
+
+        Assert.Equal(
+            ["Something Else.pgmod"],
+            Directory.GetFiles(_workspace, "*.pgmod").Select(Path.GetFileName).ToArray());
+    }
+
+    [Fact]
+    public void SomebodyElsesPackInTheFolderIsNotSweptUp()
+    {
+        WriteWorkspace("textures/b.png");
+        Edit("textures/b.png");
+
+        // Same shape, different mod. A folder is a place people put things.
+        var theirs = Path.Combine(_workspace, "theirs.pgmod");
+        var mine = Workspace.Read(_workspace);
+        PackBuilder.Build(_workspace, theirs);
+
+        File.WriteAllText(Path.Combine(_workspace, PackManifest.FileName),
+            (mine with { Id = "somebody-else", Name = "Theirs" }).ToJson());
+        PackBuilder.Build(_workspace, Path.Combine(_workspace, "Theirs.pgmod"));
+
+        Assert.True(File.Exists(theirs));
+    }
+
+    [Fact]
     public void AnEntryIsOnlyReadAsFarAsItIsAllowedTo()
     {
         // A zip says how big each entry is and then hands over as many bytes as it likes, so the

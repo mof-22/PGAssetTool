@@ -103,7 +103,7 @@ and safer than one at a time.
 | `Ctrl+F` | Jump to the search on this tab |
 | `Ctrl+E` | Extract the selected weapon |
 | `Ctrl+Shift+E` | Extract just the selected asset |
-| `Ctrl+A` | Show the alpha channel of the picture in front of you |
+| `Shift+A` | Show the alpha channel of the picture in front of you |
 | `Ctrl+Shift+R` | Show only what can be replaced |
 | `Ctrl+R` | Re-read the game from disk |
 | `F5` | Re-read the workspaces |

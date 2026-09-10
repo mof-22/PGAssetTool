@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         // here rather than on selection, because re-clicking an already selected row must still
         // fold it away.
         AddHandler(InputElement.TappedEvent, OnTapped, RoutingStrategies.Bubble);
+        AddHandler(InputElement.DoubleTappedEvent, OnDoubleTapped, RoutingStrategies.Bubble);
 
         // Space plays the clip in front of you. Not a menu shortcut: registering it as one would
         // take the space bar away from the search box and from every button that a keyboard user
@@ -120,6 +121,14 @@ public partial class MainWindow : Window
 
         switch (row.DataContext)
         {
+            // A skin is the one row where opening it and looking at it are different things.
+            // Clicking one shows the weapon wearing it, which is what somebody going down the list
+            // of skins wants from every one of them; unfolding it into its materials and textures
+            // is a separate question, and asking it of every glance made the tree unusable as a
+            // list. That one takes a double click.
+            case TreeNode { Skin: not null }:
+                break;
+
             // The asset tree keeps its own expansion, because rebuilding it must not fold up what
             // somebody had opened.
             case TreeNode { HasChildren: true } node:
@@ -132,6 +141,14 @@ public partial class MainWindow : Window
                 row.IsExpanded = !row.IsExpanded;
                 break;
         }
+    }
+
+    /// The other half of the rule above: the rows a single click does not open, a double click does.
+    private static void OnDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (e.Source is not Control control) return;
+        if (control.FindAncestorOfType<TreeViewItem>()?.DataContext is TreeNode { Skin: not null } skin)
+            skin.IsExpanded = !skin.IsExpanded;
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -147,12 +164,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Whatever a key means to something being typed into, it means that. Ctrl+A is the whole
-        // reason this is a handler rather than a key binding: as a binding the window took it
-        // before the search box could, and select-all stopped working while alpha toggled instead.
+        // Whatever a key means to something being typed into, it means that. This is a handler
+        // rather than a key binding because a binding on the window runs before the focused
+        // control sees the key at all, and the shortcuts here are all ones something else has a
+        // better claim to first.
         if (FocusManager?.GetFocusedElement() is TextBox) return;
 
-        if (e is { Key: Key.A, KeyModifiers: KeyModifiers.Control })
+        // Ctrl+A is left alone on purpose: it belongs to whatever is focused, which is a list to
+        // select the whole of or a box to select the text of. Alpha sits on Shift+A instead.
+        if (e is { Key: Key.A, KeyModifiers: KeyModifiers.Shift })
         {
             model.ToggleAlphaCommand.Execute(null);
             e.Handled = true;
@@ -229,12 +249,16 @@ public partial class MainWindow : Window
         box?.Focus();
     }
 
-    /// Opens the folder extraction wrote to, or the root if nothing has been written yet.
+    /// Opens the workspace being worked on, falling back to the last one written and then the root.
+    ///
+    /// The selected one first: the reason to open a folder is almost always to put a file into the
+    /// one on the screen, and after a session of editing, the last extraction is whichever
+    /// happened to be made most recently rather than the one anybody is looking at.
     private void OnOpenOutput(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel model) return;
 
-        var path = model.LastExport ?? model.WorkspaceRoot;
+        var path = model.Editor.SelectedWorkspace?.Directory ?? model.LastExport ?? model.WorkspaceRoot;
         System.IO.Directory.CreateDirectory(path);
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
     }

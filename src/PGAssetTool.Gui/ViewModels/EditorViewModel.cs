@@ -398,8 +398,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         var chosen = SelectedFile?.RelativePath;
 
         Files.Clear();
+        // Edited first, and stable within each band so the order the workspace is in survives
+        // underneath. A workspace holds thirty files and three of them are the mod; finding those
+        // three again after every save was most of what working here consisted of.
         if (value is not null && WorkspaceView.Open(value.Directory) is { } view)
-            foreach (var file in view.Files) Files.Add(file);
+            foreach (var file in view.Files.OrderByDescending(f => f.Edited)) Files.Add(file);
 
         Watch(value?.Directory);
         SelectedFile = Files.FirstOrDefault(f => f.RelativePath == chosen)
@@ -503,7 +506,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 // Read after showing, not before: showing is what looks up the view this model was
                 // last left at, and the texture that comes back with it may not be the one the
                 // pane happened to be wearing a moment ago.
-                preview.Show(mesh, caption, null, $"{side}:{file.RelativePath}");
+                // Keyed by where the file is, not by what it is called inside its workspace. Two
+                // workspaces made from the same weapon hold the same relative paths, so every
+                // extraction of one weapon was one model as far as the remembered views were
+                // concerned: switching between them carried the angle across, and switching to a
+                // workspace of anything else threw it away.
+                preview.Show(mesh, caption, null, $"{side}:{file.FullPath}");
                 Offer(preview, preview.ChosenTexture?.Name);
                 break;
 
