@@ -476,10 +476,39 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// The same reconcile the rest of the tool installs through, so a pack from outside is subject
     /// to the same backups, the same ledger and the same undo as one built here.
+    /// Installs packs from outside — dropped on the window, or handed over some other way.
+    ///
+    /// Their seals are read before anything is written, which is the only moment saying so is any
+    /// use. A pack that has been changed since it was signed still installs if that is what somebody
+    /// wants: a pack is a description of changes, and the tool has always taken the view that
+    /// whoever holds one may install it. What it did not do was tell them first. The seal was read
+    /// when a row was selected in the manager — after the game had been rewritten — so the one fact
+    /// worth having before deciding arrived only after the decision.
     public Task InstallPacks(IReadOnlyList<string> paths)
-        => paths.Count == 0
-            ? Task.CompletedTask
-            : RunExclusively("installing the packs", () => ApplyPacks(paths, "", ""));
+    {
+        if (paths.Count == 0) return Task.CompletedTask;
+
+        var wrong = paths
+            .Select(p => (File: p, Seal: PackFile.Inspect(p)))
+            .Where(x => x.Seal.Wrong)
+            .ToList();
+
+        if (wrong.Count == 0) return Install(paths);
+
+        Manager.Asking = new Confirmation(
+            wrong.Count == 1
+                ? "This pack is not what its author signed"
+                : $"{wrong.Count} of these packs are not what their authors signed",
+            string.Join("\n", wrong.Select(w => $"{Path.GetFileName(w.File)} — {w.Seal.Describe}"))
+                + "\n\nA pack carrying a signature it no longer matches has been changed since it was "
+                + "built, by its author or by somebody else. Nothing here can tell which. Install it?",
+            () => Install(paths));
+
+        return Task.CompletedTask;
+    }
+
+    private Task Install(IReadOnlyList<string> paths)
+        => RunExclusively("installing the packs", () => ApplyPacks(paths, "", ""));
 
     /// <param name="trouble">What went wrong earlier in the same gesture, to be repeated at the end.</param>
     /// <param name="sofar">What has already happened, for the message that says why nothing more will.</param>

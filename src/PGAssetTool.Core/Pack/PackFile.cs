@@ -17,13 +17,17 @@ public sealed record PackSeal(bool Protected, string Author, string Fingerprint,
         SealState.Signed when Author.Length > 0 => $"signed by {Author} ({Fingerprint})",
         SealState.Signed => $"signed ({Fingerprint})",
         SealState.Altered => "changed since it was built",
+        SealState.Invalid => "its signature cannot be read",
         _ => "not signed",
     };
+
+    /// Whether this is something to say before installing rather than after.
+    public bool Wrong => State is SealState.Altered or SealState.Invalid;
 }
 
 public enum SealState
 {
-    /// No signature at all: an older pack, or one built with protection off.
+    /// No signature at all: a pack built with protection off.
     Unsigned,
 
     /// The contents are what the holder of that key put in.
@@ -31,6 +35,16 @@ public enum SealState
 
     /// There is a signature and the contents no longer match it.
     Altered,
+
+    /// It is a protected pack and its seal cannot be read at all: the key, the signature or the
+    /// header is not what it should be.
+    ///
+    /// Kept apart from Unsigned, which it used to be folded into. Anything that failed to decode
+    /// came back as a plain unsigned zip, so a damaged or doctored seal could be made to disappear
+    /// simply by breaking it — and the pack still read, still installed, and raised nothing.
+    /// Refusing to say "not signed" about a file that plainly carries a signature is the whole of
+    /// the fix; what to do about it is the caller's.
+    Invalid,
 }
 
 /// A .pgmod on disk, in either of the two shapes it comes in.
@@ -77,21 +91,44 @@ public static class PackFile
     /// Reads a pack, whichever shape it is in. The archive owns the stream it was opened from.
     public static ZipArchive Open(string path) => new(new MemoryStream(Contents(path)), ZipArchiveMode.Read);
 
+    /// As much of a pack as anything here will hold in memory at once.
+    ///
+    /// A pack is a description of changes and the files they need; the largest one this tool has
+    /// built is a few megabytes. The limit is here rather than at the zip because the file is read
+    /// whole before any of it is understood — inspecting a seal, listing the manager, drawing a
+    /// tile — so a pack big enough to exhaust memory did so before reaching a single check.
+    public const long Most = 512L * 1024 * 1024;
+
     /// The zip inside a pack, unscrambled if it needed to be.
     public static byte[] Contents(string path)
     {
-        var raw = File.ReadAllBytes(path);
+        var raw = ReadWhole(path);
         return Split(raw) is var (_, payload) ? payload : raw;
     }
 
     /// Who built it and whether it still matches, without unpacking anything.
     public static PackSeal Inspect(string path)
     {
+        byte[] raw;
+        (Header Header, byte[] Payload)? split;
         try
         {
-            var raw = File.ReadAllBytes(path);
-            if (Split(raw) is not var (header, payload)) return PackSeal.Plain;
+            raw = ReadWhole(path);
+            split = Split(raw);
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException)
+        {
+            // Nothing readable to speak for. A file that is not there, or is too big to hold, is
+            // not a claim about whether anybody signed anything.
+            return e is InvalidDataException ? Unreadable : PackSeal.Plain;
+        }
 
+        if (split is not var (header, payload)) return PackSeal.Plain;
+
+        // Past here the file says it carries a seal, so a seal that will not decode is reported as
+        // one that will not decode. It is never quietly demoted to "not signed".
+        try
+        {
             var publicKey = Convert.FromBase64String(header.PublicKey);
             var state = PackAuthor.Verifies(
                     Signed(header.Author, payload),
@@ -101,10 +138,25 @@ public static class PackFile
 
             return new PackSeal(true, header.Author, PackAuthor.FingerprintOf(publicKey), state);
         }
-        catch (Exception e) when (e is IOException or FormatException or JsonException or ArgumentException)
+        catch (Exception e) when (e is FormatException or ArgumentException or CryptographicException)
         {
-            return PackSeal.Plain;
+            return new PackSeal(true, header.Author, "", SealState.Invalid);
         }
+    }
+
+    /// Too big to hold, or a container whose header will not parse. Not claimed as protected:
+    /// nothing was read far enough to know that, and Invalid says only that no seal could be read.
+    private static PackSeal Unreadable { get; } = new(false, "", "", SealState.Invalid);
+
+    private static byte[] ReadWhole(string path)
+    {
+        var length = new FileInfo(path).Length;
+        if (length > Most)
+            throw new InvalidDataException(
+                $"'{Path.GetFileName(path)}' is {length / (1024 * 1024)}MB, and a pack is not read past "
+                + $"{Most / (1024 * 1024)}MB.");
+
+        return File.ReadAllBytes(path);
     }
 
     /// Writes a pack: the zip as it is, or wrapped and signed.
@@ -136,7 +188,11 @@ public static class PackFile
     }
 
     /// Splits a protected pack into what it says about itself and what it holds. Null for a plain
-    /// zip, which is every pack built before this existed and every one built with protection off.
+    /// zip, which is every pack built with protection off.
+    ///
+    /// The two ways of not being a protected pack are kept apart. Null means it never claimed to be
+    /// one; a throw means it did and the claim is broken. Folding the second into the first is what
+    /// let a doctored container pass as an ordinary unsigned zip.
     private static (Header Header, byte[] Payload)? Split(byte[] raw)
     {
         if (raw.Length < Magic.Length + 5 || !raw.AsSpan(0, Magic.Length).SequenceEqual(Magic)) return null;
@@ -148,10 +204,21 @@ public static class PackFile
 
         var length = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(Magic.Length + 1));
         var at = Magic.Length + 1 + 4;
-        if (length < 0 || at + length > raw.Length) return null;
+        if (length < 0 || at + length > raw.Length)
+            throw new InvalidDataException("the pack says it is protected and its header runs off the end.");
 
-        var header = JsonSerializer.Deserialize<Header>(raw.AsSpan(at, length), Json);
-        if (header is null) return null;
+        Header? header;
+        try
+        {
+            header = JsonSerializer.Deserialize<Header>(raw.AsSpan(at, length), Json);
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidDataException($"the pack says it is protected and its header is not readable: {e.Message}");
+        }
+
+        if (header is null)
+            throw new InvalidDataException("the pack says it is protected and carries no header.");
 
         return (header, Scramble(raw[(at + length)..]));
     }

@@ -284,7 +284,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             if (entry is null) { failed.Add($"{mod.Id}: pack has no '{operation.Source}'"); continue; }
 
             var source = Path.Combine(staging, Path.GetFileName(operation.Source));
-            entry.ExtractToFile(source, overwrite: true);
+            PackBuilder.WriteEntry(entry, source, PackBuilder.MostPerFile, $"'{operation.Source}'");
 
             try
             {
@@ -373,7 +373,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             }
 
             var source = Path.Combine(staging, Path.GetFileName(operation.Source));
-            entry.ExtractToFile(source, overwrite: true);
+            PackBuilder.WriteEntry(entry, source, PackBuilder.MostPerFile, $"'{operation.Source}'");
             var bytes = File.ReadAllBytes(source);
 
             if (!AssetAddition.HasType(editor.File, cls))

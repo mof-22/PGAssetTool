@@ -159,4 +159,64 @@ public class PackFileTests : IDisposable
     public void SomethingThatIsNotAPackAtAllIsNotClaimedToBeSigned()
         => Assert.Equal(SealState.Unsigned, PackFile.Inspect(Path("nothing here.pgmod")).State);
 
+    [Fact]
+    public void BreakingASignatureDoesNotTurnAPackIntoAnUnsignedOne()
+    {
+        // The one thing an alteration must never be able to do is erase the evidence of itself.
+        // Anything that failed to decode used to come back as a plain unsigned zip, so a single
+        // character in the signature turned "changed since it was built" into "not signed" — a
+        // pack that read, installed, and raised nothing.
+        using var me = PackAuthor.Mine(_home);
+        var path = Path("broken.pgmod");
+        PackFile.Write(path, Zip(), me, "mof22");
+
+        var raw = File.ReadAllBytes(path);
+        raw[raw.AsSpan().IndexOf("\"signature\":\""u8) + 13] = (byte)'!';
+        File.WriteAllBytes(path, raw);
+
+        Assert.Equal(SealState.Invalid, PackFile.Inspect(path).State);
+        Assert.True(PackFile.Inspect(path).Wrong);
+    }
+
+    [Fact]
+    public void AHeaderThatWillNotParseIsNotAPlainZipEither()
+    {
+        using var me = PackAuthor.Mine(_home);
+        var path = Path("mangled.pgmod");
+        PackFile.Write(path, Zip(), me, "mof22");
+
+        var raw = File.ReadAllBytes(path);
+        raw[raw.AsSpan().IndexOf("{\"author\""u8)] = (byte)'x';
+        File.WriteAllBytes(path, raw);
+
+        Assert.Equal(SealState.Invalid, PackFile.Inspect(path).State);
+    }
+
+    [Fact]
+    public void BytesAppendedToAPublicKeyDoNotBuyADifferentFingerprint()
+    {
+        // ImportSubjectPublicKeyInfo stops at the end of the structure and says nothing about what
+        // follows, while the fingerprint was taken over the whole array — so the same key, padded,
+        // verified every signature exactly as before under a fingerprint of somebody's choosing.
+        // A fingerprint that does not name the key it verifies with is worse than none.
+        using var me = PackAuthor.Mine(_home);
+        var padded = me.PublicKey.Concat(new byte[] { 1, 2, 3, 4 }).ToArray();
+
+        Assert.Throws<System.Security.Cryptography.CryptographicException>(
+            () => PackAuthor.FingerprintOf(padded));
+        Assert.False(PackAuthor.Verifies("x"u8.ToArray(), me.Sign("x"u8.ToArray()), padded));
+    }
+
+    [Fact]
+    public void APackTooBigToHoldIsNotReadAtAll()
+    {
+        // Read whole before any of it is understood, so the size to refuse is the file's — a pack
+        // large enough to exhaust memory did so before reaching a single check, and the manager
+        // reads every pack it lists.
+        var path = Path("huge.pgmod");
+        using (var file = File.Create(path)) file.SetLength(PackFile.Most + 1);
+
+        Assert.Equal(SealState.Invalid, PackFile.Inspect(path).State);
+        Assert.Throws<InvalidDataException>(() => PackFile.Contents(path));
+    }
 }

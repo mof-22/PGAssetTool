@@ -192,7 +192,29 @@ genuine fingerprint printed beside somebody else's name.
 
 Signing a pack again under a different key is not prevented, because it cannot be. What it costs is
 the fingerprint, which is the part worth checking: the name is what somebody typed, the fingerprint
-is what they hold.
+is what they hold. The fingerprint is taken over the key as the framework re-exports it rather than
+over the bytes as they arrived: `ImportSubjectPublicKeyInfo` stops at the end of the structure, so a
+padded key verified exactly as before under a fingerprint of the padder's choosing.
+
+A seal is read before a pack from outside is installed, not when somebody looks at the row
+afterwards, and a seal that will not decode is `Invalid` rather than `Unsigned`. Those are two
+different statements and folding them together let an alteration erase the evidence of itself: break
+the signature badly enough and the pack read as an ordinary unsigned zip. Installing an altered pack
+is still allowed — a pack is a description of changes and whoever holds one may install it — but the
+GUI asks first and the CLI wants `--force`.
+
+### What a pack may not do
+
+Two rules that exist because a manifest is data, and a workspace is a folder that gets shared:
+
+- **Every path stays inside the workspace.** `PackBuilder.Inside` resolves the icon and every
+  operation's source and refuses anything absolute, drive-relative, or reaching out through `..`.
+  Without it, a manifest could name any file the builder could read and it went into the pack under
+  whatever name the manifest gave it. The file that made this worth fixing is `author.key`.
+- **Nothing is decompressed without a ceiling.** A zip states each entry's length and then hands
+  over as many bytes as it likes, so the size that counts is the one coming out — `ReadEntry` and
+  `WriteEntry` count as they go. `PackFile.Most` caps the file before it is read at all, because the
+  manager reads every pack it lists in order to draw its picture.
 
 ---
 

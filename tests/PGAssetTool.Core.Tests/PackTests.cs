@@ -282,4 +282,87 @@ public class PackTests : IDisposable
 
         Assert.Equal(wanted, Workspace.Free(wanted));
     }
+
+    [Theory]
+    [InlineData("../secret.key")]
+    [InlineData("sub/../../secret.key")]
+    [InlineData(@"..\secret.key")]
+    public void APackCarriesOnlyWhatTheWorkspaceHolds(string escape)
+    {
+        // A manifest is data. Most of them are written by this tool, but a workspace is a folder
+        // and folders get shared — and the paths in one were joined to the workspace and read
+        // without anyone asking where they landed. What made that worth fixing rather than noting
+        // is `author.key`: it sits at a known place beside the executable, it is the one file that
+        // would let somebody sign as you, and the pack it left in would be the pack you published.
+        var outside = Path.Combine(Path.GetDirectoryName(_workspace)!, "secret.key");
+        File.WriteAllText(outside, "a private key");
+        try
+        {
+            WriteWorkspace("textures/b.png");
+            Edit("textures/b.png");
+
+            var manifest = Workspace.Read(_workspace);
+            var reaching = manifest with
+            {
+                Operations = [manifest.Operations[0] with { Source = escape, BaselineSha256 = null }],
+            };
+            File.WriteAllText(Path.Combine(_workspace, PackManifest.FileName), reaching.ToJson());
+
+            var refused = Assert.Throws<InvalidOperationException>(
+                () => PackBuilder.Build(_workspace, Path.Combine(_workspace, "out.pgmod")));
+
+            Assert.Contains("outside the workspace", refused.Message);
+        }
+        finally { File.Delete(outside); }
+    }
+
+    [Fact]
+    public void ThePictureIsHeldToTheSameRuleAsTheFiles()
+    {
+        var outside = Path.Combine(Path.GetDirectoryName(_workspace)!, "secret.key");
+        File.WriteAllText(outside, "a private key");
+        try
+        {
+            WriteWorkspace("textures/b.png");
+            Edit("textures/b.png");
+
+            var manifest = Workspace.Read(_workspace) with { Icon = "../secret.key" };
+            File.WriteAllText(Path.Combine(_workspace, PackManifest.FileName), manifest.ToJson());
+
+            Assert.Throws<InvalidOperationException>(
+                () => PackBuilder.Build(_workspace, Path.Combine(_workspace, "out.pgmod")));
+        }
+        finally { File.Delete(outside); }
+    }
+
+    [Fact]
+    public void AFolderBesideTheWorkspaceIsNotInsideIt()
+    {
+        // The check is a prefix comparison, so the separator has to be part of it: without it,
+        // `pack-old` beside `pack` reads as a path within `pack`.
+        var beside = _workspace + "-old";
+        Assert.Throws<InvalidOperationException>(
+            () => PackBuilder.Inside(_workspace, Path.Combine(beside, "x.png"), "the file"));
+    }
+
+    [Fact]
+    public void AnEntryIsOnlyReadAsFarAsItIsAllowedTo()
+    {
+        // A zip says how big each entry is and then hands over as many bytes as it likes, so the
+        // length in the directory is not the limit and is not consulted. Sixteen kilobytes of pack
+        // returning sixteen megabytes is the shape of it, and the manager reads the picture out of
+        // every pack it lists before anybody installs anything.
+        var zip = new MemoryStream();
+        using (var archive = new ZipArchive(zip, ZipArchiveMode.Create, leaveOpen: true))
+        using (var entry = archive.CreateEntry("icon/a.png").Open())
+            entry.Write(new byte[PackBuilder.MostPerRead + 1]);
+
+        zip.Position = 0;
+        using var reading = new ZipArchive(zip, ZipArchiveMode.Read);
+
+        var refused = Assert.Throws<InvalidDataException>(
+            () => PackBuilder.ReadEntry(reading.GetEntry("icon/a.png")!, PackBuilder.MostPerRead, "the picture"));
+
+        Assert.Contains("the picture", refused.Message);
+    }
 }

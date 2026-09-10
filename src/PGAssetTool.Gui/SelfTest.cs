@@ -922,6 +922,33 @@ internal static class SelfTest
             if (installed.FirstOrDefault(m => m.Id == PackIdentity)?.PackPath is not { } dropped)
                 return Fail("the kept pack has no path to install from");
 
+            // A signed pack that no longer matches its signature stops and asks first. It used to
+            // be read only when a row was selected in the manager — after the game had been
+            // rewritten — so the one fact worth having before deciding arrived after the decision.
+            var meddled = Path.Combine(scratch, "meddled-" + Path.GetFileName(dropped));
+            var sealed_ = File.ReadAllBytes(dropped);
+            if (sealed_.AsSpan().IndexOf("self test"u8) is var at and >= 0)
+            {
+                "self tost"u8.CopyTo(sealed_.AsSpan(at));
+                File.WriteAllBytes(meddled, sealed_);
+
+                var ledger = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read().Count;
+                model.Manager.Asking = null;
+                _ = model.InstallPacks([meddled]);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+                Console.WriteLine($"seal     a pack changed after signing: "
+                    + $"{model.Manager.Asking?.Title ?? "nothing was asked"}");
+
+                if (model.Manager.Asking is null)
+                    return Fail("a pack that no longer matches its signature installed without a word");
+                if (new PGAssetTool.Core.Mods.ModStore(model.Game!).Read().Count != ledger)
+                    return Fail("it was installed before anybody answered");
+
+                model.Manager.Asking = null;
+            }
+            else Console.WriteLine("seal     the built pack carries no author name to meddle with");
+
             _ = model.InstallPacks([dropped]);
             WaitWhile(() => model.Busy, 300_000);
             Console.WriteLine($"drop     installing '{Path.GetFileName(dropped)}' on its own: {model.Status}");

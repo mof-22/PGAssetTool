@@ -323,6 +323,21 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
         return 2;
     }
 
+    // Said before the game is written to rather than after, and said whichever way it goes: a
+    // signature is only worth carrying if somebody hears about it while there is still a decision
+    // to make. An altered pack still installs — with --force, so it takes saying so.
+    if (command == "apply" && PackFile.Inspect(target) is { } seal && seal.State != SealState.Unsigned)
+    {
+        Console.WriteLine($"Seal       {seal.Describe}");
+        if (seal.Wrong && !args.Contains("--force"))
+        {
+            Console.Error.WriteLine(
+                $"'{Path.GetFileName(target)}' carries a signature it no longer matches, so it has been "
+                + "changed since it was built. Pass --force to install it anyway.");
+            return 1;
+        }
+    }
+
     try
     {
         var version = bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : "unknown";

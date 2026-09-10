@@ -31,6 +31,88 @@ public static class PackBuilder
     public static string OutputFor(string workspace, PackManifest manifest)
         => Path.Combine(workspace, FileNameFor(manifest));
 
+    /// As much as one entry in a pack is read as, whether into memory or onto disk.
+    ///
+    /// Generous for anything an author actually ships — the largest texture in the game is a couple
+    /// of megabytes — and finite, which is the point. A zip says how big each entry is and then
+    /// hands over as many bytes as it likes, so the size to check is the one coming out.
+    public const int MostPerFile = 256 * 1024 * 1024;
+
+    /// And for the two that are read before anything has been decided about the pack.
+    public const int MostPerRead = 16 * 1024 * 1024;
+
+    /// One entry, up to a limit, counted as it arrives.
+    ///
+    /// The declared length is not the limit and is not consulted: it is a number in the pack's own
+    /// directory, written by whoever built the pack. Nothing here is decompressed without a ceiling
+    /// on what comes out of it, because a few kilobytes of pack can expand without bound and the
+    /// manager reads the picture out of every pack it lists before anyone installs anything.
+    public static byte[] ReadEntry(ZipArchiveEntry entry, int most, string what)
+    {
+        using var stream = entry.Open();
+        var bytes = new MemoryStream();
+        var buffer = new byte[64 * 1024];
+
+        int read;
+        while ((read = stream.Read(buffer)) > 0)
+        {
+            if (bytes.Length + read > most) throw TooBig(what, most);
+            bytes.Write(buffer, 0, read);
+        }
+
+        return bytes.ToArray();
+    }
+
+    /// The same, onto disk, for the files an install stages before importing them.
+    public static void WriteEntry(ZipArchiveEntry entry, string path, int most, string what)
+    {
+        using var stream = entry.Open();
+        using var file = File.Create(path);
+        var buffer = new byte[64 * 1024];
+
+        long total = 0;
+        int read;
+        while ((read = stream.Read(buffer)) > 0)
+        {
+            total += read;
+            if (total > most) throw TooBig(what, most);
+            file.Write(buffer, 0, read);
+        }
+    }
+
+    private static InvalidDataException TooBig(string what, int most)
+        => new($"{what} unpacks to more than {most / (1024 * 1024)}MB, which is more than this reads.");
+
+    /// A file a workspace names, resolved and checked to be inside it.
+    ///
+    /// Every path in a manifest is relative to the workspace by definition, and until this was here
+    /// nothing said so: an absolute path, a drive-relative one, or enough of `..` reached anywhere
+    /// the person building could read, and whatever it found went into the pack under the name the
+    /// manifest gave it. A manifest is data — most of them written by this tool, but a workspace is
+    /// a folder, and folders are shared. The file worth naming is `author.key`, which sits at a
+    /// known place beside the executable and is the one thing that would let somebody sign as you.
+    ///
+    /// Resolved with the separator on the end of the root, so a sibling folder whose name merely
+    /// starts the same way — `workspace-old` beside `workspace` — is outside, not inside.
+    public static string Inside(string workspace, string relative, string what)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspace)) + Path.DirectorySeparatorChar;
+        var full = Path.GetFullPath(Path.Combine(workspace, relative));
+
+        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"{what} '{relative}' is outside the workspace, and a pack carries only what the "
+                + "workspace holds.");
+
+        // The name it is stored under travels with it, and is read back on the way in. Kept to the
+        // same rule so a pack cannot describe a file as living somewhere a workspace could not.
+        if (Path.IsPathRooted(relative) || relative.Split('/', '\\').Contains(".."))
+            throw new InvalidOperationException(
+                $"{what} '{relative}' has to be a plain path inside the workspace.");
+
+        return full;
+    }
+
     /// Whether an operation names a class this tool will not write back.
     private static bool Refused(PackOperation operation)
         => Enum.TryParse<AssetsTools.NET.Extra.AssetClassID>(operation.Target.Class, out var cls)
@@ -83,7 +165,7 @@ public static class PackBuilder
         // The icon goes in whether or not it is one of the files being replaced, and drops out of
         // the manifest if it is not there to go in — a pack claiming a picture it does not carry
         // would be a broken pack rather than one without a picture.
-        var icon = packed.Icon.Length > 0 && File.Exists(Path.Combine(workspace, packed.Icon))
+        var icon = packed.Icon.Length > 0 && File.Exists(Inside(workspace, packed.Icon, "the picture"))
             ? packed.Icon
             : "";
         packed = packed with { Icon = icon };
@@ -104,7 +186,7 @@ public static class PackBuilder
             if (icon.Length > 0) files = files.Append(icon);
 
             foreach (var source in files.Distinct(StringComparer.OrdinalIgnoreCase))
-                archive.CreateEntryFromFile(Path.Combine(workspace, source), source);
+                archive.CreateEntryFromFile(Inside(workspace, source, "the file"), source);
         }
 
         PackFile.Write(outputPath, bytes.ToArray(), signer, packed.Author);
@@ -126,10 +208,7 @@ public static class PackBuilder
             if (manifest.Icon.Length == 0) return null;
 
             if (archive.GetEntry(manifest.Icon) is not { } entry) return null;
-            using var stream = entry.Open();
-            using var bytes = new MemoryStream();
-            stream.CopyTo(bytes);
-            return bytes.ToArray();
+            return ReadEntry(entry, MostPerRead, "the picture");
         }
         catch (Exception e) when (e is IOException or InvalidDataException)
         {
@@ -141,8 +220,8 @@ public static class PackBuilder
     {
         var entry = archive.GetEntry(PackManifest.FileName)
             ?? throw new InvalidDataException($"the pack has no {PackManifest.FileName}.");
-        using var reader = new StreamReader(entry.Open());
-        return PackManifest.Parse(reader.ReadToEnd());
+        return PackManifest.Parse(
+            System.Text.Encoding.UTF8.GetString(ReadEntry(entry, MostPerRead, "the manifest")));
     }
 
     public static PackManifest ReadManifest(string packPath)
@@ -150,7 +229,7 @@ public static class PackBuilder
         using var archive = PackFile.Open(packPath);
         var entry = archive.GetEntry(PackManifest.FileName)
             ?? throw new InvalidDataException($"'{packPath}' has no {PackManifest.FileName}.");
-        using var reader = new StreamReader(entry.Open());
-        return PackManifest.Parse(reader.ReadToEnd());
+        return PackManifest.Parse(
+            System.Text.Encoding.UTF8.GetString(ReadEntry(entry, MostPerRead, "the manifest")));
     }
 }

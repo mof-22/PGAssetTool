@@ -54,8 +54,19 @@ public sealed class PackAuthor : IDisposable
     /// An author who publishes theirs lets people tell a re-signed pack from a genuine one.
     public string Fingerprint => FingerprintOf(PublicKey);
 
+    /// The fingerprint of a key handed over from outside.
+    ///
+    /// Taken from the key as the framework writes it rather than from the bytes as they arrived.
+    /// ImportSubjectPublicKeyInfo stops at the end of the structure and says nothing about what
+    /// follows it, so bytes appended to a public key went on verifying every signature exactly as
+    /// before while hashing to a different fingerprint — the key and the fingerprint naming two
+    /// different things, which is the one thing a fingerprint must never do. Trailing bytes are
+    /// refused outright, and what is hashed is what was actually imported.
     public static string FingerprintOf(byte[] publicKey)
-        => Convert.ToHexStringLower(SHA256.HashData(publicKey))[..16];
+    {
+        using var key = Read(publicKey);
+        return Convert.ToHexStringLower(SHA256.HashData(key.ExportSubjectPublicKeyInfo()))[..16];
+    }
 
     public byte[] Sign(byte[] contents) => _key.SignData(contents, HashAlgorithmName.SHA256);
 
@@ -63,13 +74,32 @@ public sealed class PackAuthor : IDisposable
     {
         try
         {
-            using var key = ECDsa.Create();
-            key.ImportSubjectPublicKeyInfo(publicKey, out _);
+            using var key = Read(publicKey);
             return key.VerifyData(contents, signature, HashAlgorithmName.SHA256);
         }
         catch (CryptographicException)
         {
             return false;
+        }
+    }
+
+    /// A public key from outside, with nothing after it. Throws for anything else.
+    private static ECDsa Read(byte[] publicKey)
+    {
+        var key = ECDsa.Create();
+        try
+        {
+            key.ImportSubjectPublicKeyInfo(publicKey, out var read);
+            if (read != publicKey.Length)
+                throw new CryptographicException(
+                    $"the key is {publicKey.Length} bytes and only the first {read} are a key.");
+
+            return key;
+        }
+        catch
+        {
+            key.Dispose();
+            throw;
         }
     }
 
