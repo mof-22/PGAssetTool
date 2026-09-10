@@ -163,8 +163,11 @@ public static class MeshRenderer
         Span<float> sy = stackalloc float[3];
         Span<float> sz = stackalloc float[3];
         Span<float> shade = stackalloc float[3];
+        Span<float> away = stackalloc float[3];
         Span<float> u = stackalloc float[3];
         Span<float> v = stackalloc float[3];
+
+        var shelled = mesh.CarriesAnOutline;
 
         // Submesh by submesh, because which material draws a triangle is decided by which submesh
         // it belongs to. A mesh with no submeshes recorded is drawn whole.
@@ -197,10 +200,15 @@ public static class MeshRenderer
                     sz[corner] = z;
 
                     shade[corner] = normals is null ? 1f : Lambert(view, upright, normals, vertex);
+                    away[corner] = shelled ? Facing(view, upright, normals!, vertex) : 1f;
                     u[corner] = uvs is null ? 0 : uvs[vertex * 2];
                     v[corner] = uvs is null ? 0 : uvs[vertex * 2 + 1];
                 }
                 if (!ok) continue;
+
+                // The outline shell, left out. Its near side is the side facing away from you, which
+                // is exactly how the game draws it as a silhouette and never as a surface.
+                if (away[0] + away[1] + away[2] < 0) continue;
 
                 Fill(bgra, depth, width, height, sx, sy, sz, shade, u, v, texture);
             }
@@ -246,6 +254,14 @@ public static class MeshRenderer
         }
 
         return right < left ? null : (left, top, right, bottom);
+    }
+
+    /// How much a vertex's normal points at the viewer. Negative is turned away.
+    private static float Facing(Basis view, Upright upright, float[] normals, int vertex)
+    {
+        var (ux, uy, uz) = upright.Apply(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]);
+        var (_, _, nz) = view.Apply(ux, uy, uz);
+        return nz;
     }
 
     /// A single light over the viewer's shoulder, with enough ambient that faces turned away stay

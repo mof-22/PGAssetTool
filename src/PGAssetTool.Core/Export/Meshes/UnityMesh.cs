@@ -37,6 +37,83 @@ public sealed record UnityMesh
 
     public float[]? Get(VertexAttribute attribute) => Attributes.GetValueOrDefault(attribute);
 
+    /// Whether this mesh carries an outline shell: a copy of itself, a little larger and turned
+    /// inside out, which the game draws as a silhouette by showing only the side facing away from
+    /// you. Nothing in the object says so, so it is measured, and two things have to hold.
+    ///
+    /// **The normals have to mean something.** Compared against the winding of the triangle they
+    /// belong to, which is the other account of which side is out. Every weapon looked at agrees on
+    /// nearly all of them — and #14 Battle Shovel disagrees on half, its normals turned one way and
+    /// its triangles wound the other. A mesh like that cannot be asked which side is out, and
+    /// culling it by facing hollows the shovel's head.
+    ///
+    /// **And the mesh has to lean inwards.** Each triangle's normal is weighed against the
+    /// direction out from the middle: a surface facing outwards counts for, one facing inwards
+    /// counts against, and a shell counts against by more than the body counts for, because it is
+    /// the larger of the two. Punk's Shovel comes to -13 and Black Hole to -4; Ultimatum, which has
+    /// no shell, comes to +169.
+    ///
+    /// Neither test alone is enough. The lean finds the shell but also flags a mesh whose normals
+    /// are simply wrong; the agreement says whether the answer can be trusted.
+    ///
+    /// Worked out on every ask rather than kept: it is one pass over the triangles and a handful of
+    /// multiplications, which is nothing beside the rasterizing it decides, and a cached answer in a
+    /// record is a field that quietly joins its equality.
+    public bool CarriesAnOutline
+    {
+        get
+        {
+            var positions = Get(VertexAttribute.Position);
+            var normals = Get(VertexAttribute.Normal);
+            if (positions is null || normals is null || VertexCount == 0) return false;
+
+            // The average vertex rather than the middle of the bounding box: a shell is concentric
+            // with the body it wraps, and where the mass is is what says which way outwards points
+            // on a model that is longer at one end than the other.
+            var (cx, cy, cz) = (0f, 0f, 0f);
+            for (var i = 0; i < VertexCount; i++)
+                (cx, cy, cz) = (cx + positions[i * 3], cy + positions[i * 3 + 1], cz + positions[i * 3 + 2]);
+            var (mx, my, mz) = (cx / VertexCount, cy / VertexCount, cz / VertexCount);
+
+            var lean = 0f;
+            var (agree, all) = (0, 0);
+
+            for (var i = 0; i + 2 < Indices.Length; i += 3)
+            {
+                var (a, b, c) = (Indices[i], Indices[i + 1], Indices[i + 2]);
+                if (a < 0 || b < 0 || c < 0) continue;
+                if (a >= VertexCount || b >= VertexCount || c >= VertexCount) continue;
+
+                var nx = normals[a * 3] + normals[b * 3] + normals[c * 3];
+                var ny = normals[a * 3 + 1] + normals[b * 3 + 1] + normals[c * 3 + 1];
+                var nz = normals[a * 3 + 2] + normals[b * 3 + 2] + normals[c * 3 + 2];
+
+                lean += (Middle(positions, a, b, c, 0) - mx) * nx
+                    + (Middle(positions, a, b, c, 1) - my) * ny
+                    + (Middle(positions, a, b, c, 2) - mz) * nz;
+
+                var (ux, uy, uz) = Edge(positions, a, b);
+                var (vx, vy, vz) = Edge(positions, a, c);
+                var (wx, wy, wz) = (uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+
+                all++;
+                if (wx * nx + wy * ny + wz * nz >= 0) agree++;
+            }
+
+            return all > 0 && agree >= all * 0.9f && lean < 0;
+        }
+    }
+
+    private static float Middle(float[] positions, int a, int b, int c, int axis)
+        => (positions[a * 3 + axis] + positions[b * 3 + axis] + positions[c * 3 + axis]) / 3;
+
+    private static (float X, float Y, float Z) Edge(float[] positions, int from, int to)
+        => (positions[to * 3] - positions[from * 3],
+            positions[to * 3 + 1] - positions[from * 3 + 1],
+            positions[to * 3 + 2] - positions[from * 3 + 2]);
+
+
+
     /// Byte payloads sit either on the field itself or on its Array child, depending on the type.
     private static byte[] Bytes(AssetTypeValueField field)
     {

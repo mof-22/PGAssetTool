@@ -467,7 +467,11 @@ if (tree.MainMesh is { } body)
         ? "nothing found to draw it in"
         : string.Join(", ", worn.BySubMesh.Select(t => t?.Name ?? "-"));
 
-    Console.WriteLine($"  Model    {body.Name}   ({dressed})");
+    var shell = ReadMeshOf(bundles, tree, body)?.CarriesAnOutline == true
+        ? ", with an outline shell"
+        : "";
+
+    Console.WriteLine($"  Model    {body.Name}   ({dressed}{shell})");
 }
 foreach (var group in tree.PrefabAssets.GroupBy(a => a.Class).OrderByDescending(g => g.Count()))
 {
@@ -515,6 +519,22 @@ return 0;
 /// The replaceable objects in a pack that more than one weapon reaches.
 ///
 /// Each bundle is indexed once, so a pack touching several costs one pass over each.
+/// One of the weapon's own meshes, decoded, so `show` can say what it is made of.
+static PGAssetTool.Core.Export.Meshes.UnityMesh? ReadMeshOf(BundleSet bundles, WeaponTree tree, AssetNode mesh)
+{
+    var bundle = mesh.Bundle.Length > 0 ? mesh.Bundle : tree.PrefabBundle;
+    if (bundle is null) return null;
+
+    try
+    {
+        var file = bundles.Open(bundle);
+        var info = file.file.GetAssetInfo(mesh.PathId);
+        var field = info is null ? null : bundles.Context.Deserialize(file, info);
+        return field is null ? null : PGAssetTool.Core.Preview.AssetPreview.Mesh(field, bundles, bundle);
+    }
+    catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
+}
+
 static IEnumerable<SharedAsset> SharedInPack(BundleSet bundles, PackManifest manifest)
 {
     foreach (var group in manifest.Operations.GroupBy(o => o.Target.Container, StringComparer.OrdinalIgnoreCase))

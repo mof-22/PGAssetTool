@@ -23,6 +23,106 @@ public class MeshRendererTests
         BoneNameHashes = [],
     };
 
+    /// A box. Its normals point straight out from the middle, and its triangles are wound so that
+    /// the two agree — which is what a solid looks like.
+    ///
+    /// <param name="inside">
+    /// Turn it inside out: the normals point in and the triangles are wound the other way, so the
+    /// two still agree with each other and disagree with the world. That is a shell.
+    /// </param>
+    private static (float[] Positions, float[] Normals, int[] Indices) Box(float size, bool inside = false)
+    {
+        float[] corners =
+        [
+            -size, -size, -size,  size, -size, -size,  size, size, -size,  -size, size, -size,
+            -size, -size,  size,  size, -size,  size,  size, size,  size,  -size, size,  size,
+        ];
+
+        var normals = new float[corners.Length];
+        for (var i = 0; i < corners.Length; i++)
+            normals[i] = (inside ? -corners[i] : corners[i]) / (size * MathF.Sqrt(3));
+
+        // Each face wound counter-clockwise seen from outside, so (b-a) x (c-a) points outwards.
+        int[] faces =
+        [
+            4, 5, 6, 4, 6, 7,   0, 3, 2, 0, 2, 1,   1, 2, 6, 1, 6, 5,
+            0, 4, 7, 0, 7, 3,   3, 7, 6, 3, 6, 2,   0, 1, 5, 0, 5, 4,
+        ];
+
+        if (inside)
+            for (var i = 0; i + 2 < faces.Length; i += 3)
+                (faces[i + 1], faces[i + 2]) = (faces[i + 2], faces[i + 1]);
+
+        return (corners, normals, faces);
+    }
+
+    /// A solid whose normals were turned round and whose triangles were not, so the two disagree
+    /// and neither can be trusted. #14 Battle Shovel's head is built this way.
+    private static (float[] Positions, float[] Normals, int[] Indices) Muddled(float size)
+    {
+        var box = Box(size);
+        return (box.Positions, [.. box.Normals.Select(n => -n)], box.Indices);
+    }
+
+    private static UnityMesh Solid((float[] Positions, float[] Normals, int[] Indices) box)
+        => Solid(box.Positions, box.Normals, box.Indices);
+
+    private static UnityMesh Solid(float[] positions, float[] normals, int[] indices) => new()
+    {
+        Name = "preview",
+        VertexCount = positions.Length / 3,
+        Attributes = new Dictionary<VertexAttribute, float[]>
+        {
+            [VertexAttribute.Position] = positions,
+            [VertexAttribute.Normal] = normals,
+        },
+        Dimensions = new Dictionary<VertexAttribute, int>
+        {
+            [VertexAttribute.Position] = 3,
+            [VertexAttribute.Normal] = 3,
+        },
+        Indices = indices,
+        SubMeshes = [new SubMesh(0, indices.Length, 0, 0)],
+        BindPoses = [],
+        BoneNameHashes = [],
+    };
+
+    /// Two boxes in one mesh: the second is the first, larger and turned inside out.
+    private static UnityMesh WithAnOutline()
+    {
+        var body = Box(1f);
+        var shell = Box(1.15f, inside: true);
+
+        var offset = body.Positions.Length / 3;
+        return Solid(
+            [.. body.Positions, .. shell.Positions],
+            [.. body.Normals, .. shell.Normals],
+            [.. body.Indices, .. shell.Indices.Select(i => i + offset)]);
+    }
+
+    [Fact]
+    public void AnOutlineShellIsRecognisedAndAPlainSolidIsNot()
+    {
+        // The game draws a silhouette by wrapping the model in a copy of itself, larger and turned
+        // inside out, and showing only the side of it that faces away. Drawn as an ordinary
+        // surface it covers the model completely — Punk's Shovel came up a flat magenta blob.
+        Assert.True(WithAnOutline().CarriesAnOutline);
+        Assert.False(Solid(Box(1f)).CarriesAnOutline);
+    }
+
+    [Fact]
+    public void AMeshWhoseNormalsFightItsWindingIsLeftAlone()
+    {
+        // #14 Battle Shovel: its head is wound one way and shaded the other, so the normals say
+        // nothing about which side is out. It leans inwards like a shell and is not one, and
+        // culling it by facing hollows the head — so the two tests are asked together.
+        Assert.False(Solid(Muddled(1f)).CarriesAnOutline);
+    }
+
+    [Fact]
+    public void AMeshWithNoNormalsCarriesNoOutline()
+        => Assert.False(Quad().CarriesAnOutline);
+
     private static byte[] Draw(UnityMesh mesh, Camera camera)
     {
         var target = new RenderTarget();
