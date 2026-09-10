@@ -485,7 +485,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         return cls switch
         {
             AssetClassID.Texture2D => AssetPreview.Texture(bundles, file.Target.Container, field),
-            AssetClassID.Mesh => AssetPreview.Mesh(field),
+            AssetClassID.Mesh => AssetPreview.Mesh(field, bundles, file.Target.Container),
             AssetClassID.AudioClip => AssetPreview.Audio(bundles, file.Target.Container, field),
             _ => null,
         };

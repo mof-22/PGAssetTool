@@ -48,7 +48,12 @@ public sealed record UnityMesh
             : [];
     }
 
-    public static UnityMesh Read(AssetTypeValueField field)
+    /// <param name="resource">
+    /// Fetches bytes from a companion stream file: its path as the object names it, the offset and
+    /// the length. Null for a caller with no bundle at hand, which then cannot read such a mesh.
+    /// </param>
+    public static UnityMesh Read(
+        AssetTypeValueField field, Func<string, long, long, byte[]?>? resource = null)
     {
         var name = field["m_Name"].AsString;
         var vertexData = field["m_VertexData"];
@@ -59,8 +64,20 @@ public sealed record UnityMesh
             throw new NotSupportedException(
                 $"'{name}' uses Unity's mesh compression, which packs vertices into a bit stream. "
                 + "Nothing in this game does, so unpacking it is not implemented.");
-        if (field["m_StreamData"]["path"].AsString.Length > 0)
-            throw new NotSupportedException($"'{name}' keeps its vertex data outside the object.");
+
+        // Some meshes keep their vertices in the bundle's .resS rather than in the object, exactly
+        // as most textures keep their pixels — the object then carries an empty buffer and a place
+        // to find the real one. It was refused outright, so those weapons had no model at all:
+        // #14 Battle Shovel is one, and the export wrote a field dump where a .glb should have
+        // been. The index buffer stays in the object either way.
+        var stream = field["m_StreamData"];
+        if (stream["path"].AsString is { Length: > 0 } outside)
+        {
+            raw = resource?.Invoke(outside, stream["offset"].AsLong, stream["size"].AsLong)
+                ?? throw new NotSupportedException(
+                    $"'{name}' keeps its vertex data in {Path.GetFileName(outside)}, "
+                    + "which is not reachable from here.");
+        }
 
         var channels = ReadChannels(vertexData["m_Channels"]["Array"]);
         var (attributes, dimensions) = Unpack(channels, raw, vertexCount);

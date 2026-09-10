@@ -55,18 +55,25 @@ public sealed record Camera(
         return Turned(c * right - s * down, s * right + c * down);
     }
 
-    /// Pitch is not stopped at the poles.
+    /// Pitch stops at straight up and straight down, which is what makes this a turntable.
     ///
-    /// It was, on the reasoning that a camera looking straight down has no up vector to build a
-    /// frame from — which is true of a frame built by crossing the view direction with the world's
-    /// up, and not of this one: screen-right comes from the yaw alone, so the frame stays square at
-    /// every pitch and simply carries on over the top. Stopping there cost more than it saved once
-    /// tilting arrived, since the way to look at a model from underneath is to go over the top and
-    /// straighten it, and a wall two degrees short of vertical made that impossible.
+    /// It did not, for a while: the frame is square at every pitch — screen-right comes from the
+    /// yaw alone, so there is no pole for it to collapse at — and carrying on over the top looked
+    /// like something gained for nothing. What it cost was the two things anybody actually
+    /// noticed. Past the top the frame's up vector is inverted, so a drag to the right walked the
+    /// viewer left; and a drag on a rolled view is taken apart into yaw and pitch, which past the
+    /// top puts the pieces back in the wrong places and the model tumbles end over end.
+    ///
+    /// Nothing is out of reach for the stopping. Above and below are both inside a quarter turn
+    /// either way, and going over the top only ever arrived at a view already reachable by
+    /// dragging the other way — upside down.
+    ///
+    /// Exactly at the pole rather than short of it: the frame is well defined there, so there is
+    /// no reason for the wall to stand two degrees inside the thing it is protecting.
     public Camera Turned(float dYaw, float dPitch) => this with
     {
         Yaw = Yaw + dYaw,
-        Pitch = Pitch + dPitch,
+        Pitch = Math.Clamp(Pitch + dPitch, -MathF.PI / 2, MathF.PI / 2),
     };
 
     /// Tilts the model in the plane of the screen.

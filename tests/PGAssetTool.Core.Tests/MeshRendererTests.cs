@@ -142,28 +142,43 @@ public class MeshRendererTests
     }
 
     [Fact]
-    public void TheCameraGoesOverTheTopAndCarriesOn()
+    public void TheCameraStopsAtTheTopRatherThanTumblingOverIt()
     {
-        // Straight down, and past it. Screen-right comes from the yaw alone, so there is no pole
-        // for the frame to collapse at — and going over the top is how a model is looked at from
-        // underneath without fighting a wall two degrees short of vertical.
+        // Straight up and straight down are as far as it goes, and it arrives exactly there rather
+        // than at a wall short of it — the frame is square at the pole, so there is nothing to
+        // stand back from.
+        Assert.Equal(MathF.PI / 2, new Camera().Turned(0, 9f).Pitch);
+        Assert.Equal(-MathF.PI / 2, new Camera().Turned(0, -9f).Pitch);
+        Assert.Equal(MathF.PI / 2, new Camera().Turned(0, MathF.Tau).Pitch);
+
         // A solid rather than a flat one: a plane seen exactly edge-on draws nothing however good
         // the frame is, which says nothing about the frame.
         var solid = Mesh(
             [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
             [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3]);
 
-        foreach (var pitch in new[] { MathF.PI / 2, MathF.PI * 0.75f, MathF.PI, -MathF.PI })
-        {
-            var drawn = Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: pitch)));
-            Assert.True(drawn > 0, $"nothing was drawn at a pitch of {pitch}");
-        }
+        foreach (var pitch in new[] { MathF.PI / 2, -MathF.PI / 2 })
+            Assert.True(Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: pitch))) > 0,
+                $"nothing was drawn at a pitch of {pitch}");
+    }
 
-        // A whole turn of pitch is where it started.
-        Assert.Equal(
-            Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: 0.2f))),
-            Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: 0.2f).Turned(0, MathF.Tau))),
-            tolerance: 4);
+    [Fact]
+    public void DraggingRightTurnsTheModelRightAtEveryReachableAngle()
+    {
+        // The reason the pitch stops. Past the top the frame's up vector is inverted, and yaw —
+        // which is measured about the world's up, not the frame's — then reads backwards: dragging
+        // right walked the viewer left. Nothing reachable by dragging is on that side of the pole
+        // any more, and this walks the whole range to say so.
+        // Read through panning, which is the public way to ask which way the frame's up points:
+        // dragging the model up moves the pivot down along that axis, so an inverted frame sends
+        // the pivot the other way.
+        for (var pitch = -MathF.PI / 2; pitch <= MathF.PI / 2; pitch += 0.15f)
+        {
+            var lifted = new Camera(Yaw: 0.3f, Pitch: pitch).Panned(0, 1);
+
+            Assert.True(lifted.PivotY <= 1e-5f,
+                $"the frame is upside down at a pitch of {pitch}: lifting moved the pivot to {lifted.PivotY}");
+        }
     }
 
     [Fact]

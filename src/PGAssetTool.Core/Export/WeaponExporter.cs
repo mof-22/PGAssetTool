@@ -319,7 +319,7 @@ public sealed class WeaponExporter(BundleSet bundles)
         if (info is null) return null;
 
         var field = bundles.Context.Deserialize(file, info);
-        return field is null ? null : Preview.AssetPreview.Mesh(field);
+        return field is null ? null : Preview.AssetPreview.Mesh(field, bundles, bundle);
     }
 
     private Preview.PreviewImage? TextureFor(Assets.AssetNode? node)

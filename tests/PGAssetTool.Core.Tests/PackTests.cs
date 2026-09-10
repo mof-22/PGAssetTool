@@ -363,7 +363,7 @@ public class PackTests : IDisposable
 
         Assert.Equal(
             ["Something Else.pgmod"],
-            Directory.GetFiles(_workspace, "*.pgmod").Select(Path.GetFileName).ToArray());
+            Directory.GetFiles(_workspace, "*.pgmod").Select(f => Path.GetFileName(f)).ToArray()!);
     }
 
     [Fact]

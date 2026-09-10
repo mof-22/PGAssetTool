@@ -119,6 +119,8 @@ internal static class SelfTest
 
             if (WhichMeshIsTheWeapon(model) is { } wrongMesh) return Fail(wrongMesh);
 
+            if (EveryWeaponHasAModelToShow(model) is { } modelProblem) return Fail(modelProblem);
+
             model.Search = "beretta";
             Console.WriteLine($"search   'beretta' -> {model.Weapons.Count}");
 
@@ -2236,6 +2238,39 @@ internal static class SelfTest
         Console.WriteLine($"batch    a second workspace at {Path.GetFileName(directory)}, "
             + $"editing {texture.Source}");
         return directory;
+    }
+
+    /// Whether the weapon a selection lands on can actually be decoded.
+    ///
+    /// Some meshes keep their vertices in the bundle's .resS rather than in the object, exactly as
+    /// most textures keep their pixels — and those were refused outright, so the weapon had no
+    /// model anywhere: no preview, and an export that wrote a field dump where a .glb belonged.
+    /// #14 Battle Shovel is one. Nothing in the object says so from the outside, which is why this
+    /// sweeps rather than asks.
+    private static string? EveryWeaponHasAModelToShow(MainViewModel model)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var (looked, drawn, empty) = (0, 0, new List<string>());
+
+        foreach (var item in model.Weapons.Where((_, i) => i % 37 == 0))
+        {
+            model.Selected = item;
+            if (!WaitWhile(() => model.Detail?.Tree.Record.GameNumber != item.Record.GameNumber, 60_000))
+                return $"#{item.Record.GameNumber} never resolved";
+
+            if (model.Detail!.SelectedNode is not { } row) continue;
+            looked++;
+
+            if (!Arrived(model, row)) { empty.Add($"#{item.Record.GameNumber} {row.Label}"); continue; }
+            if (model.Preview.Mesh is null) empty.Add($"#{item.Record.GameNumber} {row.Label}");
+            else drawn++;
+        }
+
+        Console.WriteLine($"model    {drawn} of {looked} swept weapons came up with a model "
+            + $"in {clock.ElapsedMilliseconds}ms");
+
+        if (looked < 15) return $"only {looked} weapons offered a model row at all";
+        return empty.Count == 0 ? null : $"no model could be read for {string.Join(", ", empty)}";
     }
 
     /// Whether selecting a weapon lands on the weapon rather than on the player's hands.

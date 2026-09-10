@@ -47,7 +47,7 @@ public sealed class AssetExporter(BundleSet bundles)
             {
                 AssetClassID.Texture2D => ExportTexture(bundle, field, stem),
                 AssetClassID.AudioClip => ExportAudio(bundle, field, stem),
-                AssetClassID.Mesh => ExportMesh(field, stem),
+                AssetClassID.Mesh => ExportMesh(bundle, field, stem),
                 _ => null,
             };
             if (exported is not null) return [exported with { Class = cls, Name = name, Address = address }];
@@ -147,11 +147,12 @@ public sealed class AssetExporter(BundleSet bundles)
     }
 
     /// A mesh that cannot be unpacked falls through to the field dump rather than failing the export.
-    private static ExportedAsset? ExportMesh(AssetTypeValueField field, string stem)
+    private ExportedAsset? ExportMesh(string bundle, AssetTypeValueField field, string stem)
     {
         try
         {
-            var mesh = UnityMesh.Read(field);
+            var mesh = UnityMesh.Read(field,
+                (path, offset, size) => bundles.ReadResource(bundle, path, offset, size));
             if (mesh.VertexCount == 0) return null;
             var path = stem + ".glb";
             GlbWriter.Write(mesh, path);

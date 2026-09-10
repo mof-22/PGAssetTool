@@ -119,11 +119,18 @@ public static class AssetPreview
         }
     }
 
-    public static UnityMesh? Mesh(AssetTypeValueField field)
+    /// <param name="bundles">Where a mesh that keeps its vertices in a companion file reads them
+    /// from. Without it such a mesh has no model to show, which is what used to happen to all of
+    /// them.</param>
+    public static UnityMesh? Mesh(
+        AssetTypeValueField field, Assets.BundleSet? bundles = null, string bundle = "")
     {
         try
         {
-            var mesh = UnityMesh.Read(field);
+            var mesh = UnityMesh.Read(field, bundles is null || bundle.Length == 0
+                ? null
+                : (path, offset, size) => bundles.ReadResource(bundle, path, offset, size));
+
             return mesh.VertexCount > 0 ? mesh : null;
         }
         catch (NotSupportedException)

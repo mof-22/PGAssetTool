@@ -1074,7 +1074,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     {
                         AssetClassID.Texture2D => AssetPreview.Texture(_bundles, node.Bundle, field),
                         AssetClassID.AudioClip => AssetPreview.Audio(_bundles, node.Bundle, field),
-                        _ => AssetPreview.Mesh(field),
+                        _ => AssetPreview.Mesh(field, _bundles, node.Bundle),
                     };
                 });
 

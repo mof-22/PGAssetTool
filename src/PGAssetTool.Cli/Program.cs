@@ -458,7 +458,17 @@ if (tree.Icon is not null)
     Console.WriteLine($"  Icon     {tree.Icon.TextureName} @ {tree.Icon.Container}");
 Console.WriteLine($"  Prefab   Weapons/{record.PrefabName} @ {tree.PrefabBundle ?? "?"}");
 if (tree.MainMesh is { } body)
-    Console.WriteLine($"  Model    {body.Name}   (the prefab holds the player's arms as well)");
+{
+    // What the renderers say goes on it, which is what the preview draws it in. Printed because
+    // a model that comes up grey is the one failure with nothing to look at: the mesh is there,
+    // the textures are there, and what is missing is the line between them.
+    var worn = tree.MeshTextures.FirstOrDefault(m => m.MeshPathId == body.PathId);
+    var dressed = worn is null
+        ? "nothing found to draw it in"
+        : string.Join(", ", worn.BySubMesh.Select(t => t?.Name ?? "-"));
+
+    Console.WriteLine($"  Model    {body.Name}   ({dressed})");
+}
 foreach (var group in tree.PrefabAssets.GroupBy(a => a.Class).OrderByDescending(g => g.Count()))
 {
     Console.WriteLine($"    {group.Key} ({group.Count()})");
