@@ -49,11 +49,8 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         // this: turning a mod on stood the others down, and installing one enrolled it enabled and
         // said nothing. Two skins for #401 arrived both on, both writing the same texture, and only
         // one of them was in the game.
-        foreach (var packPath in packPaths)
-        {
-            var id = Enrol(mods, packPath, gameVersion);
-            displaced.AddRange(StandAside(mods, [id]));
-        }
+        var enrolled = packPaths.Select(p => Enrol(mods, p, gameVersion)).ToList();
+        displaced.AddRange(StandAside(mods, enrolled));
 
         Displaced = displaced.Distinct().ToList();
         store.Write(mods);
@@ -122,19 +119,51 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// handful of small files, read once per turning-on, against a reconcile that rewrites every
     /// bundle the mods touch — and reading them is what makes the answer true for a mod installed
     /// before any of this existed.
+    ///
+    /// The mods being turned on are held to this as well as everyone else, which is the half that
+    /// was missing: select every row and turn them on, and thirty-nine mods all went on together,
+    /// rivals included. Whoever came last wins, because that is the order a reconcile applies them
+    /// in — so the answer here and the file that ends up in the game agree.
     private List<string> StandAside(List<InstalledMod> mods, IReadOnlyList<string> ids)
     {
-        var claimed = ids
-            .SelectMany(id => Writes(mods.FirstOrDefault(m => m.Id == id)))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (claimed.Count == 0) return [];
-
+        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var displaced = new List<string>();
+        var writes = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        List<string> WrittenBy(InstalledMod mod)
+        {
+            if (writes.TryGetValue(mod.Id, out var known)) return known;
+            return writes[mod.Id] = Writes(mod).ToList();
+        }
+
+        // Latest first: the last one applied is the one actually in the game, so it is the one that
+        // keeps its claim and the earlier ones stand down.
+        var turningOn = ids
+            .Select(id => mods.FindIndex(m => m.Id == id))
+            .Where(at => at >= 0)
+            .OrderByDescending(at => mods[at].InstalledAt)
+            .ThenByDescending(at => at)
+            .ToList();
+
+        foreach (var at in turningOn)
+        {
+            var mine = WrittenBy(mods[at]);
+            if (mine.Any(claimed.Contains))
+            {
+                displaced.Add(mods[at].Name);
+                mods[at] = mods[at] with { Enabled = false };
+                continue;
+            }
+
+            foreach (var asset in mine) claimed.Add(asset);
+        }
+
+        if (claimed.Count == 0) return displaced;
+
         for (var i = 0; i < mods.Count; i++)
         {
             if (!mods[i].Enabled || ids.Contains(mods[i].Id)) continue;
-            if (!Writes(mods[i]).Any(claimed.Contains)) continue;
+            if (!WrittenBy(mods[i]).Any(claimed.Contains)) continue;
 
             displaced.Add(mods[i].Name);
             mods[i] = mods[i] with { Enabled = false };

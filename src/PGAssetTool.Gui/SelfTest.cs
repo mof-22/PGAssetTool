@@ -94,6 +94,12 @@ internal static class SelfTest
         // theirs and, when the selection drifted, packed one of theirs instead.
         var scratch = Directory.CreateTempSubdirectory("pgassettool-selftest").FullName;
         var model = new MainViewModel { WorkspaceOverride = scratch, SettingsHome = scratch };
+
+        // Held out here so the tidying up on the way out knows what the author's game looked like
+        // before this run, however far the run got. Null until the ledger has been read once.
+        HashSet<string>? wasInstalled = null;
+        HashSet<string>? wasEnabled = null;
+
         try
         {
             Settle(model.LoadAsync(), "opening the game");
@@ -916,12 +922,12 @@ internal static class SelfTest
             // first — an earlier version of this left a mod behind every time the workspace it
             // happened to pick changed, and nothing noticed for days.
             var theirs = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
-            var wasInstalled = theirs.Select(m => m.Id).ToHashSet();
+            wasInstalled = theirs.Select(m => m.Id).ToHashSet();
 
             // Their on-or-off state as well as their presence. Turning a mod on now turns off
             // whatever else writes the same assets, and the author's own mods are within reach of
             // that — so being left installed is no longer the whole of leaving them alone.
-            var wasEnabled = theirs.Where(m => m.Enabled).Select(m => m.Id).ToHashSet();
+            wasEnabled = theirs.Where(m => m.Enabled).Select(m => m.Id).ToHashSet();
 
             // A second workspace, so what gets tested is the batch. Building and applying six packs
             // one at a time is six trips through the same controls, and — because applying is a
@@ -1250,6 +1256,13 @@ internal static class SelfTest
                 return Fail($"shift-removing left {string.Join(", ", still.Select(Path.GetFileName))} behind");
             Console.WriteLine($"manager  and the {kept.Count} kept pack file(s) went with them");
 
+            // Before the check below rather than instead of it. This run's second pack replaces the
+            // first shotgun's texture, the author has a mod of their own that replaces it too, and
+            // one of the two has to stand down — so the exclusion turning theirs off is the tool
+            // working, not a fault. Putting it back on afterwards is this test's job; the check is
+            // then what says the putting back worked.
+            TidyUpAfterItself(model.Game, wasInstalled, wasEnabled);
+
             var now = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
             var switched = now
                 .Where(m => wasInstalled.Contains(m.Id) && m.Enabled != wasEnabled.Contains(m.Id))
@@ -1298,20 +1311,109 @@ internal static class SelfTest
         }
         finally
         {
+            var installation = model.Game;
             model.Dispose();
             try { Directory.Delete(scratch, recursive: true); }
             catch (IOException) { }
 
-            // Also on the way out of a failed run. A run that stops before the manager still leaves
-            // its pack in the store, and eighteen of them collected there while this test was being
-            // fixed. Only files under this test's own name, which nothing else can be called.
-            // Both spellings: a pack is filed under the mod's name now and was filed under its id
-            // before, and a run that fails half way through either scheme still has to tidy up.
-            var store = Path.Combine(ModStore.DefaultHome(), "mods");
-            if (Directory.Exists(store))
-                foreach (var pattern in new[] { PackName + "*.pgmod", PackIdentity + "*.pgmod" })
-                foreach (var stale in Directory.GetFiles(store, pattern))
-                    try { File.Delete(stale); } catch (IOException) { }
+            // Also on the way out of a failed run, which is the whole reason this is here: a run
+            // that stops half way leaves its own mods installed and its own packs kept, and the
+            // next run then starts from a game this one made rather than from the author's.
+            TidyUpAfterItself(installation, wasInstalled, wasEnabled);
+        }
+    }
+
+    /// Takes this test's own mods and packs back out, and puts the author's back as they were.
+    ///
+    /// Three things pile up. The ledger keeps whatever a failed run had installed, and that is not
+    /// just clutter — a later run asserts on what the author had before it started, and one of
+    /// these left behind makes an unrelated check fail in a way that says nothing about the cause.
+    /// The store keeps a copy of every pack it installs, filed under the weapon and look the pack
+    /// names, under a file name taken from the directory it was built in — so each run kept its own
+    /// copy, in a folder the old sweep of the mods directory itself never looked in. Twenty-four of
+    /// them had collected under one weapon. And this run's own packs write assets the author's mods
+    /// write, so installing them turns theirs off, which is the tool working correctly and still
+    /// has to be undone.
+    ///
+    /// The packs are found by the id in the manifest rather than by the file's name. The ones this
+    /// test installs are also called rival and refused, and the id is the only thing all of them
+    /// share and nothing of the author's can be called.
+    ///
+    /// Safe to call twice, and called twice: once where the run can still check the result, and
+    /// again on the way out for the runs that never get there.
+    private static void TidyUpAfterItself(
+        Core.Game.GameInstallation? installation,
+        IReadOnlySet<string>? wasInstalled, IReadOnlySet<string>? wasEnabled)
+    {
+        if (installation is not null && !Core.Game.GameProcess.IsRunning(installation))
+            try
+            {
+                var store = new ModStore(installation);
+                var ledger = store.Read();
+
+                var mine = ledger
+                    .Where(m => m.Id.StartsWith(PackIdentity, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                // Put back exactly what was there, rather than turning them on through the applier:
+                // turning a mod on stands its rivals down, and the author having two that write the
+                // same asset is theirs to have. This is undoing a change, not making one.
+                List<InstalledMod> switched = wasInstalled is null || wasEnabled is null
+                    ? []
+                    : ledger.Where(m => wasInstalled.Contains(m.Id)
+                                        && m.Enabled != wasEnabled.Contains(m.Id)).ToList();
+
+                if (mine.Count > 0 || switched.Count > 0)
+                {
+                    if (mine.Count > 0)
+                        Console.WriteLine($"cleanup  taking back out: {string.Join(", ", mine.Select(m => m.Id))}");
+                    if (switched.Count > 0)
+                        Console.WriteLine("cleanup  putting back as they were: "
+                            + string.Join(", ", switched.Select(m => $"{m.Name} {(m.Enabled ? "off" : "on")}")));
+
+                    store.Write(ledger
+                        .Where(m => !mine.Contains(m))
+                        .Select(m => switched.Contains(m)
+                            ? m with { Enabled = wasEnabled!.Contains(m.Id) }
+                            : m));
+
+                    new Core.Mods.ModApplier(installation, store).Reconcile();
+                }
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException or System.Text.Json.JsonException)
+            {
+                Console.WriteLine($"cleanup  could not put the game back: {e.Message}");
+            }
+
+        var mods = Path.Combine(ModStore.DefaultHome(), "mods");
+        if (!Directory.Exists(mods)) return;
+
+        foreach (var pack in Directory.GetFiles(mods, "*" + Core.Pack.PackBuilder.Extension,
+                     SearchOption.AllDirectories))
+        {
+            string id;
+            try { id = Core.Pack.PackBuilder.ReadManifest(pack).Id; }
+            catch (Exception e) when (e is IOException or InvalidDataException or System.Text.Json.JsonException)
+            {
+                continue;
+            }
+
+            if (!id.StartsWith(PackIdentity, StringComparison.OrdinalIgnoreCase)) continue;
+
+            try { File.Delete(pack); } catch (IOException) { continue; }
+            Prune(Path.GetDirectoryName(pack), mods);
+        }
+    }
+
+    /// Takes away the folders this test's packs were the last thing in, up to the mods root.
+    private static void Prune(string? directory, string root)
+    {
+        for (var at = directory; at is not null; at = Path.GetDirectoryName(at))
+        {
+            if (Path.GetFullPath(at).Length <= Path.GetFullPath(root).Length) return;
+            if (!Directory.Exists(at) || Directory.EnumerateFileSystemEntries(at).Any()) return;
+
+            try { Directory.Delete(at); } catch (IOException) { return; }
         }
     }
 
@@ -2399,6 +2501,25 @@ internal static class SelfTest
 
             if (store.Read().FirstOrDefault(m => m.Id == PackIdentity + "-rival") is not { Enabled: false })
                 return "turning a mod on left the rival that writes the same assets on as well";
+
+            // And both at once, which is what select-everything and turn on does. The rivals were
+            // held against what was already installed and not against each other, so one gesture
+            // turned on thirty-nine mods and every pair of them that could not stand together.
+            //
+            // The later of the two keeps its claim, because a reconcile applies them in the order
+            // they were installed and the last one is the one actually in the game.
+            applier.SetEnabled([PackIdentity, PackIdentity + "-rival"], true);
+
+            Console.WriteLine("exclude  turning both on at once stood down: "
+                + (applier.Displaced.Count == 0 ? "nothing" : string.Join(", ", applier.Displaced)));
+
+            var both = store.Read();
+            if (both.FirstOrDefault(m => m.Id == PackIdentity) is not { Enabled: false })
+                return "turning both on at once left the earlier of two rivals on";
+            if (both.FirstOrDefault(m => m.Id == PackIdentity + "-rival") is not { Enabled: true })
+                return "turning both on at once left the later of two rivals off";
+            if (both.FirstOrDefault(m => m.Id == PackIdentityB) is not { Enabled: true })
+                return "turning both on at once turned off a mod writing different assets";
         }
         finally
         {
