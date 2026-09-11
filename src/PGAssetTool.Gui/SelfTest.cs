@@ -128,6 +128,8 @@ internal static class SelfTest
             Console.WriteLine($"weapons  {model.Weapons.Count}");
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
+            if (EveryKindOpens(model, scratch) is { } kindProblem) return Fail(kindProblem);
+
             if (WhichMeshIsTheWeapon(model) is { } wrongMesh) return Fail(wrongMesh);
 
             if (EveryWeaponHasAModelToShow(model) is { } modelProblem) return Fail(modelProblem);
@@ -2162,6 +2164,98 @@ internal static class SelfTest
                 return $"'{name}' is still held open after {what} — {ex.Message}";
             }
         }
+        return null;
+    }
+
+    /// Every kind the game has opens in the browser, and one that is not a weapon goes all the way
+    /// to a workspace.
+    ///
+    /// Weapons were the only kind for the tool's first year, and everything that reads one turned
+    /// out to be general already: a hat is a prefab under a root of its own with a skin beside it
+    /// and an offer icon named after its id, which is a weapon's arrangement with the names changed.
+    /// What was missing was a catalogue per kind, and those are all in `generated_data`.
+    ///
+    /// So this drives the picker rather than the catalogue: select each kind, take the first thing
+    /// in it, and see a tree with assets in it come back. A kind whose registry reads but whose
+    /// prefabs do not resolve looks perfectly healthy from the catalogue's side and shows an empty
+    /// pane, which is the failure worth catching.
+    private static string? EveryKindOpens(MainViewModel model, string scratch)
+    {
+        if (model.Kinds.Count < 2) return "only one kind of thing was found in the game";
+
+        var was = model.Kind;
+
+        try
+        {
+            foreach (var kind in model.Kinds)
+            {
+                model.Kind = kind;
+                if (model.Weapons.Count == 0) return $"the {kind.Name} list came up empty";
+
+                var first = model.Weapons[0];
+                model.Selected = first;
+
+                if (!WaitWhile(() => model.Detail?.Tree.Record.Slug != first.Record.Slug, 60_000))
+                    return $"'{first.Record.Slug}' ({kind.Name}) never resolved: {model.Status}";
+
+                var tree = model.Detail!.Tree;
+                Console.WriteLine($"kinds    {kind.Name,-10} {model.Weapons.Count,5} listed   "
+                    + $"first '{tree.DisplayName}' in {tree.PrefabBundle ?? "-"}: "
+                    + $"{tree.PrefabAssets.Count} assets, {tree.Related.Count} related, "
+                    + $"mesh {tree.MainMesh?.Name ?? "-"}, icon {(tree.Icon is null ? "no" : "yes")}");
+
+                if (tree.PrefabBundle is null)
+                    return $"'{first.Record.Slug}' ({kind.Name}) is in no bundle: "
+                        + string.Join("; ", tree.UnresolvedReasons);
+                if (tree.PrefabAssets.Count == 0)
+                    return $"'{first.Record.Slug}' ({kind.Name}) resolved to nothing";
+            }
+        }
+        finally
+        {
+            model.Kind = was;
+        }
+
+        return HatsExtractLikeWeapons(model, scratch);
+    }
+
+    /// A hat written out as a workspace is a workspace like any other, and says it is a hat.
+    ///
+    /// The whole point of the kinds being the same shape is that nothing downstream has to change,
+    /// and the one thing that does is the label: a pack is filed by what it is for, so a hat that
+    /// called itself a weapon would go in the wrong folder and show up under the wrong heading in
+    /// the manager.
+    private static string? HatsExtractLikeWeapons(MainViewModel model, string scratch)
+    {
+        if (model.Game is null || Core.Catalog.ItemKinds.ByName("Hat") is not { } hats) return null;
+
+        using var bundles = new BundleSet(model.Game);
+        var catalogs = Core.Catalog.GameCatalogs.Load(bundles);
+        if (catalogs.Of(hats).FirstOrDefault() is not { } hat) return "the game lists no hats";
+
+        var tree = new Core.Weapons.WeaponResolver(bundles, catalogs).Resolve(hat);
+        var into = Path.Combine(scratch, "kinds");
+
+        var export = new Core.Export.WeaponExporter(bundles) { MaskUnused = true }
+            .ExportAsWorkspace(tree, into, "self test", null);
+
+        var manifest = Core.Pack.Workspace.Read(export.Directory);
+
+        Console.WriteLine($"kinds    '{hat.Slug}' written out as {manifest.Operations.Count} "
+            + $"replaceable file(s), filed as {manifest.Subject?.Kind}/{manifest.Subject?.Id}");
+
+        if (manifest.Subject?.Kind != hats.Pack)
+            return $"a hat's workspace is filed as '{manifest.Subject?.Kind}'";
+        if (manifest.Subject.Number != 0)
+            return $"a hat was given the number {manifest.Subject.Number}, and hats are not numbered";
+        if (manifest.Operations.Count == 0) return "a hat's workspace named nothing replaceable";
+
+        // Its own texture, not the particle sheet it shares with everything else: a kind whose
+        // prefab resolves but whose own art does not is a kind that looks fine and is not.
+        if (!manifest.Operations.Any(o => o.Source.Contains(hat.Slug, StringComparison.OrdinalIgnoreCase)))
+            return $"nothing in '{hat.Slug}'s workspace is named after it";
+
+        try { Directory.Delete(into, recursive: true); } catch (IOException) { }
         return null;
     }
 

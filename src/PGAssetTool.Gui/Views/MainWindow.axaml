@@ -209,17 +209,24 @@
         <Grid ColumnDefinitions="300,4,*">
 
           <DockPanel Grid.Column="0" Margin="10">
+            <!-- Which of the game's kinds the list is showing. Weapons are what this opens on and
+                 what most of it is for; the rest of the game's cosmetics are the same arrangement
+                 under other names, so the only thing that changes below is what is in the list. -->
+            <ComboBox Name="Kinds" DockPanel.Dock="Top" ItemsSource="{Binding Kinds}"
+                      SelectedItem="{Binding Kind}" HorizontalAlignment="Stretch" Margin="0,0,0,6"
+                      IsVisible="{Binding Kinds.Count}" />
             <TextBox Name="Search" DockPanel.Dock="Top" Text="{Binding Search}"
-                     Watermark="Search weapons" Margin="0,0,0,8" />
+                     Watermark="Search" Margin="0,0,0,8" />
             <ListBox Name="Weapons" ItemsSource="{Binding Weapons}" SelectedItem="{Binding Selected}">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:WeaponListItem">
                   <Grid ColumnDefinitions="52,*" Margin="0,2">
                     <TextBlock Grid.Column="0" Text="{Binding Number}" Classes="dim mono"
-                               VerticalAlignment="Center" />
+                               VerticalAlignment="Center" IsVisible="{Binding IsNumbered}" />
                     <StackPanel Grid.Column="1">
                       <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                      <TextBlock Text="{Binding Prefab}" Classes="dim mono" />
+                      <TextBlock Text="{Binding Prefab}" Classes="dim mono"
+                                 TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                   </Grid>
                 </DataTemplate>

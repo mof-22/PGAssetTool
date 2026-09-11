@@ -89,7 +89,11 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         if (displayName is null && !record.IsHidden)
             unresolved.Add($"no translation for '{record.LocalizationKey}' in {catalogs.Localization.Language}");
 
-        var prefabPath = "Weapons/" + record.PrefabName;
+        // Whichever of the kind's roots the game actually files this one under. Every kind but
+        // weapons has more than one, because the game moved some of them and left the rest.
+        var prefabPath = record.Kind.PathsFor(record.PrefabName)
+            .FirstOrDefault(p => catalogs.Lookup.BundleFor(p) is not null) ?? record.AssetPath;
+
         var prefabBundle = catalogs.Lookup.BundleFor(prefabPath);
         if (prefabBundle is null) unresolved.Add($"'{prefabPath}' is not in the asset lookup table");
 
@@ -97,10 +101,17 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         if (prefabBundle is not null)
         {
             var file = bundles.Open(prefabBundle);
+
+            // By the leaf of the path the lookup table actually matched, and without minding case.
+            // The registry's id and the prefab's own name are the same string for a weapon and only
+            // nearly for everything else: `BerserkBoots_Up1` is filed as `BerserkBoots_up1`, which
+            // the lookup finds and an exact search for the id does not.
+            var named = prefabPath[(prefabPath.LastIndexOf('/') + 1)..];
             var root = ReferenceWalker.FindByName(
-                bundles.Context, file, AssetClassID.GameObject, record.PrefabName);
+                bundles.Context, file, AssetClassID.GameObject, named, StringComparison.OrdinalIgnoreCase);
+
             if (root is null)
-                unresolved.Add($"'{record.PrefabName}' was not found inside bundle '{prefabBundle}'");
+                unresolved.Add($"'{named}' was not found inside bundle '{prefabBundle}'");
             else
                 // Filtered after the walk and never during it: what a withheld object points at is
                 // found exactly as before — a texture a component names is still a texture — and it
@@ -111,14 +122,19 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                     .ToList();
         }
 
-        var skins = catalogs.Skins.ForWeapon(record.Index)
-            .Select(s => new WeaponSkinView(
-                s, catalogs.Localization.Translate(s.LocalizationKey), Materials(s), CustomModel(s)))
-            .ToList();
+        // A weapon's skins are a registry of their own, three bundles deep, and are looked up by
+        // the weapon's index. Every other kind keeps its one skin beside the thing itself, under a
+        // root named after the kind — so for those the skin is a related asset like any other and
+        // there is nothing to look up.
+        var skins = record.Kind == ItemKinds.Weapon
+            ? catalogs.Skins.ForWeapon(record.Index)
+                .Select(s => new WeaponSkinView(
+                    s, catalogs.Localization.Translate(s.LocalizationKey), Materials(s), CustomModel(s)))
+                .ToList()
+            : [];
 
         // The skin materials are already listed under each skin, so they are left out here.
-        var related = catalogs.Lookup.PathsForWeapon(record.PrefabNumber)
-            .Where(p => p != prefabPath && !p.StartsWith("WeaponSkinsV2/WeaponSkinAssets/", StringComparison.Ordinal))
+        var related = Related(record, prefabPath)
             .Select(p => new RelatedAsset(NamespaceOf(p), p, catalogs.Lookup.BundleFor(p)))
             .OrderBy(r => r.Namespace, StringComparer.Ordinal)
             .ThenBy(r => r.Path, StringComparer.Ordinal)
@@ -134,6 +150,44 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved,
             dressing,
             prefabBundle is null ? null : MainMesh(prefabBundle, assets, dressing, record.Slug, record.PrefabName));
+    }
+
+    /// Everything else the game files under this item's name.
+    ///
+    /// A weapon's belongings are found by the number in its prefab name — the icon, the chat icon,
+    /// the profile, the pickup — because that number is in every one of their paths and the weapon's
+    /// id is in none of them. Everything else is the other way round: a hat's skin is
+    /// `HatsSkins/skin_<id>` and its icon `OfferIcons/<id>_icon1_big`, so its own id is what finds
+    /// them, and a search for it turns up the lot without a table to consult.
+    private IEnumerable<string> Related(WeaponRecord record, string prefabPath)
+    {
+        if (record.Kind == ItemKinds.Weapon)
+            return catalogs.Lookup.PathsForWeapon(record.PrefabNumber)
+                .Where(p => p != prefabPath
+                    && !p.StartsWith("WeaponSkinsV2/WeaponSkinAssets/", StringComparison.Ordinal));
+
+        return catalogs.Lookup.Entries
+            .Select(e => e.Key)
+            .Where(p => p != prefabPath && Names(p, record.Slug))
+            .ToList();
+    }
+
+    /// Whether a path is about this item rather than about one whose id merely starts the same way.
+    ///
+    /// `hat_sweet` must not collect `hat_sweet_dreams`, so the id has to end where the path's own
+    /// name does or run into a suffix the game adds — `_icon1_big`, `_preview`, `_game`.
+    private static bool Names(string path, string id)
+    {
+        var leaf = path[(path.LastIndexOf('/') + 1)..];
+        var at = leaf.IndexOf(id, StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return false;
+
+        // Something before it has to be a word boundary too: `skin_hat_sweet` counts, `xhat_sweet`
+        // does not.
+        if (at > 0 && leaf[at - 1] is not ('_' or '-')) return false;
+
+        var after = at + id.Length;
+        return after == leaf.Length || leaf[after] is '_' or '-' or '.';
     }
 
     /// Which of a model's meshes is the thing it is a model of.

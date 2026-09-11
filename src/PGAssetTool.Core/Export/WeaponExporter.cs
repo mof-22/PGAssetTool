@@ -57,7 +57,10 @@ public sealed class WeaponExporter(BundleSet bundles)
     {
         var chosen = Chosen(tree);
         var directory = Pack.Workspace.Free(Path.Combine(outputRoot,
-            $"{tree.Record.GameNumber:D4}_{AssetExporter.Sanitize(tree.Record.Slug)}"
+            // Numbered where the kind is numbered, which is weapons and nothing else: the number is
+            // what a player calls a weapon by, and a hat has only its id.
+            (tree.Record.IsNumbered ? $"{tree.Record.GameNumber:D4}_" : "")
+            + AssetExporter.Sanitize(tree.Record.Slug)
             + (chosen is null ? "" : $"_{AssetExporter.Sanitize(Suffix(tree, chosen))}")));
         Directory.CreateDirectory(directory);
 
@@ -535,7 +538,7 @@ public sealed class WeaponExporter(BundleSet bundles)
             assets: export.Assets,
             subject: new Pack.PackSubject
             {
-                Kind = Pack.PackKind.Weapon,
+                Kind = tree.Record.Kind.Pack,
                 Id = AssetExporter.Sanitize(tree.Record.Slug).ToLowerInvariant(),
                 Number = tree.Record.GameNumber,
                 Prefab = tree.Record.PrefabName,

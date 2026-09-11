@@ -186,9 +186,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Whether this weapon has any, so the picker stays out of the way of the ones that do not.
     public bool HasSkins => SkinChoices.Count > 1;
 
+    /// Which sort of thing the list is showing.
+    ///
+    /// Weapons are what the tool was built for and what it opens on; the rest of the game's
+    /// cosmetics are the same arrangement under different roots, so switching kinds changes which
+    /// registry the list is filled from and nothing else.
+    public ObservableCollection<ItemKind> Kinds { get; } = [];
+
+    [ObservableProperty] private ItemKind _kind = ItemKinds.Weapon;
+
+    partial void OnKindChanged(ItemKind value)
+    {
+        if (_catalogs is null || _loading) return;
+
+        // The search is about the list, and the list has just been replaced. Kept when it still
+        // finds something, cleared when it would leave somebody looking at nothing.
+        Show(Found());
+        if (Weapons.Count == 0 && Search.Length > 0) Search = "";
+        Selected = Weapons.FirstOrDefault();
+    }
+
     public string Title => _catalogs is null
         ? "PGAssetTool"
-        : $"PGAssetTool — {Weapons.Count} of {_catalogs.Items.Count} weapons";
+        : $"PGAssetTool — {Weapons.Count} of {_catalogs.Of(Kind).Count} {Kind.Name.ToLowerInvariant()}s";
 
     public async Task LoadAsync()
     {
@@ -235,12 +255,26 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             foreach (var (bundle, name) in GameCatalogs.Languages(_bundles!))
                 Languages.Add(new LanguageOption(bundle, name));
 
+            // Only the kinds the game turns out to have anything in, and the one being browsed put
+            // back by name: a reload rebuilds these objects, and the one held before it is not the
+            // one in the list afterwards.
+            var was = Kind.Name;
+            Kinds.Clear();
+            foreach (var kind in _catalogs!.Kinds) Kinds.Add(kind);
+
+            // Put back quietly. Changing kinds by hand means "show me these instead", and takes the
+            // selection to the top of the new list; a reload is the opposite — it happens under
+            // somebody in the middle of something, and putting the selection back is the caller's,
+            // which is why ReloadAsync remembers what was selected before it started.
+            var quiet = _loading;
+            _loading = true;
+            Kind = Kinds.FirstOrDefault(k => k.Name == was) ?? ItemKinds.Weapon;
+            _loading = quiet;
+
             // Whatever is being searched for, still. A reload happens under somebody who is in the
             // middle of something — building a pack reloads the game — and putting the whole list
             // back while the search box still says what they typed reads as the search breaking.
-            Show(Search.Length == 0
-                ? _catalogs!.Items.Weapons
-                : _catalogs!.Items.Search(Search, _catalogs.Names));
+            Show(Found());
 
             Editor.Rescan(WorkspaceRoot);
 
@@ -253,7 +287,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 : catalogs.Items.Search(text, catalogs.Names).Select(w => w.GameNumber).ToHashSet();
 
             Manager.Refresh();
-            Status = $"{_catalogs.Items.Count} weapons";
+            Status = $"{_catalogs.Items.Count} weapons, {_catalogs.Kinds.Count - 1} other kinds";
             OnPropertyChanged(nameof(GameDescribed));
         }
         catch (Exception ex)
@@ -289,9 +323,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     partial void OnSearchChanged(string value)
     {
         if (_catalogs is null) return;
-        Show(value.Length == 0
-            ? _catalogs.Items.Weapons
-            : _catalogs.Items.Search(value, _catalogs.Names));
+        Show(Found());
+    }
+
+    /// What the list should hold: the kind being browsed, narrowed by what is being searched for.
+    ///
+    /// Weapons search through their own index, which knows every name in every language and the
+    /// in-game number. Everything else is matched on what it has — its id and the name in the
+    /// language on screen — which is enough, because those names are what the picker is showing.
+    private IEnumerable<WeaponRecord> Found()
+    {
+        if (_catalogs is null) return [];
+
+        var items = _catalogs.Of(Kind);
+        if (Search.Length == 0) return items;
+
+        if (Kind == ItemKinds.Weapon) return _catalogs.Items.Search(Search, _catalogs.Names);
+
+        return items.Where(r =>
+            r.Slug.Contains(Search, StringComparison.OrdinalIgnoreCase)
+            || r.Tag.Contains(Search, StringComparison.OrdinalIgnoreCase)
+            || _catalogs.Localization.Translate(r.LocalizationKey) is { } named
+               && named.Contains(Search, StringComparison.OrdinalIgnoreCase));
     }
 
     private void Show(IEnumerable<WeaponRecord> records)
@@ -692,7 +745,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             _catalogs = _catalogs.WithLanguage(_bundles, value);
             _resolver = new WeaponResolver(_bundles, _catalogs);
-            Show(Search.Length == 0 ? _catalogs.Items.Weapons : _catalogs.Items.Search(Search, _catalogs.Names));
+            Show(Found());
 
             // The manager's headings are weapon and skin names too, and they are read out of the
             // table that has just changed rather than out of what a pack was called when it was
@@ -1168,8 +1221,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
 public sealed record WeaponListItem(WeaponRecord Record, string? Translated)
 {
-    public string Name => Translated ?? Record.Slug;
+    public string Name => Translated is { Length: > 0 } named ? named
+        : Record.Tag.Length > 0 ? Record.Tag
+        : Record.Slug;
+
     public string Number => $"#{Record.GameNumber}";
+
+    /// Only weapons are numbered, and the column that shows it is theirs alone: a hat's id is what
+    /// identifies it, and it is already on the second line.
+    public bool IsNumbered => Record.IsNumbered;
 
     /// Shown next to the name because the two numbering systems disagree for all but six weapons,
     /// and the prefab number is the one that appears in asset paths.

@@ -26,11 +26,14 @@ if (command is "-h" or "--help" or "help")
 
           info                 Show the detected installation and version.
           weapons [<filter>]   List weapons, optionally filtered by name, slug, tag or prefab.
-          show <weapon>        Show one weapon and everything it references. Takes the in-game
-                               number (819), a prefab name (Weapon1257) or a slug. Note that the
-                               in-game number and the prefab number are different sequences.
+          items [<kind>]       List the game's other kinds — hats, capes, masks, boots, pets,
+                               gliders, transports, avatars — or the whole of one of them.
+          show <item>          Show one item and everything it references. A weapon takes the
+                               in-game number (819), a prefab name (Weapon1257) or a slug; anything
+                               else takes the id `items` lists. Note that a weapon's in-game number
+                               and its prefab number are different sequences.
 
-          extract <weapon>     Write out everything belonging to a weapon: images as PNG, audio as
+          extract <item>       Write out everything belonging to an item: images as PNG, audio as
                                WAV, meshes as glTF, the object graph as JSON. With --workspace, also writes a
                                pgmod.json naming every replaceable file.
           pack [<directory>]   Build a .pgmod from a workspace. Only files edited since the
@@ -388,7 +391,7 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
     }
 }
 
-if (command is not ("weapons" or "show" or "extract"))
+if (command is not ("weapons" or "items" or "show" or "extract"))
 {
     Console.Error.WriteLine($"Unknown command '{command}'. Try --help.");
     return 2;
@@ -397,6 +400,30 @@ if (command is not ("weapons" or "show" or "extract"))
 var timer = Stopwatch.StartNew();
 var catalogs = weaponNames.Value;
 var catalogTime = timer.ElapsedMilliseconds;
+
+if (command == "items")
+{
+    var wanted = positional.FirstOrDefault();
+
+    foreach (var kind in catalogs.Kinds)
+    {
+        if (wanted is { Length: > 0 }
+            && !string.Equals(kind.Name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+
+        var of = catalogs.Of(kind);
+        Console.WriteLine($"{kind.Name} ({of.Count})");
+
+        // The whole of a kind when it was asked for by name, and a taste of each otherwise: there
+        // are 596 avatars and nobody typing `items` wanted all of them.
+        foreach (var item in wanted is { Length: > 0 } ? of : of.Take(5))
+            Console.WriteLine($"    {TextColumn.Pad(item.Slug, 42)} "
+                + $"{catalogs.Localization.Translate(item.LocalizationKey) ?? item.Tag}");
+
+        if (wanted is null or "" && of.Count > 5) Console.WriteLine($"    … {of.Count - 5} more");
+    }
+
+    return 0;
+}
 
 if (command == "weapons")
 {
@@ -418,10 +445,10 @@ if (query is null)
     return 2;
 }
 
-var record = catalogs.Items.Find(query);
+var record = catalogs.Find(query);
 if (record is null)
 {
-    Console.Error.WriteLine($"No weapon matches '{query}'.");
+    Console.Error.WriteLine($"Nothing matches '{query}'.");
     return 1;
 }
 

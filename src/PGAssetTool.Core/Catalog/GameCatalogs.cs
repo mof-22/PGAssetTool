@@ -9,8 +9,10 @@ public sealed class GameCatalogs
 {
     public const string DefaultLanguage = "l_en-gb";
 
-    private GameCatalogs(ItemCatalog items, AssetLookup lookup, Localization localization, SkinCatalog skins)
-        => (Items, Lookup, Localization, Skins) = (items, lookup, localization, skins);
+    private GameCatalogs(
+        ItemCatalog items, AssetLookup lookup, Localization localization, SkinCatalog skins,
+        GearCatalog gear)
+        => (Items, Lookup, Localization, Skins, Gear) = (items, lookup, localization, skins, gear);
 
     /// Every weapon name in every language, for searching. Filled in after construction because it
     /// needs the item catalog that is being built alongside it.
@@ -20,6 +22,35 @@ public sealed class GameCatalogs
     public AssetLookup Lookup { get; }
     public Localization Localization { get; }
     public SkinCatalog Skins { get; }
+
+    /// Everything the game sells that is not a weapon, by kind.
+    public GearCatalog Gear { get; }
+
+    /// The items of one kind, whichever kind that is. Weapons come from their own registry and
+    /// everything else from the generated ones, and nothing outside here needs to know that.
+    public IReadOnlyList<WeaponRecord> Of(ItemKind kind)
+        => kind == ItemKinds.Weapon ? Items.Weapons.ToList() : Gear.Of(kind);
+
+    /// The kinds with anything in them, so a picker offers nothing that leads nowhere.
+    public IReadOnlyList<ItemKind> Kinds
+        => [.. ItemKinds.All.Where(k => k == ItemKinds.Weapon || Gear.Count(k) > 0)];
+
+    /// Whatever the query names, of whatever kind.
+    ///
+    /// Weapons first and by their own rules — a bare number is an in-game number and nothing else —
+    /// because that is what somebody typing at this tool almost always means. Everything else is
+    /// found by the id the game knows it as, which is what the lists show and what a pack records.
+    public WeaponRecord? Find(string query)
+    {
+        if (Items.Find(query) is { } weapon) return weapon;
+
+        foreach (var kind in Kinds.Where(k => k != ItemKinds.Weapon))
+            if (Gear.Of(kind).FirstOrDefault(
+                    r => string.Equals(r.Slug, query, StringComparison.OrdinalIgnoreCase)) is { } found)
+                return found;
+
+        return null;
+    }
 
     /// The game's own translation tables, as bundle name and the language in its own script.
     ///
@@ -55,7 +86,8 @@ public sealed class GameCatalogs
             ItemCatalog.Load(bundles),
             AssetLookup.Load(bundles),
             Localization.Load(bundles, language),
-            SkinCatalog.Load(bundles));
+            SkinCatalog.Load(bundles),
+            GearCatalog.Load(bundles));
 
         catalogs.Names = WeaponNames.Load(bundles, catalogs.Items);
         return catalogs;
@@ -67,7 +99,7 @@ public sealed class GameCatalogs
     /// and the search index do not. Rebuilding all of them to change which name is displayed cost
     /// the better part of a second for no reason.
     public GameCatalogs WithLanguage(BundleSet bundles, string language)
-        => new(Items, Lookup, Localization.Load(bundles, language), Skins) { Names = Names };
+        => new(Items, Lookup, Localization.Load(bundles, language), Skins, Gear) { Names = Names };
 }
 
 /// Maps a logical asset path such as "Weapons/Weapon25" to the bundle holding it. The game resolves

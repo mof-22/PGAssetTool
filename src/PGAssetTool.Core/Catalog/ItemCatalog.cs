@@ -43,6 +43,21 @@ public sealed record WeaponRecord(
 {
     /// Weapons with no localization key never appear in the game's own list.
     public bool IsHidden => LocalizationKey.Length == 0;
+
+    /// What sort of thing this is.
+    ///
+    /// Weapons unless said otherwise, because for the tool's whole first year they were the only
+    /// kind and every place that builds one of these means a weapon. Everything that reads an item
+    /// — the resolver, the tree, the preview, the exporter — goes through this rather than knowing
+    /// where weapons in particular are kept.
+    public ItemKind Kind { get; init; } = ItemKinds.Weapon;
+
+    /// Where the game files this one's prefab: `Weapons/Weapon834`, `Hats/hat_sweet`.
+    public string AssetPath => Kind.PathFor(PrefabName);
+
+    /// The number a player reads off the list, where the kind has one. Weapons are numbered and
+    /// nothing else is, which is why the rest are found by name.
+    public bool IsNumbered => Kind == ItemKinds.Weapon;
 }
 
 /// The weapon registry in the `it_d` bundle: `itemDatas` gives every item a slug, `itemRecords`

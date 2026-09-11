@@ -153,8 +153,13 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
     partial void OnSelectedNodeChanged(TreeNode? value) => NodeSelected?.Invoke(value);
 
     public string Name => Tree.DisplayName;
+
+    /// What it is, said in the terms its own kind uses. A weapon has a number a player reads off
+    /// the list and a prefab name that agrees with nothing else; a hat has an id and that is all.
     public string Subtitle =>
-        $"#{Tree.Record.GameNumber}   {Tree.Record.PrefabName}   {Tree.Record.Slug}"
+        (Tree.Record.IsNumbered
+            ? $"#{Tree.Record.GameNumber}   {Tree.Record.PrefabName}   {Tree.Record.Slug}"
+            : $"{Tree.Record.Kind.Name}   {Tree.Record.Slug}")
         + (Tree.PrefabBundle is null ? "" : $"   @ {Tree.PrefabBundle}");
 
     private static ObservableCollection<TreeNode> Build(WeaponTree tree, bool replaceableOnly)
