@@ -28,6 +28,19 @@ public static class UvCoverage
     /// How far outside the square a coordinate may sit before it counts as leaving it.
     private const float Slack = 0.001f;
 
+    /// How much of a texel a triangle has to cover before that texel counts as read.
+    ///
+    /// A coordinate sitting exactly on a texel boundary belongs, as far as arithmetic goes, to the
+    /// texel on the far side of it — and pixel-art UVs land on boundaries constantly, an island
+    /// ending at exactly 16/64 rather than at 15.99. Taking every texel a triangle touches therefore
+    /// grew every island by a row and a column the model never shows, which is what an author
+    /// notices first when they lay the mask over the same UVs in Blender.
+    ///
+    /// A hundredth of a texel is far below anything a triangle really covers — a UV island one texel
+    /// wide still covers whole texels along its length — and far above what touching a boundary
+    /// produces, which is nothing at all.
+    private const float Least = 0.01f;
+
     /// The texels these submeshes sample, or null when the answer is "all of it".
     ///
     /// Null rather than a mask of everything, so a caller can tell "keep the whole thing" from
@@ -94,45 +107,102 @@ public static class UvCoverage
 
     private static void Fill(bool[] used, int width, int height, Span<float> px, Span<float> py)
     {
-        // The corners themselves, always. A triangle smaller than a texel covers no sample point
-        // and would otherwise mark nothing at all — and the small ones are the details.
-        for (var corner = 0; corner < 3; corner++) Mark(used, width, height, px[corner], py[corner]);
-
-        var left = (int)MathF.Floor(MathF.Min(px[0], MathF.Min(px[1], px[2])));
-        var right = (int)MathF.Ceiling(MathF.Max(px[0], MathF.Max(px[1], px[2])));
-        var top = (int)MathF.Floor(MathF.Min(py[0], MathF.Min(py[1], py[2])));
-        var bottom = (int)MathF.Ceiling(MathF.Max(py[0], MathF.Max(py[1], py[2])));
-
-        left = Math.Max(left, 0);
-        top = Math.Max(top, 0);
-        right = Math.Min(right, width - 1);
-        bottom = Math.Min(bottom, height - 1);
+        var left = Math.Max((int)MathF.Floor(MathF.Min(px[0], MathF.Min(px[1], px[2]))), 0);
+        var right = Math.Min((int)MathF.Ceiling(MathF.Max(px[0], MathF.Max(px[1], px[2]))), width - 1);
+        var top = Math.Max((int)MathF.Floor(MathF.Min(py[0], MathF.Min(py[1], py[2]))), 0);
+        var bottom = Math.Min((int)MathF.Ceiling(MathF.Max(py[0], MathF.Max(py[1], py[2]))), height - 1);
 
         var area = Edge(px[0], py[0], px[1], py[1], px[2], py[2]);
 
-        // Three points on a line enclose nothing, and the corners above have it covered.
-        if (MathF.Abs(area) < 1e-6f) return;
+        // A triangle with no area in UV space still draws. Every one of its corners reads the same
+        // texel, which is how a face painted from a single point of the atlas is written — and it is
+        // the one thing the coverage below cannot see, since it covers nothing. Answered the way the
+        // game answers it: the texel the point falls in, by the same flooring.
+        if (MathF.Abs(area) < 1e-6f)
+        {
+            for (var corner = 0; corner < 3; corner++)
+            {
+                var x = Math.Clamp((int)MathF.Floor(px[corner]), 0, width - 1);
+                var y = Math.Clamp((int)MathF.Floor(py[corner]), 0, height - 1);
+                used[y * width + x] = true;
+            }
+
+            return;
+        }
 
         for (var y = top; y <= bottom; y++)
         for (var x = left; x <= right; x++)
-        {
-            float sx = x + 0.5f, sy = y + 0.5f;
-
-            // Divided by the area so all three come out positive inside whichever way the triangle
-            // is wound, and a hair of slack so a sample exactly on an edge counts as in.
-            var a = Edge(px[1], py[1], px[2], py[2], sx, sy) / area;
-            var b = Edge(px[2], py[2], px[0], py[0], sx, sy) / area;
-            var c = Edge(px[0], py[0], px[1], py[1], sx, sy) / area;
-
-            if (a >= -0.0001f && b >= -0.0001f && c >= -0.0001f) used[y * width + x] = true;
-        }
+            if (Covered(px, py, x, y, area) > Least) used[y * width + x] = true;
     }
 
-    private static void Mark(bool[] used, int width, int height, float x, float y)
+    /// How much of one texel a triangle covers, from none of it to all of it.
+    private static float Covered(Span<float> px, Span<float> py, int x, int y, float area)
     {
-        var px = Math.Clamp((int)MathF.Floor(x), 0, width - 1);
-        var py = Math.Clamp((int)MathF.Floor(y), 0, height - 1);
-        used[py * width + px] = true;
+        // Wholly inside, which is most of the texels under any triangle bigger than a few of them.
+        // A triangle is convex, so a square whose four corners are all within it is within it.
+        if (Within(px, py, x, y, area) && Within(px, py, x + 1, y, area)
+            && Within(px, py, x, y + 1, area) && Within(px, py, x + 1, y + 1, area))
+            return 1f;
+
+        Span<float> xs = stackalloc float[8];
+        Span<float> ys = stackalloc float[8];
+        Span<float> cx = stackalloc float[8];
+        Span<float> cy = stackalloc float[8];
+
+        for (var corner = 0; corner < 3; corner++) { xs[corner] = px[corner]; ys[corner] = py[corner]; }
+        var count = 3;
+
+        // The triangle cut down by each of the texel's four sides in turn. What survives is the
+        // piece of the triangle inside the texel, and its area is the answer.
+        count = Clip(xs, ys, count, cx, cy, 1, 0, x);
+        count = Clip(cx, cy, count, xs, ys, -1, 0, -(x + 1));
+        count = Clip(xs, ys, count, cx, cy, 0, 1, y);
+        count = Clip(cx, cy, count, xs, ys, 0, -1, -(y + 1));
+
+        if (count < 3) return 0f;
+
+        var twice = 0f;
+        for (var i = 0; i < count; i++)
+        {
+            var next = (i + 1) % count;
+            twice += xs[i] * ys[next] - xs[next] * ys[i];
+        }
+
+        return MathF.Abs(twice) * 0.5f;
+    }
+
+    /// Whether a point is on the inner side of all three edges, whichever way the triangle is wound.
+    private static bool Within(Span<float> px, Span<float> py, float x, float y, float area)
+        => Edge(px[1], py[1], px[2], py[2], x, y) / area >= 0
+            && Edge(px[2], py[2], px[0], py[0], x, y) / area >= 0
+            && Edge(px[0], py[0], px[1], py[1], x, y) / area >= 0;
+
+    /// Sutherland–Hodgman against one half-plane: keeps everything where ax*x + ay*y >= b, and puts
+    /// a new corner wherever an edge crosses the line.
+    private static int Clip(
+        Span<float> xs, Span<float> ys, int count, Span<float> ox, Span<float> oy,
+        float ax, float ay, float b)
+    {
+        var kept = 0;
+
+        for (var i = 0; i < count; i++)
+        {
+            var next = (i + 1) % count;
+            var here = ax * xs[i] + ay * ys[i] - b;
+            var there = ax * xs[next] + ay * ys[next] - b;
+
+            if (here >= 0) { ox[kept] = xs[i]; oy[kept] = ys[i]; kept++; }
+
+            if (here >= 0 != there >= 0 && kept < ox.Length)
+            {
+                var along = here / (here - there);
+                ox[kept] = xs[i] + (xs[next] - xs[i]) * along;
+                oy[kept] = ys[i] + (ys[next] - ys[i]) * along;
+                kept++;
+            }
+        }
+
+        return kept;
     }
 
     private static float Edge(float ax, float ay, float bx, float by, float cx, float cy)
