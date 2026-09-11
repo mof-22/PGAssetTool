@@ -152,6 +152,10 @@ public sealed partial class ManagerViewModel : ObservableObject
 
     public ManagerViewModel(Func<GameInstallation?> game) => _game = game;
 
+    /// Size or speed, when this rewrites the game. Set from the settings, which is where the
+    /// choice is made; the manager itself only passes it on.
+    public BundlePacking Packing { get; set; }
+
     /// Everything installed, whatever folder it is filed in.
     public ObservableCollection<InstalledRow> Mods { get; } = [];
 
@@ -527,7 +531,7 @@ public sealed partial class ManagerViewModel : ObservableObject
     [RelayCommand]
     private void Reapply() => Ask("Reapply everything", _ => Applier().Reconcile(), needsSelection: false);
 
-    private ModApplier Applier() => new(_game()!, new ModStore(_game()!));
+    private ModApplier Applier() => new(_game()!, new ModStore(_game()!)) { Packing = Packing };
 
     /// The rows a command acts on: everything highlighted, or the one current row.
     ///

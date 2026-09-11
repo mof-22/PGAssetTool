@@ -123,6 +123,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnProtectPacksChanged(bool value) => Remember();
 
+    /// Whether writing to the game is done for speed rather than for size. See BundlePacking.
+    [ObservableProperty] private bool _fasterApplies;
+
+    partial void OnFasterAppliesChanged(bool value)
+    {
+        Manager.Packing = Packing;
+        Remember();
+    }
+
+    public BundlePacking Packing => FasterApplies ? BundlePacking.Faster : BundlePacking.Smaller;
+
     /// The key packs are signed with, shown so an author can publish it: somebody who knows this
     /// can tell a pack you built from one re-signed by whoever altered it.
     public string AuthorFingerprint
@@ -194,6 +205,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Manager.TileSize = _settings.TileSize;
         Manager.Order = (ModOrder)_settings.ModOrder;
         ProtectPacks = _settings.ProtectPacks;
+        FasterApplies = _settings.FasterApplies;
+        Manager.Packing = Packing;
         _loading = false;
 
         try
@@ -539,7 +552,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             using (var reading = new BundleSet(game))
                 if (reading.Context.HasClassDatabase) version = GameVersion.Read(reading.Context, game);
 
-            result = await Task.Run(() => new ModApplier(game, store).Install(paths, version));
+            result = await Task.Run(() => new ModApplier(game, store) { Packing = Packing }.Install(paths, version));
         }
         finally
         {
@@ -720,6 +733,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
+            FasterApplies = FasterApplies,
         };
         try { _settings.Save(SettingsHome); }
         catch (IOException) { }

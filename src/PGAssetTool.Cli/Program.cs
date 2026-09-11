@@ -55,6 +55,9 @@ if (command is "-h" or "--help" or "help")
           --out <directory>    Where extract writes (default ./workspace).
           --author <name>      Recorded in the manifest by extract --workspace.
           --force              Let apply back up a bundle that is already modified.
+          --fast               Squeeze rebuilt bundles less: that part is about four times quicker
+                               and the bundles come out about a sixth larger. The game reads both
+                               at the same speed.
           --opaque             Write textures with no alpha channel. Most of them keep emission
                                rather than transparency there, and an editor opens those as almost
                                invisible. An image brought back without an alpha channel keeps the
@@ -302,7 +305,11 @@ if (command == "verify")
 if (command is "apply" or "mods" or "enable" or "disable" or "remove")
 {
     var store = new ModStore(game);
-    var applier = new ModApplier(game, store) { Force = args.Contains("--force") };
+    var applier = new ModApplier(game, store)
+    {
+        Force = args.Contains("--force"),
+        Packing = args.Contains("--fast") ? BundlePacking.Faster : BundlePacking.Smaller,
+    };
 
     if (command == "mods")
     {

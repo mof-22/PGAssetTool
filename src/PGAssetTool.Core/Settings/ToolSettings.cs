@@ -73,6 +73,17 @@ public sealed record ToolSettings
     /// a plain zip is easier to look inside and most packs never leave the machine that made them.
     public bool ProtectPacks { get; init; }
 
+    /// Whether writing to the game is done for speed rather than for size.
+    ///
+    /// The squeezing itself is about four times quicker and the bundles come out about a sixth
+    /// larger; measured end to end, on a machine with cores to spare, a whole apply is about a
+    /// tenth quicker, and more than that on a machine without them, where the work cannot be spread
+    /// as wide. The game reads both at the same speed.
+    ///
+    /// Off by default, because a tool leaving the installation the size it found it is the answer
+    /// that surprises nobody, and somebody with thirty mods and room to spare can say otherwise.
+    public bool FasterApplies { get; init; }
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

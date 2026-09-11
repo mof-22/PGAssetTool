@@ -120,6 +120,8 @@ internal static class SelfTest
             Console.WriteLine($"status   preferences for this run: {model.SettingsPath}");
 
             if (ReaderReleasesItsBundles(model) is { } stillOpen) return Fail(stillOpen);
+
+            if (ABundleSurvivesBeingWrittenBothWays(model, scratch) is { } packProblem) return Fail(packProblem);
             Console.WriteLine($"weapons  {model.Weapons.Count}");
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
@@ -2120,6 +2122,84 @@ internal static class SelfTest
         }
         return null;
     }
+
+    /// A bundle written back comes back the same bundle, at either setting.
+    ///
+    /// The file the game loads is assembled here rather than by the library that knows the format —
+    /// the library's compressor is twenty-five times slower than the one used instead, and was
+    /// seventeen of the nineteen seconds an apply took. That makes the layout this tool's own
+    /// problem: a header, a table of blocks, and a hundred-odd compressed blocks, in a format
+    /// nothing in this repository documents. Reading one back and asking it what it holds is the
+    /// cheapest way to know it was assembled right, and the first attempt at it was wrong in a way
+    /// that would have left every modded bundle unreadable.
+    ///
+    /// Both settings, because they differ in more than effort: a block compressed the quick way is
+    /// flagged differently from one compressed thoroughly, and a block that would have grown is
+    /// stored as it is and flagged as neither.
+    ///
+    /// Nothing of the game is written. The bundle is read from the installation and the copies go
+    /// to this run's own scratch directory.
+    private static string? ABundleSurvivesBeingWrittenBothWays(MainViewModel model, string scratch)
+    {
+        const string name = "bw";
+        string path;
+        int assets;
+        List<string> textures;
+
+        using (var bundles = new BundleSet(model.Game!))
+        {
+            path = bundles.PathOf(name);
+            var file = bundles.Open(name);
+            assets = file.file.AssetInfos.Count;
+            textures = Textures(bundles.Context, file);
+        }
+
+        foreach (var packing in new[] { BundlePacking.Smaller, BundlePacking.Faster })
+        {
+            var output = Path.Combine(scratch, $"{name}.{packing}".ToLowerInvariant());
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+
+            using (var editor = new BundleEditor(path)) editor.Save(output, packing);
+            var took = clock.ElapsedMilliseconds;
+
+            int back;
+            List<string> theirs;
+
+            try
+            {
+                using var editor = new BundleEditor(output);
+                back = editor.File.file.AssetInfos.Count;
+
+                // Deserialized rather than counted, so this reads the blocks themselves and not
+                // only the table in front of them.
+                theirs = Textures(editor.Context, editor.File);
+            }
+            catch (Exception e)
+            {
+                // Anything at all: a file assembled wrongly fails in whatever way the reader
+                // happens to fail, and none of those ways is one to carry on from.
+                return $"a bundle written {packing} could not be read back — {e.GetType().Name}: {e.Message}";
+            }
+
+            if (back != assets) return $"'{name}' holds {assets} assets and {back} written {packing}";
+            if (!theirs.SequenceEqual(textures))
+                return $"'{name}' holds {textures.Count} textures and {theirs.Count} written {packing}";
+
+            Console.WriteLine($"pack     '{name}' written {packing.ToString().ToLowerInvariant()}: "
+                + $"{new FileInfo(output).Length / 1024}KB in {took}ms, {back} assets, {theirs.Count} textures");
+
+            File.Delete(output);
+        }
+
+        return null;
+    }
+
+    private static List<string> Textures(AssetsContext context, AssetsFileInstance file)
+        => file.file.AssetInfos
+            .Where(i => i.TypeId == (int)AssetClassID.Texture2D)
+            .Select(i => context.Deserialize(file, i)?["m_Name"].AsString ?? "")
+            .Order(StringComparer.Ordinal)
+            .ToList();
 
     /// Renames a workspace and re-labels its manifest, the way the editor's form does.
     ///

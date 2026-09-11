@@ -78,7 +78,10 @@ public sealed class BundleEditor : IDisposable
 
     /// Writes the whole bundle out, LZ4-compressed as the game ships it. Uncompressed would also
     /// load, but every bundle here is compressed and there is no reason to be the odd one out.
-    public void Save(string outputPath)
+    ///
+    /// The compressing itself is BundlePacker's, not the library's, because the library's is the
+    /// single slowest thing this tool does.
+    public void Save(string outputPath, BundlePacking packing = BundlePacking.Smaller)
     {
         var directory = _bundle.file.BlockAndDirInfo.DirectoryInfos;
         directory[_entryIndex].SetNewData(Serialize(w => File.file.Write(w, 0)));
@@ -90,9 +93,7 @@ public sealed class BundleEditor : IDisposable
         var rebuilt = new AssetBundleFile();
         rebuilt.Read(new AssetsFileReader(uncompressed));
 
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
-        using (var writer = new AssetsFileWriter(outputPath))
-            rebuilt.Pack(writer, AssetBundleCompressionType.LZ4);
+        BundlePacker.Write(rebuilt, outputPath, packing);
 
         rebuilt.Close();
         uncompressed.Dispose();

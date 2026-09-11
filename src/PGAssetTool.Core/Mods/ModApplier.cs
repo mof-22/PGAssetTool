@@ -29,6 +29,18 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// Accept a bundle that is already modified as the baseline for its backup.
     public bool Force { get; init; }
 
+    /// Size or speed, when a bundle is written back. See BundlePacking.
+    public BundlePacking Packing { get; init; }
+
+    /// What a bundle being rebuilt is called until it is finished.
+    private const string Unfinished = ".pgnew";
+
+    private static void Discard(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
     public ReconcileResult Install(string packPath, string gameVersion)
         => Install([packPath], gameVersion);
 
@@ -222,6 +234,10 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             var live = LivePathIn(cache, bundle, hash);
             if (live is null || !File.Exists(live)) continue;
 
+            // A rebuild that never got as far as its rename, from a run that died part way. It is
+            // no use to anyone and the game's own folder is no place to leave one lying.
+            Discard(live + Unfinished);
+
             // Nothing to put back if it is already what the game shipped. A backup outlives the mod
             // that caused it — nothing prunes one for being unneeded — so this loop kept copying
             // every bundle the tool had ever touched over an identical copy of itself: seventy
@@ -338,11 +354,19 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 }
                 store.Backup(cache, bundle, hash, live);
 
-                var rewritten = Path.Combine(staging.FullName, bundle);
+                // Written beside the file it replaces rather than into the temporary directory,
+                // because the last step is then a rename instead of a copy. The two are rarely on
+                // the same drive — the game on one, the system's temporary directory on another —
+                // and a rebuild of every bundle is a couple of hundred megabytes to carry across.
+                //
+                // Nothing but this ever looks at the half-written name, and a run that dies before
+                // the rename leaves it for the next one to clear out. The game is not running while
+                // any of this happens; that is checked before an apply starts.
+                var rewritten = live + Unfinished;
                 var wrote = EditBundle(live, rewritten, parts, staging.FullName, applied, failed, shared);
-                if (wrote.Count == 0) continue;
+                if (wrote.Count == 0) { Discard(rewritten); continue; }
 
-                File.Copy(rewritten, live, overwrite: true);
+                File.Move(rewritten, live, overwrite: true);
                 foreach (var id in wrote) touchedByMod[id][bundle] = hash;
             }
         }
@@ -477,7 +501,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
         // Written once, whatever went into it. Saving per mod would put the bundle back through a
         // whole rebuild for each of them, which is the cost this exists to avoid.
-        if (wrote.Count > 0) editor.Save(output);
+        if (wrote.Count > 0) editor.Save(output, Packing);
         return wrote;
     }
 

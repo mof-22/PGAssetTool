@@ -276,6 +276,20 @@ uninstalling drops the mod before its bundles are put back.
 `apply` refuses a bundle that something else has already modified and has no backup, unless `--force`
 says to accept its contents as the original.
 
+A reconcile is organised by bundle rather than by mod: every enabled mod's operations for one bundle
+are gathered first, and the bundle is opened, edited and written once. Going mod by mod meant
+rebuilding a bundle once per mod on it, and a rebuild is a decompress and a recompress — thirty-one
+mods on seventeen bundles took thirty-eight seconds for forty operations.
+
+Writing one back out is `BundlePacker`, not the library's `Pack`. AssetsTools.NET's LZ4 is LZ4HC
+through a managed port that manages about 28MB/s, and it was seventeen of those nineteen remaining
+seconds; the blocks are independent, so they are compressed here, on every core. `BundlePacking`
+chooses between the size the game ships and about four times the speed for about a sixth more disk.
+The layout written is the one AssetsTools.NET wrote — 128KB blocks, the block and directory table
+compressed at the end — which is not the layout the game ships and is the one this tool has always
+written into it. Each bundle is rebuilt beside the file it replaces and renamed over it, so the last
+step is a rename rather than a copy across drives.
+
 ### Where things are kept
 
 Everything the tool writes lives in `PGAssetTool-data/`, beside the executable. No registry, no
