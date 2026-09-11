@@ -58,6 +58,8 @@ if (command is "-h" or "--help" or "help")
           --fast               Squeeze rebuilt bundles less: that part is about four times quicker
                                and the bundles come out about a sixth larger. The game reads both
                                at the same speed.
+          --rebuild            Rebuild every bundle, including the ones already holding what they
+                               should. Those are normally left where they are.
           --opaque             Write textures with no alpha channel. Most of them keep emission
                                rather than transparency there, and an editor opens those as almost
                                invisible. An image brought back without an alpha channel keeps the
@@ -308,6 +310,7 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
     var applier = new ModApplier(game, store)
     {
         Force = args.Contains("--force"),
+        Rebuild = args.Contains("--rebuild"),
         Packing = args.Contains("--fast") ? BundlePacking.Faster : BundlePacking.Smaller,
     };
 
@@ -368,7 +371,11 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
             Console.WriteLine($"  removed stale backups: {string.Join(", ", result.PrunedBackups)}");
         foreach (var failure in result.Failed) Console.Error.WriteLine($"  FAILED {failure}");
 
-        Console.WriteLine($"\n{result.Applied.Count} operation(s) applied, {result.Failed.Count} failed.");
+        if (result.Unchanged.Count > 0)
+            Console.WriteLine($"  already holding what they should: {string.Join(", ", result.Unchanged)}");
+
+        Console.WriteLine($"\n{result.Applied.Count} operation(s) applied, {result.Failed.Count} failed"
+            + (result.Unchanged.Count > 0 ? $", {result.Unchanged.Count} bundle(s) left alone." : "."));
         return result.Failed.Count > 0 ? 1 : 0;
     }
     catch (Exception ex)

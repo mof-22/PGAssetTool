@@ -281,6 +281,21 @@ are gathered first, and the bundle is opened, edited and written once. Going mod
 rebuilding a bundle once per mod on it, and a rebuild is a decompress and a recompress — thirty-one
 mods on seventeen bundles took thirty-eight seconds for forty operations.
 
+Bundles that already hold what this run would put into them are left where they are. `written.json`
+records, per bundle, the mods and packs it was built from and the hash of the file that came out; a
+bundle whose recipe is unchanged and whose file still hashes to what was written is neither restored
+nor rebuilt. Both halves have to hold, and anything else — a game update, an edit from outside, a
+record from a run that did not finish — falls through to restoring and reapplying. `ModApplier.Rebuild`
+turns the shortcut off, which is what the manager's *Reapply everything* is for. Turning one mod off
+then costs the bundles that mod is on rather than every bundle any mod is on.
+
+The ones that are rebuilt are rebuilt side by side, four at a time, largest first. They share
+nothing: different files, different backups, their own corner of the staging directory. The limit is
+memory rather than cores — a bundle holds its whole decompressed self while it is worked on, and the
+largest in this game is 216MB — and each one already spreads its compression across every core.
+A pack is opened once for the whole run and read under a lock, because several bundles may be drawing
+from it at the same time.
+
 Writing one back out is `BundlePacker`, not the library's `Pack`. AssetsTools.NET's LZ4 is LZ4HC
 through a managed port that manages about 28MB/s, and it was seventeen of those nineteen remaining
 seconds; the blocks are independent, so they are compressed here, on every core. `BundlePacking`
@@ -304,6 +319,7 @@ PGAssetTool-data/
   installs/<game>/
     backup/              each bundle as it was before the first write to it
     installed.json       the ledger
+    written.json         what was last written into each bundle, so a reconcile can skip it
 ```
 
 The arrangement under `mods/` is the one the manager shows. Two views of the same thing that

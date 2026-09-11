@@ -528,8 +528,16 @@ public sealed partial class ManagerViewModel : ObservableObject
             });
     }
 
+    /// Rebuilds every bundle, including the ones already holding what they should.
+    ///
+    /// Every other route leaves those alone, which is what makes a toggle cost one bundle instead of
+    /// seventeen. This is the request that means the opposite: it is what somebody reaches for when
+    /// they think the game is not in the state the tool believes it is, and answering it by deciding
+    /// there was nothing to do would be no answer at all.
     [RelayCommand]
-    private void Reapply() => Ask("Reapply everything", _ => Applier().Reconcile(), needsSelection: false);
+    private void Reapply() => Ask("Reapply everything",
+        _ => new ModApplier(_game()!, new ModStore(_game()!)) { Packing = Packing, Rebuild = true }.Reconcile(),
+        needsSelection: false);
 
     private ModApplier Applier() => new(_game()!, new ModStore(_game()!)) { Packing = Packing };
 
@@ -613,6 +621,7 @@ public sealed partial class ManagerViewModel : ObservableObject
             var also = afterwards?.Invoke() ?? "";
 
             Status = $"{what}: {result.Applied.Count} applied, {result.Restored.Count} restored"
+                + (result.Unchanged.Count > 0 ? $", {result.Unchanged.Count} left alone" : "")
                 + (result.Failed.Count > 0
                     ? $", {result.Failed.Count} failed — {string.Join("; ", result.Failed)}"
                     : "")

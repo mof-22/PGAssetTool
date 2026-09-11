@@ -122,6 +122,9 @@ internal static class SelfTest
             if (ReaderReleasesItsBundles(model) is { } stillOpen) return Fail(stillOpen);
 
             if (ABundleSurvivesBeingWrittenBothWays(model, scratch) is { } packProblem) return Fail(packProblem);
+
+            if (LeavingBundlesAloneArrivesWhereRebuildingDoes(model) is { } shortcutProblem)
+                return Fail(shortcutProblem);
             Console.WriteLine($"weapons  {model.Weapons.Count}");
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
@@ -2121,6 +2124,93 @@ internal static class SelfTest
             }
         }
         return null;
+    }
+
+    /// A reconcile that leaves bundles alone leaves the game where rebuilding it would.
+    ///
+    /// A reconcile restores every modified bundle and applies everything enabled again, which is the
+    /// same work whether one mod changed or none did — so turning one mod off rebuilt seventeen
+    /// bundles to change one. It now leaves alone any bundle already holding exactly what this run
+    /// would put into it, judged on the mods and packs behind it and on the file not having moved
+    /// since.
+    ///
+    /// That is a shortcut past the tool's most load-bearing property, so what is checked here is not
+    /// that it is quicker but that it is invisible: settle the game, leave it alone, then rebuild it
+    /// from scratch, and every bundle has to come out with the hash it already had. If it does not,
+    /// the shortcut is wrong — or something in the writing is not deterministic, which would be
+    /// worth knowing about just as much.
+    ///
+    /// Run before this test installs anything, so what it settles is the author's own game and the
+    /// answer is about their mods rather than this run's.
+    private static string? LeavingBundlesAloneArrivesWhereRebuildingDoes(MainViewModel model)
+    {
+        var game = model.Game!;
+        var store = new ModStore(game);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var settling = new Core.Mods.ModApplier(game, store).Reconcile();
+        var settled = clock.ElapsedMilliseconds;
+
+        var before = LiveBundles(game, store);
+        if (before.Count == 0)
+        {
+            Console.WriteLine("shortcut nothing is installed, so there is nothing to leave alone");
+            return null;
+        }
+
+        clock.Restart();
+        var again = new Core.Mods.ModApplier(game, store).Reconcile();
+        var quickly = clock.ElapsedMilliseconds;
+
+        Console.WriteLine($"shortcut settling {before.Count} bundle(s) took {settled}ms, "
+            + $"asking again took {quickly}ms and left {again.Unchanged.Count} alone");
+
+        if (again.Unchanged.Count == 0)
+            return "a reconcile with nothing to do left no bundle alone";
+        if (again.Restored.Count > 0)
+            return $"a reconcile with nothing to do put back {string.Join(", ", again.Restored)}";
+        if (again.Applied.Count > 0 && settling.Applied.Count > 0)
+            return $"a reconcile with nothing to do applied {again.Applied.Count} operation(s)";
+
+        var between = LiveBundles(game, store);
+        if (Differ(before, between) is { } moved)
+            return $"a reconcile that did nothing changed {moved}";
+
+        clock.Restart();
+        var forced = new Core.Mods.ModApplier(game, store) { Rebuild = true }.Reconcile();
+        Console.WriteLine($"shortcut rebuilding the lot took {clock.ElapsedMilliseconds}ms, "
+            + $"{forced.Applied.Count} applied, {forced.Unchanged.Count} left alone");
+
+        if (forced.Unchanged.Count > 0)
+            return $"rebuilding everything still left {forced.Unchanged.Count} bundle(s) alone";
+
+        var after = LiveBundles(game, store);
+        if (Differ(before, after) is { } elsewhere)
+            return $"rebuilding arrived somewhere else than leaving things alone: {elsewhere}";
+
+        return null;
+    }
+
+    /// What every bundle this store has a backup of currently holds, by the copy the game loads.
+    private static Dictionary<string, string> LiveBundles(Core.Game.GameInstallation game, ModStore store)
+    {
+        var holds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (_, bundle, hash) in store.BackedUp())
+            if (game.Resolve(bundle, hash) is { } resolved && File.Exists(resolved.Path))
+                holds[bundle] = Core.Mods.BundleIntegrity.Md5(resolved.Path);
+
+        return holds;
+    }
+
+    private static string? Differ(Dictionary<string, string> before, Dictionary<string, string> after)
+    {
+        var moved = before
+            .Where(b => !after.TryGetValue(b.Key, out var now) || now != b.Value)
+            .Select(b => b.Key)
+            .ToList();
+
+        return moved.Count == 0 ? null : string.Join(", ", moved);
     }
 
     /// A bundle written back comes back the same bundle, at either setting.

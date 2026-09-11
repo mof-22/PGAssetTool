@@ -30,6 +30,14 @@ public sealed record InstalledMod
     public required Dictionary<string, string> TouchedBundles { get; init; }
 }
 
+/// What this tool last wrote into one bundle: the mods and packs it was built from, and the hash of
+/// the file that came out.
+///
+/// Held so a reconcile can tell a bundle that already holds the right thing from one that does not.
+/// Both halves are needed — the recipe says the answer would be the same, the hash says nobody has
+/// been at the file since — and neither is trusted on its own.
+public sealed record WrittenBundle(string Recipe, string Hash);
+
 /// The tool's own directory: original bundles it has replaced, and what is installed.
 ///
 /// Deliberately outside the game folder. Uninstalling the game removes that folder, and the
@@ -40,6 +48,7 @@ public sealed class ModStore
 {
     public const string DataDirectoryName = "PGAssetTool-data";
     private const string StateFileName = "installed.json";
+    private const string WrittenFileName = "written.json";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -112,6 +121,36 @@ public sealed class ModStore
         Directory.CreateDirectory(Root);
         if (File.Exists(StatePath)) File.Copy(StatePath, StatePath + ".previous", overwrite: true);
         File.WriteAllText(StatePath, JsonSerializer.Serialize(mods.ToList(), Json));
+    }
+
+    private string WrittenPath => Path.Combine(Root, WrittenFileName);
+
+    /// What the last reconcile left in each bundle.
+    ///
+    /// A convenience, never a source of truth: everything it says is checked against the file on
+    /// disk before it is acted on, and the whole file being missing or unreadable means nothing
+    /// worse than rebuilding every bundle once.
+    public Dictionary<string, WrittenBundle> ReadWritten()
+    {
+        try
+        {
+            return File.Exists(WrittenPath)
+                ? JsonSerializer.Deserialize<Dictionary<string, WrittenBundle>>(
+                      File.ReadAllText(WrittenPath), Json) is { } read
+                    ? new Dictionary<string, WrittenBundle>(read, StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, WrittenBundle>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, WrittenBundle>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception e) when (e is IOException or JsonException)
+        {
+            return new Dictionary<string, WrittenBundle>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public void WriteWritten(IReadOnlyDictionary<string, WrittenBundle> written)
+    {
+        Directory.CreateDirectory(Root);
+        File.WriteAllText(WrittenPath, JsonSerializer.Serialize(written, Json));
     }
 
     /// Backups are filed under the bundle's hash, so a backup taken before an update stays

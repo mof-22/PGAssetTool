@@ -16,7 +16,8 @@ public sealed record ReconcileResult(
     IReadOnlyList<AppliedOperation> Applied,
     IReadOnlyList<string> Failed,
     IReadOnlyList<string> PrunedBackups,
-    IReadOnlyList<SharedAsset> Shared);
+    IReadOnlyList<SharedAsset> Shared,
+    IReadOnlyList<string> Unchanged);
 
 /// Writes the enabled mods into the game's bundles.
 ///
@@ -31,6 +32,14 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
     /// Size or speed, when a bundle is written back. See BundlePacking.
     public BundlePacking Packing { get; init; }
+
+    /// Rebuild every bundle, whatever it already holds.
+    ///
+    /// A reconcile leaves alone any bundle that already holds exactly what this run would put into
+    /// it, which is what makes turning one mod off cost one bundle instead of seventeen. Reapplying
+    /// everything is the one request where that is the wrong answer: it is what somebody reaches for
+    /// when they believe the game is not in the state the tool thinks it is.
+    public bool Rebuild { get; init; }
 
     /// What a bundle being rebuilt is called until it is finished.
     private const string Unfinished = ".pgnew";
@@ -217,6 +226,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
     /// Rebuilds every affected bundle from its backup, then applies the enabled mods in order.
     /// Also runs after a game update, which is when backups for superseded bundle versions go stale.
+    ///
+    /// Bundles already holding exactly what this run would put into them are left where they are.
+    /// The restoring and reapplying is the same work whether one mod changed or none did, so a
+    /// toggle used to rebuild every bundle any mod anywhere had touched: seventeen of them, to
+    /// change one.
     public ReconcileResult Reconcile()
     {
         var hashes = game.ReadManifest().ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase);
@@ -225,10 +239,67 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         var applied = new List<AppliedOperation>();
         var failed = new List<string>();
         var shared = new List<SharedAsset>();
+        var unchanged = new List<string>();
+        var touchedByMod = new Dictionary<string, Dictionary<string, string>>();
 
-        // Restore from every backup there is, not from what the installed mods happen to name.
-        // Uninstalling drops the mod before its bundles are put back, so by the time the reconcile
-        // runs the list no longer mentions them and the modified bundle would be left in place.
+        var archives = new List<ZipArchive>();
+        var staging = Directory.CreateTempSubdirectory("pgassettool-apply");
+
+        try
+        {
+            var byBundle = Gather(mods, archives, touchedByMod, failed);
+            var recipes = byBundle.ToDictionary(b => b.Key, b => RecipeFor(b.Value),
+                StringComparer.OrdinalIgnoreCase);
+
+            // What the last run left in each bundle. Missing, unreadable or turned down by Rebuild
+            // all mean the same thing: assume nothing, and do the lot.
+            var written = Rebuild ? [] : store.ReadWritten();
+
+            var settled = PutBack(recipes, written, restored);
+
+            ApplyAll(byBundle, settled, recipes, written, hashes, touchedByMod,
+                applied, failed, shared, unchanged, staging.FullName);
+
+            store.WriteWritten(written);
+        }
+        finally
+        {
+            foreach (var archive in archives) archive.Dispose();
+            staging.Delete(recursive: true);
+        }
+
+        // Record which bundle version each mod actually wrote to, so a later update is detectable.
+        store.Write(mods.Select(m => touchedByMod.TryGetValue(m.Id, out var touched)
+            ? m with { TouchedBundles = touched }
+            : m));
+
+        var pruned = store.PruneStaleBackups(hashes);
+        return new ReconcileResult(restored, applied, failed, pruned, shared, unchanged);
+    }
+
+    /// Puts back every bundle that is not already what it should be, and answers which ones are.
+    ///
+    /// Every backup there is, not what the installed mods happen to name: uninstalling drops the mod
+    /// before its bundles are put back, so by the time this runs the list no longer mentions them
+    /// and the modified bundle would be left in place.
+    ///
+    /// The file is hashed once and the answer used twice. A bundle that already matches what the
+    /// game shipped needs nothing doing — a backup outlives the mod that caused it, so this used to
+    /// copy every bundle the tool had ever touched over an identical copy of itself. And a bundle
+    /// that matches what this tool last wrote into it, from the same mods in the same order, needs
+    /// nothing doing either: putting it back and building it again would arrive at the file already
+    /// there.
+    ///
+    /// Both halves of that have to hold. The recipe says the answer would be the same; the hash says
+    /// nobody has been at the file since. Anything else — a game update, an edit from outside, a
+    /// record from a run that did not finish — falls through to the slow, certain path.
+    private HashSet<string> PutBack(
+        IReadOnlyDictionary<string, string> recipes,
+        Dictionary<string, WrittenBundle> written,
+        List<string> restored)
+    {
+        var settled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var (cache, bundle, hash) in store.BackedUp())
         {
             var live = LivePathIn(cache, bundle, hash);
@@ -238,29 +309,64 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             // no use to anyone and the game's own folder is no place to leave one lying.
             Discard(live + Unfinished);
 
-            // Nothing to put back if it is already what the game shipped. A backup outlives the mod
-            // that caused it — nothing prunes one for being unneeded — so this loop kept copying
-            // every bundle the tool had ever touched over an identical copy of itself: seventy
-            // megabytes of writing, on every install and every toggle, to no effect. Hashing the
-            // one file is a fraction of the cost of rewriting it, and a write that never happens is
-            // a write that cannot collide with something still reading the file.
-            if (BundleIntegrity.IsPristine(live, hash)) continue;
+            var holds = BundleIntegrity.Md5(live);
+            if (string.Equals(holds, hash, StringComparison.OrdinalIgnoreCase))
+            {
+                written.Remove(bundle);
+                continue;
+            }
+
+            if (written.TryGetValue(bundle, out var before)
+                && recipes.TryGetValue(bundle, out var recipe)
+                && before.Recipe == recipe
+                && string.Equals(before.Hash, holds, StringComparison.OrdinalIgnoreCase)
+                // Only the copy the game would actually load. A bundle present in both caches has
+                // one record between them, and the copy nothing loads still has to be put back.
+                && game.Resolve(bundle, hash) is { } resolved
+                && resolved.Cache == cache)
+            {
+                settled.Add(bundle);
+                continue;
+            }
 
             if (store.RestoreIfBackedUp(cache, bundle, hash, live))
                 restored.Add($"{bundle} ({cache.ToString().ToLowerInvariant()})");
+
+            written.Remove(bundle);
         }
 
-        var touchedByMod = new Dictionary<string, Dictionary<string, string>>();
+        return settled;
+    }
 
-        ApplyAll(mods, hashes, touchedByMod, applied, failed, shared);
+    /// What one bundle is to be built from, as a line that changes whenever the answer would.
+    ///
+    /// The mods in the order they will be applied, each with the whole content of the pack it comes
+    /// out of. The pack rather than its manifest, because an author can rebuild a pack under the
+    /// same id with a different picture in it; all of them together are a megabyte, and hashing that
+    /// is nothing beside rebuilding a bundle that did not need it.
+    private static string RecipeFor(IReadOnlyList<Contribution> parts)
+    {
+        var recipe = new System.Text.StringBuilder();
 
-        // Record which bundle version each mod actually wrote to, so a later update is detectable.
-        store.Write(mods.Select(m => touchedByMod.TryGetValue(m.Id, out var touched)
-            ? m with { TouchedBundles = touched }
-            : m));
+        foreach (var part in parts)
+        {
+            recipe.Append(part.Mod.Id).Append(' ');
 
-        var pruned = store.PruneStaleBackups(hashes);
-        return new ReconcileResult(restored, applied, failed, pruned, shared);
+            try
+            {
+                using var pack = File.OpenRead(part.Mod.PackPath);
+                recipe.Append(Convert.ToHexStringLower(System.Security.Cryptography.MD5.HashData(pack)));
+            }
+            catch (IOException)
+            {
+                // Unreadable now is a reason to rebuild, not a reason to claim it has not changed.
+                recipe.Append(Guid.NewGuid().ToString("n"));
+            }
+
+            recipe.Append('\n');
+        }
+
+        return recipe.ToString();
     }
 
     /// Where a backup taken from a given cache belongs, which is not necessarily the copy the game
@@ -275,7 +381,65 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// One mod's operations for one bundle, with the pack they came out of held open.
     private sealed record Contribution(InstalledMod Mod, ZipArchive Archive, List<PackOperation> Operations);
 
-    /// Writes every enabled mod into the game, a bundle at a time.
+    /// Sorts every enabled mod's operations into the bundles they are for, in install order.
+    ///
+    /// Install order is what decides who wins where two mods write the same asset, and this is where
+    /// it is fixed: the contributions are gathered in it and applied in it within each bundle.
+    private Dictionary<string, List<Contribution>> Gather(
+        List<InstalledMod> mods, List<ZipArchive> archives,
+        Dictionary<string, Dictionary<string, string>> touchedByMod, List<string> failed)
+    {
+        var byBundle = new Dictionary<string, List<Contribution>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var mod in mods.Where(m => m.Enabled).OrderBy(m => m.InstalledAt))
+        {
+            touchedByMod[mod.Id] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!File.Exists(mod.PackPath))
+            {
+                failed.Add($"{mod.Id}: pack file is gone ({mod.PackPath})");
+                continue;
+            }
+
+            // Held open for the whole run rather than reopened at each bundle. A pack is a small
+            // file read whole into memory, and a mod that writes to four bundles would otherwise
+            // be read four times.
+            var archive = PackFile.Open(mod.PackPath);
+            archives.Add(archive);
+
+            foreach (var group in PackBuilder.ReadManifest(mod.PackPath).Operations
+                         .GroupBy(o => o.Target.Container, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!byBundle.TryGetValue(group.Key, out var parts))
+                    byBundle[group.Key] = parts = [];
+
+                parts.Add(new Contribution(mod, archive, group.ToList()));
+            }
+        }
+
+        return byBundle;
+    }
+
+    /// One bundle to rebuild: where it is, who writes to it, and where its pack contents are put.
+    private sealed record Job(
+        string Bundle, string Hash, string Live, long Size,
+        IReadOnlyList<Contribution> Parts, string Staging);
+
+    /// What came of rebuilding one, kept apart until every job is done so the reporting stays in
+    /// one order however the work was shared out.
+    private sealed record Outcome(
+        Job Job, string Holds, List<string> Wrote,
+        List<AppliedOperation> Applied, List<string> Failed, List<SharedAsset> Shared);
+
+    /// How many bundles are rebuilt at once.
+    ///
+    /// Each one holds its whole decompressed self in memory while it is worked on, and the largest
+    /// in this game is 216MB unpacked, so this is a limit on memory rather than on cores — four of
+    /// them at once is about a gigabyte at the worst moment, and the work is nearly all compression,
+    /// which is already spread across every core inside each bundle.
+    private const int AtOnce = 4;
+
+    /// Writes every enabled mod into the game, a bundle at a time, several bundles at once.
     ///
     /// A bundle at a time and not a mod at a time, which is how this used to work. Each pass over a
     /// bundle decompresses it, edits it and compresses it again, and going mod by mod meant one such
@@ -283,98 +447,115 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// was never in the edits: with thirty-one mods installed a toggle took thirty-eight seconds, of
     /// which thirty-seven were this, for forty operations in total.
     ///
-    /// Install order still decides who wins, because that is the order the contributions are
-    /// gathered in and applied in within each bundle. What each mod touched is still recorded per
-    /// mod, because that is what tells a later game update which mods need reapplying.
+    /// The bundles themselves have nothing to do with each other — different files, different
+    /// backups, different packs — so they are rebuilt side by side, largest first so the longest job
+    /// is not the one left at the end. What each mod touched is still recorded per mod, because that
+    /// is what tells a later game update which mods need reapplying.
     private void ApplyAll(
-        List<InstalledMod> mods, IReadOnlyDictionary<string, string> hashes,
+        Dictionary<string, List<Contribution>> byBundle, HashSet<string> settled,
+        IReadOnlyDictionary<string, string> recipes, Dictionary<string, WrittenBundle> written,
+        IReadOnlyDictionary<string, string> hashes,
         Dictionary<string, Dictionary<string, string>> touchedByMod,
-        List<AppliedOperation> applied, List<string> failed, List<SharedAsset> shared)
+        List<AppliedOperation> applied, List<string> failed, List<SharedAsset> shared,
+        List<string> unchanged, string staging)
     {
-        var archives = new List<ZipArchive>();
-        var byBundle = new Dictionary<string, List<Contribution>>(StringComparer.OrdinalIgnoreCase);
-        var staging = Directory.CreateTempSubdirectory("pgassettool-apply");
+        var jobs = new List<Job>();
 
-        try
+        foreach (var (bundle, parts) in byBundle)
         {
-            foreach (var mod in mods.Where(m => m.Enabled).OrderBy(m => m.InstalledAt))
+            if (!hashes.TryGetValue(bundle, out var hash))
             {
-                touchedByMod[mod.Id] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                if (!File.Exists(mod.PackPath))
-                {
-                    failed.Add($"{mod.Id}: pack file is gone ({mod.PackPath})");
-                    continue;
-                }
-
-                // Held open for the whole run rather than reopened at each bundle. A pack is a small
-                // file read whole into memory, and a mod that writes to four bundles would otherwise
-                // be read four times.
-                var archive = PackFile.Open(mod.PackPath);
-                archives.Add(archive);
-
-                foreach (var group in PackBuilder.ReadManifest(mod.PackPath).Operations
-                             .GroupBy(o => o.Target.Container, StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!byBundle.TryGetValue(group.Key, out var parts))
-                        byBundle[group.Key] = parts = [];
-
-                    parts.Add(new Contribution(mod, archive, group.ToList()));
-                }
+                foreach (var part in parts)
+                    failed.Add($"{part.Mod.Id}: no bundle named '{bundle}' in this installation");
+                continue;
             }
 
-            foreach (var (bundle, parts) in byBundle)
+            // Only the copy the game would actually load is worth writing to. Editing the shipped
+            // copy of a bundle the downloaded cache claims changes nothing and says nothing.
+            if (game.Resolve(bundle, hash) is not { } resolved)
             {
-                if (!hashes.TryGetValue(bundle, out var hash))
-                {
-                    foreach (var part in parts)
-                        failed.Add($"{part.Mod.Id}: no bundle named '{bundle}' in this installation");
-                    continue;
-                }
-
-                // Only the copy the game would actually load is worth writing to. Editing the shipped
-                // copy of a bundle the downloaded cache claims changes nothing and says nothing.
-                if (game.Resolve(bundle, hash) is not { } resolved)
-                {
-                    foreach (var part in parts)
-                        failed.Add($"{part.Mod.Id}: no copy of '{bundle}' is present in any cache");
-                    continue;
-                }
-                var (cache, live) = (resolved.Cache, resolved.Path);
-
-                // Backing up a bundle something else already edited would record that edit as the
-                // original, leaving no way back to the shipped file.
-                if (!store.HasBackup(cache, bundle, hash) && !BundleIntegrity.IsPristine(live, hash) && !Force)
-                {
-                    foreach (var part in parts)
-                        failed.Add($"{part.Mod.Id}: '{bundle}' in the {cache.ToString().ToLowerInvariant()} cache "
-                            + "has already been modified by something else and there is no backup of it. "
-                            + "Restore it, or pass --force to accept its contents as the original.");
-                    continue;
-                }
-                store.Backup(cache, bundle, hash, live);
-
-                // Written beside the file it replaces rather than into the temporary directory,
-                // because the last step is then a rename instead of a copy. The two are rarely on
-                // the same drive — the game on one, the system's temporary directory on another —
-                // and a rebuild of every bundle is a couple of hundred megabytes to carry across.
-                //
-                // Nothing but this ever looks at the half-written name, and a run that dies before
-                // the rename leaves it for the next one to clear out. The game is not running while
-                // any of this happens; that is checked before an apply starts.
-                var rewritten = live + Unfinished;
-                var wrote = EditBundle(live, rewritten, parts, staging.FullName, applied, failed, shared);
-                if (wrote.Count == 0) { Discard(rewritten); continue; }
-
-                File.Move(rewritten, live, overwrite: true);
-                foreach (var id in wrote) touchedByMod[id][bundle] = hash;
+                foreach (var part in parts)
+                    failed.Add($"{part.Mod.Id}: no copy of '{bundle}' is present in any cache");
+                continue;
             }
+            var (cache, live) = (resolved.Cache, resolved.Path);
+
+            // Already holding exactly this. The mods still have to be told they are in it, because
+            // that record is what a game update is noticed against.
+            if (settled.Contains(bundle))
+            {
+                unchanged.Add(bundle);
+                foreach (var part in parts) touchedByMod[part.Mod.Id][bundle] = hash;
+                continue;
+            }
+
+            // Backing up a bundle something else already edited would record that edit as the
+            // original, leaving no way back to the shipped file.
+            if (!store.HasBackup(cache, bundle, hash) && !BundleIntegrity.IsPristine(live, hash) && !Force)
+            {
+                foreach (var part in parts)
+                    failed.Add($"{part.Mod.Id}: '{bundle}' in the {cache.ToString().ToLowerInvariant()} cache "
+                        + "has already been modified by something else and there is no backup of it. "
+                        + "Restore it, or pass --force to accept its contents as the original.");
+                continue;
+            }
+            store.Backup(cache, bundle, hash, live);
+
+            jobs.Add(new Job(bundle, hash, live, new FileInfo(live).Length, parts,
+                Path.Combine(staging, jobs.Count.ToString())));
         }
-        finally
+
+        // Largest first, and each with its own corner of the staging directory: two mods can carry
+        // a file of the same name, and the name is all that reaches disk.
+        jobs = [.. jobs.OrderByDescending(j => j.Size)];
+
+        var outcomes = new Outcome[jobs.Count];
+        Parallel.For(0, jobs.Count, new ParallelOptions { MaxDegreeOfParallelism = AtOnce },
+            at => outcomes[at] = Rebuilt(jobs[at]));
+
+        foreach (var outcome in outcomes)
         {
-            foreach (var archive in archives) archive.Dispose();
-            staging.Delete(recursive: true);
+            applied.AddRange(outcome.Applied);
+            failed.AddRange(outcome.Failed);
+            shared.AddRange(outcome.Shared);
+
+            var bundle = outcome.Job.Bundle;
+            foreach (var id in outcome.Wrote) touchedByMod[id][bundle] = outcome.Job.Hash;
+
+            if (outcome.Wrote.Count > 0) written[bundle] = new WrittenBundle(recipes[bundle], outcome.Holds);
+            else written.Remove(bundle);
         }
+    }
+
+    /// One bundle, rebuilt and put in place, with nothing shared with whatever else is running.
+    private Outcome Rebuilt(Job job)
+    {
+        var applied = new List<AppliedOperation>();
+        var failed = new List<string>();
+        var shared = new List<SharedAsset>();
+
+        // Written beside the file it replaces rather than into the temporary directory, because the
+        // last step is then a rename instead of a copy. The two are rarely on the same drive — the
+        // game on one, the system's temporary directory on another — and a rebuild of every bundle
+        // is a couple of hundred megabytes to carry across.
+        //
+        // Nothing but this ever looks at the half-written name, and a run that dies before the
+        // rename leaves it for the next one to clear out. The game is not running while any of this
+        // happens; that is checked before an apply starts.
+        var rewritten = job.Live + Unfinished;
+        var wrote = EditBundle(job.Live, rewritten, job.Parts, job.Staging, applied, failed, shared);
+
+        if (wrote.Count == 0)
+        {
+            Discard(rewritten);
+            return new Outcome(job, "", wrote, applied, failed, shared);
+        }
+
+        File.Move(rewritten, job.Live, overwrite: true);
+
+        // Hashed as it goes in, so the next reconcile can tell this bundle apart from one somebody
+        // has edited since. The file was written a moment ago and is still in the system's cache.
+        return new Outcome(job, BundleIntegrity.Md5(job.Live), wrote, applied, failed, shared);
     }
 
     /// The texture as the game holds it, decoded, so a replacement that arrives without an alpha
@@ -418,6 +599,24 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         return true;
     }
 
+    /// Takes one file out of a pack and puts it where the importer can read it.
+    ///
+    /// Locked on the pack: a pack is opened once for the whole run and a mod that writes to four
+    /// bundles is read from while four bundles are being rebuilt at once, and a ZipArchive is not a
+    /// thing to share. The lock is held for the whole read, because the entry's stream is only good
+    /// while nothing else has moved the archive on.
+    private static bool Stage(ZipArchive archive, string entryName, string destination)
+    {
+        lock (archive)
+        {
+            if (archive.GetEntry(entryName) is not { } entry) return false;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination))!);
+            PackBuilder.WriteEntry(entry, destination, PackBuilder.MostPerFile, $"'{entryName}'");
+            return true;
+        }
+    }
+
     /// Applies every mod's share of one bundle, in one pass, and answers which of them wrote to it.
     private List<string> EditBundle(
         string live, string output, IReadOnlyList<Contribution> parts,
@@ -455,11 +654,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 var field = editor.Read(info);
                 if (field is null) { failed.Add($"{mod.Id}: {operation.Target} could not be read"); continue; }
 
-                var entry = archive.GetEntry(operation.Source);
-                if (entry is null) { failed.Add($"{mod.Id}: pack has no '{operation.Source}'"); continue; }
-
                 var source = Path.Combine(staging, Path.GetFileName(operation.Source));
-                PackBuilder.WriteEntry(entry, source, PackBuilder.MostPerFile, $"'{operation.Source}'");
+                if (!Stage(archive, operation.Source, source))
+                { failed.Add($"{mod.Id}: pack has no '{operation.Source}'"); continue; }
 
                 try
                 {
@@ -546,14 +743,13 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 failed.Add($"{mod.Id}: {operation.Target} names no class this build knows");
                 continue;
             }
-            if (archive.GetEntry(operation.Source) is not { } entry)
+            var source = Path.Combine(staging, Path.GetFileName(operation.Source));
+            if (!Stage(archive, operation.Source, source))
             {
                 failed.Add($"{mod.Id}: pack has no '{operation.Source}'");
                 continue;
             }
 
-            var source = Path.Combine(staging, Path.GetFileName(operation.Source));
-            PackBuilder.WriteEntry(entry, source, PackBuilder.MostPerFile, $"'{operation.Source}'");
             var bytes = File.ReadAllBytes(source);
 
             if (!AssetAddition.HasType(editor.File, cls))

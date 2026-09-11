@@ -292,14 +292,34 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             + "The folder goes with everything in it, edits included, and this is not something the "
             + "tool can undo. Packs already built from it are files of their own and stay where "
             + "they are, installed or not.",
-            () => { Discard(chosen); return Task.CompletedTask; });
+            () => Discard(chosen));
     }
 
-    private void Discard(IReadOnlyList<WorkspaceItem> chosen)
+    private async Task Discard(IReadOnlyList<WorkspaceItem> chosen)
     {
         // The watcher holds a handle on the directory it watches, and Windows will not delete a
         // directory out from under one. Rescan puts a watcher back on whatever is selected after.
         Watch(null);
+
+        // And so does the comparison, which reads the selected file on a thread of its own. Nothing
+        // selected, then wait for whatever was already reading to finish: choosing a workspace
+        // starts a read of a file inside it, and deleting it in the next moment found that file
+        // still open. It took a faster install to make that moment short enough to catch.
+        SelectedFile = null;
+        await _reading.WaitAsync();
+        try
+        {
+            Erase(chosen);
+        }
+        finally
+        {
+            _reading.Release();
+        }
+    }
+
+    /// The folders themselves, once nothing of this pane is holding them open.
+    private void Erase(IReadOnlyList<WorkspaceItem> chosen)
+    {
 
         var (gone, failed) = (0, new List<string>());
         foreach (var workspace in chosen)
