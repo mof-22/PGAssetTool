@@ -24,6 +24,11 @@ public sealed class MeshView : Control
     public static readonly StyledProperty<IReadOnlyList<PreviewImage?>?> TexturesProperty =
         AvaloniaProperty.Register<MeshView, IReadOnlyList<PreviewImage?>?>(nameof(Textures));
 
+    /// The model to size and centre the view by, when an animation is moving the one being drawn.
+    /// Null means the view is framed by whatever is on screen, which is the ordinary case.
+    public static readonly StyledProperty<UnityMesh?> FramingProperty =
+        AvaloniaProperty.Register<MeshView, UnityMesh?>(nameof(Framing));
+
     /// Where the model is being looked at from.
     ///
     /// A property rather than a field, and bound two ways, so the view outlives the control: the
@@ -46,6 +51,12 @@ public sealed class MeshView : Control
         set => SetValue(TexturesProperty, value);
     }
 
+    public UnityMesh? Framing
+    {
+        get => GetValue(FramingProperty);
+        set => SetValue(FramingProperty, value);
+    }
+
     public Camera Camera
     {
         get => GetValue(CameraProperty);
@@ -63,7 +74,7 @@ public sealed class MeshView : Control
         // another or the same one has merely been read again is a question the control cannot
         // answer, and answering it wrongly threw away an angle somebody had just chosen; whoever
         // owns the camera decides.
-        AffectsRender<MeshView>(MeshProperty, TexturesProperty, CameraProperty);
+        AffectsRender<MeshView>(MeshProperty, TexturesProperty, CameraProperty, FramingProperty);
     }
 
     /// Set while the middle button is down, which pans instead of turning.
@@ -149,7 +160,7 @@ public sealed class MeshView : Control
             _target.Resize(width, height);
         }
 
-        MeshRenderer.Render(mesh, Camera, _target, Textures);
+        MeshRenderer.Render(mesh, Camera, _target, Textures, Framing);
 
         using (var locked = _bitmap.Lock())
             System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);

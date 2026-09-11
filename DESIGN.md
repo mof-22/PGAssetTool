@@ -116,6 +116,29 @@ texture, and nothing else would say so.
 A texture no model here draws is written whole: a shop icon, a gloss or mask map bound beside the
 main slot, a particle sheet. Clearing those would mean guessing which mesh reads them.
 
+### A model plays its own animations
+
+The game's weapons are one skinned mesh on three or four bones — the slide, the magazine, the hands —
+and their clips are legacy curves bound to those bones by the path from whatever carries the
+Animation component. So a reload can be shown without a scene and without a second mesh: `Motion`
+reads the curves, `Skeleton` walks the hierarchy from the renderer's `m_Bones`, and the vertices
+follow. Twelve of twelve weapons sampled animate, along with half the capes, most gliders and half
+the pets; hats, masks and boots are rigid and have no bones at all, and avatars are on bones whose
+clips are not in their own prefab.
+
+Three things about it that look arbitrary:
+
+- **The space comes from the model at rest, not from the renderer's transform.** A bind pose is
+  written against whatever the model was parented to when it was rigged, and the prefab no longer
+  says what that was — the beretta's bind poses put its bones at the origin where its prefab hangs
+  them a metre and a half away. At rest every bone's skinning matrix is the same one, so its inverse
+  is by construction the transform that leaves the mesh where it was read.
+- **A missing weight channel means one bone at full weight, not no bones.** These weapons are rigged
+  one bone per vertex, so Unity writes no weights at all; reading that as zero left every vertex
+  where it started, which looks exactly like an animation that does nothing.
+- **The view is framed by the model at rest.** A pistol with its magazine out is a taller model than
+  the same pistol at rest, and a frame sized to the moment slides about for the length of the clip.
+
 ### A workspace records what each model is drawn with
 
 `PackOperation.Wears` names, for each `.glb`, the pictures beside it that go on it. A workspace holds

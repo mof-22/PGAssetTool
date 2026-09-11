@@ -46,6 +46,30 @@
       <DockPanel>
       
         <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+          <!-- What the model can be made to do. Only the clips that move this mesh are offered: a
+               weapon's prefab carries animations for the muzzle flash and the shell casing too, and
+               one of those plays as a model sitting perfectly still. -->
+          <Grid ColumnDefinitions="*,auto" IsVisible="{Binding HasClips}" Margin="0,0,0,4">
+            <ComboBox Grid.Column="0" ItemsSource="{Binding Clips}" SelectedItem="{Binding Clip}"
+                      HorizontalAlignment="Stretch" PlaceholderText="Play an animation">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:MotionChoice">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding Name}" />
+                    <TextBlock Text="{Binding Detail}" Classes="dim mono" />
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <ToggleButton Grid.Column="1" IsChecked="{Binding Playing}" Margin="4,0,0,0"
+                          Padding="10,3" Content="▶" ToolTip.Tip="Play or hold" />
+          </Grid>
+
+          <!-- Where in the clip it is, and a way to stop somewhere. An animation worth looking at
+               closely is worth looking at one frame at a time. -->
+          <Slider Value="{Binding Time, Mode=TwoWay}" Minimum="0" Maximum="{Binding Length}"
+                  IsVisible="{Binding HasClips}" Margin="0,0,0,4" />
+
           <!-- Applies one texture to the whole model: the question it answers is what this mesh
                looks like wearing another skin, and a skin is not per-submesh. -->
           <ComboBox ItemsSource="{Binding TextureChoices}" SelectedItem="{Binding ChosenTexture}"
@@ -118,6 +142,7 @@
                    RenderOptions.BitmapInterpolationMode="None" />
       
             <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
+                          Framing="{Binding Rest}"
                           Camera="{Binding Camera, Mode=TwoWay}"
                           IsVisible="{Binding HasMesh}" />
 

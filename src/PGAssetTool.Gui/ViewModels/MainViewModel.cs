@@ -307,7 +307,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         Editor.Dispose();
         _bundles?.Dispose();
-        (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
+        (_bundles, _catalogs, _resolver, _tree, _clips) = (null, null, null, null, null);
         Detail = null;
         Preview.Clear();
         Busy = true;
@@ -371,6 +371,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 var tree = await Task.Run(() => _resolver.Resolve(value.Record));
                 Preview.Clear();
                 _tree = tree;
+                _clips = null;
 
                 // What was learned about the last weapon's skins goes with the tree it was learned
                 // into: every row carries its own, and the rows are about to be thrown away.
@@ -496,7 +497,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void CloseReader()
     {
         _bundles?.Dispose();
-        (_bundles, _catalogs, _resolver, _tree) = (null, null, null, null);
+        (_bundles, _catalogs, _resolver, _tree, _clips) = (null, null, null, null, null);
         Detail = null;
         Preview.Clear();
     }
@@ -1118,6 +1119,43 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private static IEnumerable<TreeNode> AllNodes(IEnumerable<TreeNode> nodes)
         => nodes.SelectMany(n => new[] { n }.Concat(AllNodes(n.Children)));
 
+    /// The animations this item carries, read once per item and kept.
+    ///
+    /// They belong to the whole thing rather than to any one of its meshes — the prefab holds them
+    /// and the clips name what they move by path — so they are read when the item is and handed to
+    /// whichever model turns out to be moved by them.
+    private IReadOnlyList<Motion> Clips()
+    {
+        if (_clips is not null) return _clips;
+        if (_tree is not { } tree || _bundles is null) return [];
+
+        var found = new List<Motion>();
+
+        foreach (var node in tree.PrefabAssets.Where(a => a.Class == AssetClassID.AnimationClip))
+        {
+            var bundle = node.Bundle.Length > 0 ? node.Bundle : tree.PrefabBundle;
+            if (bundle is null) continue;
+
+            try
+            {
+                var file = _bundles.Open(bundle);
+                var info = file.file.GetAssetInfo(node.PathId);
+                var field = info is null ? null : _bundles.Context.Deserialize(file, info);
+
+                if (field is not null && Motion.Read(field) is { } motion) found.Add(motion);
+            }
+            catch (Exception e) when (e is IOException or FileNotFoundException)
+            {
+                // A clip that will not read costs its own row and nothing else.
+            }
+        }
+
+        return _clips = found;
+    }
+
+    /// Cleared with the tree, because they are the tree's.
+    private IReadOnlyList<Motion>? _clips;
+
     private async void ShowPreview(TreeNode? node)
     {
         // A skin row stands for a look rather than for an asset, so selecting one shows the weapon
@@ -1158,6 +1196,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     };
                 });
 
+                // What this model can be made to do, read on the same thread and behind the same
+                // lock. Only for a model, and only for one something in the prefab actually skins:
+                // the bones are the renderer's and the clips are the prefab's, and a mesh with
+                // neither is shown standing still as it always was.
+                var (skeleton, motions) = loaded is UnityMesh
+                    ? await Task.Run(() => (
+                        Skeleton.For(_bundles!, node.Bundle, node.PathId),
+                        Clips()))
+                    : (null, []);
+
                 switch (loaded)
                 {
                     case PreviewImage picture:
@@ -1173,7 +1221,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                             // them is not the angle the other was left at.
                             subject: node.Within is { } within
                                 ? $"{within.Path}/{node.Bundle}:{node.PathId}"
-                                : $"{node.Bundle}:{node.PathId}");
+                                : $"{node.Bundle}:{node.PathId}",
+                            skeleton: skeleton, motions: motions);
 
                         // After the model, which puts back whatever this mesh was last wearing.
                         // Taken whether or not it was found, so it cannot arrive on the next one.

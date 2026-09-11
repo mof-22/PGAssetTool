@@ -54,6 +54,115 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// away at the moment it had proved useful.
     [ObservableProperty] private Camera _camera = new();
 
+    /// The model as it was read, before anything was played on it.
+    ///
+    /// The frame is taken from this rather than from what is on screen: a pistol whose magazine has
+    /// dropped out of it is a taller model than the same pistol at rest, and a view sized to the
+    /// moment slides about while the clip runs. It is also what posing starts from each frame,
+    /// because a pose is written against the model at rest and not against the last one.
+    [ObservableProperty] private UnityMesh? _rest;
+
+    /// The clips that move the model on show, and which of them is playing.
+    ///
+    /// A weapon's prefab carries clips for the whole of it — the muzzle flash, the shell casing —
+    /// and only some of them touch the mesh in front of you. The ones that do not would play as a
+    /// model sitting still, which reads as the feature being broken, so they are left out.
+    public ObservableCollection<MotionChoice> Clips { get; } = [];
+
+    [ObservableProperty] private MotionChoice? _clip;
+
+    /// Whether the model has anything to play, so the controls stay out of the way when it has not.
+    public bool HasClips => Clips.Count > 0;
+
+    [ObservableProperty] private bool _playing;
+
+    /// How far through the clip, in seconds. Bound to the scrub bar, and moved by the timer.
+    [ObservableProperty] private double _time;
+
+    public double Length => Clip?.Motion.Length ?? 0;
+
+    private Skeleton? _skeleton;
+    private Avalonia.Threading.DispatcherTimer? _ticking;
+
+    /// What a model can be made to do, if anything.
+    private void Dress(Skeleton? skeleton, IReadOnlyList<Motion>? motions)
+    {
+        Stop();
+        _skeleton = skeleton;
+        Clips.Clear();
+
+        if (skeleton is not null)
+            foreach (var motion in motions ?? [])
+                if (skeleton.Moves(motion))
+                    Clips.Add(new MotionChoice(motion));
+
+        Clip = null;
+        Time = 0;
+        OnPropertyChanged(nameof(HasClips));
+    }
+
+    partial void OnClipChanged(MotionChoice? value)
+    {
+        Time = 0;
+        OnPropertyChanged(nameof(Length));
+        Pose();
+
+        // Choosing one is asking to see it. Stopping is the button beside it.
+        if (value is not null) Playing = true;
+        else Playing = false;
+    }
+
+    partial void OnTimeChanged(double value) => Pose();
+
+    partial void OnPlayingChanged(bool value)
+    {
+        if (value && Clip is not null)
+        {
+            _ticking ??= new Avalonia.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1 / 30.0),
+            };
+
+            _ticking.Tick -= Tick;
+            _ticking.Tick += Tick;
+            _ticking.Start();
+            return;
+        }
+
+        _ticking?.Stop();
+    }
+
+    private void Tick(object? sender, EventArgs e) => Advance(1 / 30.0);
+
+    /// Moves the clip on by so much, and the model with it.
+    ///
+    /// Apart from the timer that calls it, because a clock is a poor thing to test through: the one
+    /// on screen is the window's own and does not tick in a test that has no window. Everything the
+    /// tick does is here, where it can be driven a frame at a time.
+    public void Advance(double seconds)
+    {
+        if (Clip is not { } clip || Rest is null) { Stop(); return; }
+
+        // Round and round: a reload is under two seconds and watching it once tells you less than
+        // watching it three times. The scrub bar follows, so where it is is always where the model
+        // is.
+        var length = Math.Max(clip.Motion.Length, 0.001);
+        Time = (Time + seconds) % length;
+    }
+
+    /// Stops without forgetting where it had got to.
+    public void Stop() => Playing = false;
+
+    /// Puts the model where the clip has it now, or back as it was read when nothing is playing.
+    private void Pose()
+    {
+        if (Rest is not { } rest) return;
+
+        Mesh = _skeleton is null || Clip is null
+            ? rest
+            : _skeleton.Pose(rest, Clip.Motion, (float)Time);
+    }
+
     /// What is on show, as far as "is this still the same thing" goes. Null for anything that has
     /// no lasting identity, which starts the view over the way a different asset does.
     private string? _subject;
@@ -116,10 +225,12 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     public void Clear(string? why = null)
     {
+        Dress(null, null);
         _picture = null;
         Image?.Dispose();
         Image = null;
         Mesh = null;
+        Rest = null;
         Sound = null;
         Caption = "";
         Nothing = why ?? "Select a texture, a mesh or a sound.";
@@ -134,6 +245,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Image?.Dispose();
         Image = null;
         Mesh = null;
+        Rest = null;
+        Dress(null, null);
         Sound = sound;
         Caption = $"{caption}   {sound.Describe}";
         Nothing = null;
@@ -168,8 +281,9 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// nothing about a rocket launcher.
     /// </param>
     public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures,
-        string? subject = null)
+        string? subject = null, Skeleton? skeleton = null, IReadOnlyList<Motion>? motions = null)
     {
+        Dress(skeleton, motions);
         _subject = subject;
         var seen = subject is not null && _views.TryGetValue(subject, out var before) ? before : null;
 
@@ -178,6 +292,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         _automatic = textures;
         Image?.Dispose();
         Image = null;
+        Rest = mesh;
         Mesh = mesh;
         MeshTextures = textures;
         ChosenTexture = seen?.Texture;
@@ -272,6 +387,14 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 public sealed record ViewPreset(string Name, float Yaw, float Pitch)
 {
     public override string ToString() => Name;
+}
+
+/// One of a model's animations, as a row in the picker.
+public sealed record MotionChoice(Motion Motion)
+{
+    public string Name => Motion.Name;
+    public string Detail => $"{Motion.Length:0.00}s";
+    public override string ToString() => Motion.Name;
 }
 
 public sealed record TextureChoice(string Name, string Bundle, long PathId)

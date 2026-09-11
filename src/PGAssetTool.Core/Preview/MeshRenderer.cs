@@ -129,8 +129,17 @@ public static class MeshRenderer
     /// <c>i</c>. A null entry, or a mesh with more submeshes than textures, falls back to plain
     /// shading rather than to whatever texture happened to be first.
     /// </param>
+    /// <param name="framing">
+    /// The model to size and centre the view by, when that is not the one being drawn.
+    ///
+    /// An animation moves vertices, and a frame worked out from where they are now moves with them:
+    /// a pistol whose magazine drops out of it is drawn smaller and lower for as long as the
+    /// magazine is out, so what an author sees is the whole gun sliding about rather than the part
+    /// that is actually moving. Framing by the model at rest holds the camera still.
+    /// </param>
     public static void Render(
-        UnityMesh mesh, Camera camera, RenderTarget target, IReadOnlyList<PreviewImage?>? textures = null)
+        UnityMesh mesh, Camera camera, RenderTarget target, IReadOnlyList<PreviewImage?>? textures = null,
+        UnityMesh? framing = null)
     {
         if (target.IsEmpty) return;
 
@@ -142,7 +151,8 @@ public static class MeshRenderer
 
         var normals = mesh.Get(VertexAttribute.Normal);
         var uvs = mesh.Get(VertexAttribute.TexCoord0);
-        var (centre, size, radius) = Bounds(mesh, positions);
+        var held = framing ?? mesh;
+        var (centre, size, radius) = Bounds(held, held.Get(VertexAttribute.Position) ?? positions);
         var upright = Upright.For(size);
         if (radius <= 0) radius = 1;
 

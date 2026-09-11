@@ -134,6 +134,8 @@ internal static class SelfTest
 
             if (EveryWeaponHasAModelToShow(model) is { } modelProblem) return Fail(modelProblem);
 
+            if (TheModelPlaysItsAnimations(model) is { } movingProblem) return Fail(movingProblem);
+
             model.Search = "beretta";
             Console.WriteLine($"search   'beretta' -> {model.Weapons.Count}");
 
@@ -2165,6 +2167,105 @@ internal static class SelfTest
             }
         }
         return null;
+    }
+
+    /// A weapon's model plays its own animations, and comes back where it started.
+    ///
+    /// The game's weapons are one skinned mesh on three or four bones — the slide, the magazine, the
+    /// hands — and their clips are legacy curves bound to those bones by name. So a reload can be
+    /// shown without a scene or a second mesh: evaluate the curves, walk the hierarchy, and the
+    /// vertices follow.
+    ///
+    /// Three things have to hold, and each of them was wrong at some point on the way here. The
+    /// model at rest has to be the model as it was read, which is what says the bind poses are being
+    /// composed the right way round — it was out by a metre and a half until the space was taken
+    /// from the model itself rather than from the renderer's transform. Something has to actually
+    /// move, which it did not while the one-bone-per-vertex rigging these weapons use was read as
+    /// having no weights at all. And it has to come back: a clip that ends somewhere else has been
+    /// evaluated past its end.
+    private static string? TheModelPlaysItsAnimations(MainViewModel model)
+    {
+        if (!Select(model, 16)) return "#16 never resolved, and it is the one with the clips";
+        if (model.Detail?.SelectedNode is not { } row) return "#16 selected nothing to show";
+        if (!Arrived(model, row)) return $"'{row.Label}' never appeared";
+
+        var preview = model.Preview;
+        if (preview.Mesh is null) return $"'{row.Label}' is not a model";
+
+        Console.WriteLine($"anim     '{row.Label}': {preview.Clips.Count} clip(s) move it"
+            + (preview.Clips.Count == 0 ? "" : $" — {string.Join(", ", preview.Clips.Select(c => c.Name))}"));
+
+        if (preview.Clips.Count == 0) return $"'{row.Label}' is skinned and nothing plays on it";
+
+        var rest = preview.Rest ?? preview.Mesh;
+        var reload = preview.Clips.FirstOrDefault(c => c.Name.Contains("Reload", StringComparison.OrdinalIgnoreCase))
+            ?? preview.Clips[0];
+
+        preview.Clip = reload;
+        if (!preview.Playing) return $"choosing '{reload.Name}' did not start it";
+
+        // A frame at a time rather than through the timer: the clock on screen is the window's own,
+        // and a test with no window has nothing driving it. What the tick does is all here.
+        var wrapped = 0;
+        for (var frame = 0; frame < 90; frame++)
+        {
+            var was = preview.Time;
+            preview.Advance(1 / 30.0);
+            if (preview.Time < was) wrapped++;
+        }
+
+        Console.WriteLine($"anim     three seconds of it came round {wrapped} time(s)"
+            + $", stopping at {preview.Time:0.###}s");
+
+        if (wrapped == 0) return $"'{reload.Name}' is {reload.Motion.Length:0.00}s and three seconds of it never came round";
+
+        preview.Stop();
+        if (preview.Playing) return "stopping did not stop it";
+
+        // At the beginning, the model is the model.
+        preview.Time = 0;
+        if (Apart(rest, preview.Mesh) is { } atRest && atRest > 0.0001f)
+            return $"at rest '{reload.Name}' has already moved the model by {atRest:0.###}";
+
+        var furthest = 0f;
+        for (var step = 1; step <= 12; step++)
+        {
+            preview.Time = reload.Motion.Length * step / 12.0;
+            if (Apart(rest, preview.Mesh) is { } moved) furthest = Math.Max(furthest, moved);
+        }
+
+        Console.WriteLine($"anim     '{reload.Name}' {reload.Motion.Length:0.00}s: "
+            + $"furthest a vertex moves is {furthest:0.###}");
+
+        if (furthest < 0.001f) return $"'{reload.Name}' moved nothing at all";
+
+        preview.Time = reload.Motion.Length;
+        if (Apart(rest, preview.Mesh) is { } atEnd && atEnd > furthest)
+            return $"'{reload.Name}' ends further from rest ({atEnd:0.###}) than it ever gets ({furthest:0.###})";
+
+        preview.Clip = null;
+        return Apart(rest, preview.Mesh) is { } after && after > 0.0001f
+            ? "putting the clip down left the model where it had got to"
+            : null;
+    }
+
+    /// How far the furthest vertex of one model is from the same vertex of another.
+    private static float? Apart(Core.Export.Meshes.UnityMesh? a, Core.Export.Meshes.UnityMesh? b)
+    {
+        if (a?.Get(Core.Export.Meshes.VertexAttribute.Position) is not { } one) return null;
+        if (b?.Get(Core.Export.Meshes.VertexAttribute.Position) is not { } other) return null;
+        if (one.Length != other.Length) return null;
+
+        var furthest = 0f;
+        for (var at = 0; at + 2 < one.Length; at += 3)
+        {
+            var dx = one[at] - other[at];
+            var dy = one[at + 1] - other[at + 1];
+            var dz = one[at + 2] - other[at + 2];
+            furthest = MathF.Max(furthest, MathF.Sqrt(dx * dx + dy * dy + dz * dz));
+        }
+
+        return furthest;
     }
 
     /// Every kind the game has opens in the browser, and one that is not a weapon goes all the way
