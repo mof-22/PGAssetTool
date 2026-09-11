@@ -253,19 +253,25 @@ public sealed class WeaponExporter(BundleSet bundles)
                 if (dressed.BySubMesh[slot] is { } node)
                     Add(node.Bundle, node.PathId, (dressed.MeshPathId, slot));
 
-        // A skin repaints the weapon's own geometry, and which of its materials lands in which slot
-        // is the renderer's business rather than the skin's — so a skin's texture is held against
-        // everything this weapon draws. Wider than it needs to be, and wide is the safe direction.
-        var everything = tree.MeshTextures
-            .SelectMany(d => Enumerable.Range(0, d.BySubMesh.Count).Select(slot => (d.MeshPathId, slot)))
-            .ToList();
+        // A skin repaints the gun, so its paint is held against the gun's own mesh and nothing else.
+        // Which of a skin's materials lands in which slot is the renderer's business rather than the
+        // skin's, so every submesh of that one mesh counts.
+        //
+        // Held against every mesh at first, on the grounds that wide was the safe direction. It is
+        // not: a skin's material often paints with the weapon's own texture — 32 of the first 700
+        // weapons, #416 among them — and holding that texture against the arms as well kept the
+        // arms' UV island inside the gun's atlas, a region the gun never reads and which an author
+        // recognises on sight because it is arm-shaped.
+        var gun = tree.MeshTextures.FirstOrDefault(m => m.MeshPathId == tree.MainMesh?.PathId);
 
-        foreach (var material in tree.Skins.SelectMany(s => s.Materials))
-            if (material.Main is { } main)
-            {
-                var (bundle, pathId) = material.Locate(main);
-                foreach (var use in everything) Add(bundle, pathId, use);
-            }
+        if (gun is not null)
+            foreach (var material in tree.Skins.SelectMany(s => s.Materials))
+                if (material.Main is { } main)
+                {
+                    var (bundle, pathId) = material.Locate(main);
+                    for (var slot = 0; slot < gun.BySubMesh.Count; slot++)
+                        Add(bundle, pathId, (gun.MeshPathId, slot));
+                }
 
         var read = new Dictionary<long, UnityMesh?>();
 
