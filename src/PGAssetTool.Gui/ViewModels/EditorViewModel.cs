@@ -457,9 +457,16 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 // disposed reader, or kept the bundle open across a write to it.
                 if (_bundles() is not { } bundles) { Edited.Clear("The game is not open."); return; }
 
+                // Read here rather than on the thread below: the list belongs to the window and is
+                // rebuilt on it whenever the workspace is read again.
+                var named = Files.Select(f => f.Target.Container).Where(c => c.Length > 0).Distinct().ToList();
+
                 var loaded = await Task.Run(() => (
                     Game: FromGame(bundles, file),
-                    Disk: AssetPreview.FromFile(file.FullPath)));
+                    Disk: AssetPreview.FromFile(file.FullPath),
+                    Wears: Wears(bundles, file, named)));
+
+                _wearing = loaded.Wears;
 
                 // The link is off while both halves are being filled, and put back afterwards.
                 //
@@ -492,6 +499,47 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             Edited.Clear($"{ex.Message}  (while comparing against the game)");
         }
     }
+
+    /// Which of the game's textures the mesh in this file is drawn with, in submesh order.
+    ///
+    /// Asked of the game rather than of the workspace, because the workspace holds no renderers and
+    /// no materials to read: a `.glb` and a folder of `.png` say nothing about which goes on which.
+    /// The answer comes back as the game's own path ids, which is exactly what the workspace files
+    /// record themselves against — so it can be turned into "this picture, that one, not the other
+    /// nine" without either end knowing about the other.
+    /// <param name="named">
+    /// Every bundle this workspace mentions, because a weapon's prefab and its geometry do not
+    /// always live in the same one — and the workspace was extracted from the prefab, so whichever
+    /// bundle holds the renderer is named by something in it.
+    /// </param>
+    private IReadOnlyList<long> Wears(BundleSet bundles, WorkspaceFile file, IReadOnlyList<string> named)
+    {
+        if (file.Target.Class != nameof(AssetClassID.Mesh) || file.Target.PathId is not { } mesh) return [];
+
+        try
+        {
+            // Kept per reader: the first question costs an index of which bundle holds which file,
+            // and asking it again for every model opened would pay for that index every time.
+            if (!ReferenceEquals(_dressed.Reader, bundles))
+                _dressed = (bundles, new Dressing(bundles));
+
+            return _dressed.Dressing!.For(file.Target.Container, mesh, named)
+                .Where(t => t is not null)
+                .Select(t => t!.PathId)
+                .Distinct()
+                .ToList();
+        }
+        catch (Exception)
+        {
+            // Nothing here is worth failing a preview over; the list simply comes back unmarked.
+            return [];
+        }
+    }
+
+    private (BundleSet? Reader, Dressing? Dressing) _dressed;
+
+    /// What the model now being shown is drawn with, for the list of pictures to be marked against.
+    private IReadOnlyList<long> _wearing = [];
 
     private static object? FromGame(BundleSet bundles, WorkspaceFile file)
     {
@@ -557,15 +605,40 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         preview.TextureChoices.Clear();
         if (SelectedWorkspace is not { } workspace) return;
 
+        // Which of the workspace's pictures replace the textures this model is actually drawn with.
+        // The workspace records what each file stands for in the game, and the dressing came back
+        // in those same terms, so the two meet here without either having to know the other's shape.
+        var worn = Files
+            .Where(f => f.Target.PathId is { } id && _wearing.Contains(id))
+            .Select(f => f.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         preview.TextureChoices.Add(new TextureChoice("(none)", "", 0));
-        foreach (var picture in Workspace.Pictures(workspace.Directory))
-            preview.TextureChoices.Add(new TextureChoice(picture, workspace.Directory, -1));
 
-        if (wearing is null) return;
-        if (preview.TextureChoices.FirstOrDefault(c => c.Name == wearing) is not { } again) return;
+        // Lit first and listed first, the same way the browse pane does it: a workspace holds a
+        // dozen pictures and two of them are the ones this mesh wears.
+        foreach (var picture in Workspace.Pictures(workspace.Directory)
+                     .OrderByDescending(worn.Contains))
+            preview.TextureChoices.Add(new TextureChoice(picture, workspace.Directory, -1)
+            {
+                Worn = worn.Contains(picture),
+            });
 
-        preview.ChosenTexture = again;
-        WearFromDisk(preview, again);
+        // Put on by itself, unless something was already chosen. A model drawn grey says nothing
+        // about the mod, and choosing the right picture out of the list was a step everybody took
+        // every time — the tool knows the answer, so it takes the step.
+        // What was on before wins only while this model wears it too. Otherwise the model's own
+        // paint goes on — moving from one mesh to another is exactly when carrying the last choice
+        // across stops being helpful — and a deliberate choice this model knows nothing about is
+        // kept rather than thrown away.
+        var choice = preview.TextureChoices.FirstOrDefault(c => c.Name == wearing && c.Worn)
+            ?? preview.TextureChoices.FirstOrDefault(c => c.Worn)
+            ?? preview.TextureChoices.FirstOrDefault(c => c.Name == wearing);
+
+        if (choice is null) return;
+
+        preview.ChosenTexture = choice;
+        WearFromDisk(preview, choice);
     }
 
     /// Reads one of those images off disk and puts it on the model.

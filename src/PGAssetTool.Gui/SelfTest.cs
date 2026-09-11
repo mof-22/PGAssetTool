@@ -881,11 +881,13 @@ internal static class SelfTest
             model.ProtectPacks = true;
             Core.Pack.Workspace.Save(written, Core.Pack.Workspace.Read(written) with { Protect = null });
 
+            if (TheEditorPutsTheModelInItsPaint(model) is { } paintProblem) return Fail(paintProblem);
+
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
 
             model.Editor.SelectedFile = texture;
-            WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+            Shows(model, texture);
             Console.WriteLine($"editor   original: {model.Editor.Original.Caption}");
             Console.WriteLine($"editor   edited:   {model.Editor.Edited.Caption}");
 
@@ -1678,7 +1680,7 @@ internal static class SelfTest
             return "no model in the extracted workspace to look at";
 
         model.Editor.SelectedFile = model3d;
-        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+        Shows(model, model3d);
         if (model.Editor.Edited.Mesh is null) return "the file side of the comparison shows no model";
 
         if (model.Editor.Edited.TextureChoices.FirstOrDefault(c => c.PathId == -1) is not { } wearing)
@@ -1695,7 +1697,7 @@ internal static class SelfTest
 
         // The reading a save sets off, which is where the view used to be lost.
         model.Editor.Refresh();
-        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+        Shows(model, model3d);
 
         if (model.Editor.Edited.Camera != turned)
             return $"reading the model again threw the view away: {model.Editor.Edited.Camera}";
@@ -1707,9 +1709,9 @@ internal static class SelfTest
         // Away and back is the same asset as far as the view is concerned, and a different asset
         // is not: an angle chosen for one model says nothing about the next.
         model.Editor.SelectedFile = back;
-        WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+        Shows(model, back);
         model.Editor.SelectedFile = model3d;
-        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+        Shows(model, model3d);
 
         if (model.Editor.Edited.Camera != turned)
             return "looking at something else and coming back lost the view";
@@ -1727,7 +1729,7 @@ internal static class SelfTest
 
         Console.WriteLine("editor   the view survives a reading, and the halves move together");
         model.Editor.SelectedFile = back;
-        WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+        Shows(model, back);
         return null;
     }
 
@@ -1874,7 +1876,7 @@ internal static class SelfTest
         for (var i = 0; i < 2; i++)
         {
             model.Editor.SelectedFile = meshes[i];
-            WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+            Shows(model, meshes[i]);
             if (model.Editor.Edited.Mesh is null) return $"'{meshes[i].Name}' would not show";
 
             model.Editor.Edited.Camera = views[i];
@@ -1884,7 +1886,7 @@ internal static class SelfTest
             for (var i = 0; i < 2; i++)
             {
                 model.Editor.SelectedFile = meshes[i];
-                WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+                Shows(model, meshes[i]);
 
                 if (model.Editor.Edited.Camera != views[i])
                     return $"on pass {pass} '{meshes[i].Name}' came back at "
@@ -1897,7 +1899,7 @@ internal static class SelfTest
             + "across three passes");
 
         model.Editor.SelectedFile = back;
-        WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+        Shows(model, back);
         return null;
     }
 
@@ -1952,7 +1954,7 @@ internal static class SelfTest
         {
             model.Editor.SelectedWorkspace = first;
             model.Editor.SelectedFile = model.Editor.Files.FirstOrDefault(f => f.RelativePath == back.RelativePath);
-            WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
+            if (model.Editor.SelectedFile is { } went) Shows(model, went);
 
             try { Directory.Delete(second.Directory, recursive: true); } catch (IOException) { }
             model.Editor.Rescan(model.WorkspaceRoot);
@@ -1969,7 +1971,7 @@ internal static class SelfTest
 
         model.Editor.Edited.Clear();
         model.Editor.SelectedFile = mesh;
-        WaitWhile(() => model.Editor.Edited.Mesh is null, 60_000);
+        Shows(model, mesh);
         return model.Editor.Edited.Mesh is null ? null : mesh;
     }
 
@@ -2001,8 +2003,7 @@ internal static class SelfTest
             File.WriteAllBytes(byChoice, again);
 
             model.Editor.SelectedFile = model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath);
-            WaitWhile(() => model.Editor.Edited.Nothing is not null, 60_000);
-
+            Shows(model, model.Editor.SelectedFile);
             model.Editor.Import([byChoice]);
             if (!File.ReadAllBytes(texture.FullPath).SequenceEqual(again))
                 return $"a file dropped under another name did not reach the selected one: {model.Editor.Status}";
@@ -2123,6 +2124,58 @@ internal static class SelfTest
                 return $"'{name}' is still held open after {what} — {ex.Message}";
             }
         }
+        return null;
+    }
+
+    /// A model opened in the editor comes up wearing its own paint, and says which of the pictures
+    /// that is.
+    ///
+    /// The workspace is a `.glb` and a folder of `.png` and holds nothing that says which goes on
+    /// which — no renderers, no materials — so a model drew grey until somebody picked a picture out
+    /// of a list of a dozen, every time, for every mesh. The answer is in the game: the renderer
+    /// that draws this mesh names a material, the material names a texture, and the workspace files
+    /// record which of the game's textures each of them stands for.
+    private static string? TheEditorPutsTheModelInItsPaint(MainViewModel model)
+    {
+        var models = model.Editor.Files
+            .Where(f => f.Name.EndsWith(".glb", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (models.Count == 0) return "the extracted workspace holds no model to dress";
+
+        var dressed = 0;
+
+        foreach (var mesh in models)
+        {
+            model.Editor.SelectedFile = mesh;
+            if (!Shows(model, mesh))
+                return $"'{mesh.Name}' never loaded in the editor: {model.Editor.Edited.Nothing}";
+
+            var offered = model.Editor.Edited.TextureChoices;
+            var lit = offered.Count(c => c.Worn);
+            var chosen = model.Editor.Edited.ChosenTexture;
+
+            Console.WriteLine($"editor   '{mesh.Name}': {lit} of {Math.Max(offered.Count - 1, 0)} "
+                + $"pictures are its own, wearing '{chosen?.Name ?? "nothing"}'");
+
+            if (lit == 0) continue;
+            dressed++;
+
+            if (chosen is not { Worn: true })
+                return $"'{mesh.Name}' knows which picture it wears and came up wearing "
+                    + $"'{chosen?.Name ?? "nothing"}'";
+
+            if (model.Editor.Edited.MeshTextures is not { } on || on.All(t => t is null))
+                return $"'{mesh.Name}' chose '{chosen.Name}' and is still drawn grey";
+
+            // Marked and listed first, both: an order only says something once the whole list has
+            // been read, and the mark says it at a glance.
+            var order = offered.Skip(1).Select(c => c.Worn).ToList();
+            if (order.LastIndexOf(true) > order.IndexOf(false))
+                return $"'{mesh.Name}' lists a picture it wears below one it does not";
+        }
+
+        if (dressed == 0) return "no model in the workspace knew which of its pictures it wears";
         return null;
     }
 
@@ -2801,6 +2854,27 @@ internal static class SelfTest
     /// row, and every check after it read the wrong asset's answers — which only started happening
     /// when the tool began showing a weapon's model the moment the weapon is picked, putting one
     /// more of those in flight. The caption is the one thing that says which row landed.
+    /// Waits until the editor's comparison is showing the file it was asked for.
+    ///
+    /// Not "until something is loaded": the panes hold the last file until the new one lands, so a
+    /// test that waits for a mesh to be there is answered instantly by the mesh already there, and
+    /// everything after it runs against the wrong model. That has now cost two afternoons in two
+    /// different places — the browse tree was the first — so both wait on the caption, which names
+    /// what is actually in front of you.
+    private static bool Shows(MainViewModel model, Core.Pack.WorkspaceFile file)
+        => WaitWhile(
+            () => !Showing(model.Editor.Edited, file) || !Showing(model.Editor.Original, file),
+            60_000);
+
+    /// Whether one pane has finished with this file, whether or not it could show it.
+    ///
+    /// Both panes are emptied the moment a file is selected and both say so in the same words, so
+    /// that message is the one state that means "not yet" — anything else is an answer about the
+    /// file asked for.
+    private static bool Showing(PreviewViewModel pane, Core.Pack.WorkspaceFile file)
+        => pane.Caption.StartsWith(file.Name, StringComparison.Ordinal)
+            || pane.Nothing is { } why && why != "Nothing selected.";
+
     private static bool Arrived(MainViewModel model, TreeNode node)
         => WaitWhile(
             () => !model.Preview.Caption.StartsWith($"{node.Label}   @ ", StringComparison.Ordinal),

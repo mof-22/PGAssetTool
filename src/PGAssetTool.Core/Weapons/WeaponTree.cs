@@ -66,7 +66,13 @@ public sealed record WeaponTree(
 public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 {
     private readonly IconResolver _icons = new(bundles, catalogs.Lookup);
-    private readonly BundleGraph _graph = new(bundles);
+    /// How a material binds its paint is the same question wherever it is asked from, and the
+    /// editor asks it too — of a mesh rather than of a weapon. One implementation of it, here.
+    private readonly Dressing _dressing = new(bundles);
+
+    /// Following a pointer out of one bundle and into the next, shared with the dressing so the
+    /// index of which bundle holds which file is built once.
+    private BundleGraph Graph => _dressing.Graph;
 
     /// Reached by weapons, but not part of one: shared engine assets that cannot be replaced here.
     /// Not worth walking into. A shader is neither replaceable nor readable, and dumping the
@@ -100,7 +106,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 // found exactly as before — a texture a component names is still a texture — and it
                 // is the object itself that does not appear. See Replaceable for which and why.
                 assets = ReferenceWalker
-                    .Closure(bundles.Context, file, root.PathId, _graph.Resolve, skip: Opaque)
+                    .Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: Opaque)
                     .Where(a => Pack.Replaceable.CanShow(a.Class))
                     .ToList();
         }
@@ -254,48 +260,11 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         return found;
     }
 
-    /// The texture bound to a material's main slot, wherever the material and the texture live.
     private AssetNode? MainTextureOf(string from, int fileId, long pathId)
-    {
-        if (pathId == 0) return null;
+        => _dressing.MainTextureOf(from, fileId, pathId);
 
-        var (file, bundle) = fileId == 0
-            ? (SafeOpen(from), from)
-            : _graph.Resolve(SafeOpen(from) ?? throw new InvalidOperationException(), fileId) is { } next
-                ? (next.File, next.Bundle)
-                : (null, "");
-
-        if (file is null) return null;
-
-        var info = file.file.GetAssetInfo(pathId);
-        var material = info is null ? null : bundles.Context.Deserialize(file, info);
-        return material is null ? null : MainTextureIn(file, bundle, material);
-    }
-
-    /// The texture a material binds to its main slot, wherever that texture lives.
     private AssetNode? MainTextureIn(AssetsFileInstance file, string bundle, AssetTypeValueField material)
-    {
-        // _MainTex first; some materials only bind another slot, and showing that beats showing
-        // nothing at all.
-        var slots = material["m_SavedProperties"]["m_TexEnvs"]["Array"].Children;
-        var main = slots.FirstOrDefault(s => s["first"].AsString == "_MainTex") ?? slots.FirstOrDefault();
-        if (main is null) return null;
-
-        var pointer = main["second"]["m_Texture"];
-        var textureId = pointer["m_PathID"].AsLong;
-        if (textureId == 0) return null;
-
-        var (textureFile, textureBundle) = pointer["m_FileID"].AsInt == 0
-            ? (file, bundle)
-            : _graph.Resolve(file, pointer["m_FileID"].AsInt) is { } other ? (other.File, other.Bundle) : (null, "");
-        if (textureFile is null) return null;
-
-        var textureInfo = textureFile.file.GetAssetInfo(textureId);
-        if (textureInfo is null || textureInfo.TypeId != (int)AssetClassID.Texture2D) return null;
-
-        var name = bundles.Context.Deserialize(textureFile, textureInfo)?["m_Name"].AsString ?? "";
-        return new AssetNode(textureId, AssetClassID.Texture2D, name, textureBundle);
-    }
+        => _dressing.MainTextureIn(file, bundle, material);
 
     private AssetsFileInstance? SafeOpen(string bundle)
     {
@@ -337,7 +306,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             // Only the textures, not the whole closure: a material also reaches its shader, and a
             // shader is neither replaceable nor worth a row.
             var textures = ReferenceWalker
-                .Closure(bundles.Context, file, info.PathId, _graph.Resolve, skip: Opaque)
+                .Closure(bundles.Context, file, info.PathId, Graph.Resolve, skip: Opaque)
                 .Where(n => n.Class == AssetClassID.Texture2D)
                 .ToList();
 
