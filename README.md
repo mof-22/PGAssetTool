@@ -7,8 +7,9 @@ finds an item and everything it uses, writes the assets out as files you can edi
 programs, packs your edits into a `.pgmod`, and installs that into the game — with a backup of every
 bundle it touches, so anything it does can be undone.
 
-Weapons and their skins today. The rest of the game's items are the same shape underneath and are
-where this is going.
+Weapons and their skins, and the game's other cosmetics beside them: hats, capes, masks, boots,
+pets, gliders, transports and avatars. Every kind is the same arrangement underneath, so the picker
+at the top of the list is the whole of the difference.
 
 It ships no game content. A pack describes changes and names assets already present in the player's
 own installation.
@@ -71,9 +72,11 @@ the copy taken before the first write.
 
 ## The three tabs
 
-**Browse** — every weapon, and the tree of everything the selected one references. Previews live
-here. `Ctrl+Shift+R` narrows the tree to the things that can actually be replaced, which is usually
-what you want.
+**Browse** — every item of whichever kind the picker at the top is showing, and the tree of
+everything the selected one references. Previews live here: a texture, a sound, or a model you can
+turn, dress in any of the item's own skins, and — where the model is on bones — play its own
+animations on. `Ctrl+Shift+R` narrows the tree to the things that can actually be replaced, which is
+usually what you want.
 
 **Editor** — the workspaces you have extracted, which files you have edited, and the comparison
 between yours and the game's. The pack's name, author, version, description and picture are set
@@ -181,8 +184,9 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | --- | --- |
 | `info` | Show the detected installation and version. |
 | `weapons [<filter>]` | List weapons, filtered by name, slug, tag or prefab. |
-| `show <weapon>` | Show one weapon and everything it references. Takes the in-game number (`819`), a prefab name (`Weapon1257`) or a slug. The in-game number and the prefab number are different sequences. |
-| `extract <weapon>` | Write out everything belonging to a weapon. With `--workspace`, also writes the `pgmod.json` that makes it packable. |
+| `items [<kind>]` | List the game's other kinds — hats, capes, masks, boots, pets, gliders, transports, avatars — or the whole of one of them. |
+| `show <item>` | Show one item and everything it references. A weapon takes the in-game number (`819`), a prefab name (`Weapon1257`) or a slug; anything else takes the id `items` lists. The in-game number and the prefab number are different sequences. |
+| `extract <item>` | Write out everything belonging to an item. With `--workspace`, also writes the `pgmod.json` that makes it packable. |
 | `pack [<directory>]` | Build a `.pgmod` from a workspace. Only files edited since the extract are included. |
 | `convert <path>` | Turn raw `.dat` assets exported by another asset editor into a packable workspace. |
 | `apply <pack>` | Install a `.pgmod` into the game. |
@@ -200,8 +204,11 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `--author <name>` | Recorded in the manifest. |
 | `--skin <id or name>` | Write out one of the weapon's skins instead of the weapon as it comes. `show` lists what a weapon has. |
 | `--opaque` | Write textures with no alpha channel. Most of them keep emission rather than transparency there, and an editor opens those as almost invisible. An image brought back without an alpha channel keeps the original one. |
+| `--whole` | Write the whole of every texture. By default the part no model samples is made transparent, so what is left is what you can actually see on the item. |
 | `--protect` | Sign the built pack, and keep it from opening as a zip. |
 | `--force` | Let `apply` back up a bundle that is already modified. |
+| `--fast` | Squeeze rebuilt bundles less: that part is about four times quicker and the bundles come out about a sixth larger. The game reads both at the same speed. |
+| `--rebuild` | Rebuild every bundle, including the ones already holding what they should. Those are normally left where they are. |
 
 ```
 pgassettool weapons crystal
@@ -236,8 +243,10 @@ what a thing *does*, and this is a tool for how things look and sound.
 
 ## Not done yet
 
-- **Items other than weapons.** Hats, capes, masks, boots and pets are the same arrangement under
-  other names, and the machinery that reads and writes them is already general.
+- **Graffiti, gadgets and armor.** Missing from the game rather than from here: nothing in its
+  lookup table is graffiti, gadgets are two prefabs with no registry behind them, and armor has 32
+  registry entries and not one prefab — an armor is a number and a shop icon, and that icon lives
+  outside the bundles.
 - **Writing to `.assets`** — the files under `*_Data` — and sprite atlases. Everything here writes
   AssetBundles.
 - **An editable format for fonts and shaders.** Their bytes go back through the raw route; what is
