@@ -46,23 +46,32 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
     /// things; the rest are for a model whose prefab lives elsewhere.
     /// </param>
     public IReadOnlyList<AssetNode?> For(string meshBundle, long meshPathId, IEnumerable<string>? lookIn = null)
+        => Every(meshBundle, meshPathId, lookIn).FirstOrDefault() ?? [];
+
+    /// Every renderer's answer, not just the first.
+    ///
+    /// More than one can draw the same mesh, and they do not agree: the tactical knife's geometry is
+    /// drawn by its own prefab in one paint and by a skin's prefab in another, both in the same
+    /// bundle. Which of those a caller wants is something the caller knows and this does not — the
+    /// export picks the one whose paint it actually wrote out — so all of them come back, in the
+    /// order they were found.
+    public IEnumerable<IReadOnlyList<AssetNode?>> Every(
+        string meshBundle, long meshPathId, IEnumerable<string>? lookIn = null)
     {
         var searching = new[] { meshBundle }
             .Concat(lookIn ?? [])
             .Distinct(StringComparer.OrdinalIgnoreCase);
 
         foreach (var bundle in searching)
-            if (In(bundle, meshBundle, meshPathId) is { Count: > 0 } found)
-                return found;
-
-        return [];
+            foreach (var found in In(bundle, meshBundle, meshPathId))
+                yield return found;
     }
 
-    private IReadOnlyList<AssetNode?> In(string bundle, string meshBundle, long meshPathId)
+    private IEnumerable<IReadOnlyList<AssetNode?>> In(string bundle, string meshBundle, long meshPathId)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
-        catch (Exception e) when (e is IOException or FileNotFoundException) { return []; }
+        catch (Exception e) when (e is IOException or FileNotFoundException) { yield break; }
 
         var meshOfGameObject = new Dictionary<long, bool>();
         var renderers = new List<(long GameObject, bool Mesh, AssetTypeValueField Field)>();
@@ -95,10 +104,8 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
                 .Select(m => MainTextureOf(bundle, m["m_FileID"].AsInt, m["m_PathID"].AsLong))
                 .ToList();
 
-            if (slots.Any(s => s is not null)) return slots;
+            if (slots.Any(s => s is not null)) yield return slots;
         }
-
-        return [];
     }
 
     /// Whether a pointer names this exact mesh, following it out of the file if it leaves.

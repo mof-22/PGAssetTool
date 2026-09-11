@@ -21,7 +21,11 @@ public sealed class WeaponExporter(BundleSet bundles)
 
     /// Resolves references that leave the bundle they were written in, which a skin's model does
     /// as readily as the weapon's own prefab.
-    private readonly BundleGraph _graph = new(bundles);
+    private readonly Dressing _dressing = new(bundles);
+
+    /// Following a reference out of one bundle and into the next, shared with the dressing so the
+    /// index of which bundle holds which file is built once.
+    private BundleGraph Graph => _dressing.Graph;
 
     /// Write textures with no alpha channel; see AssetExporter for why.
     public bool Opaque { get; init; }
@@ -140,9 +144,90 @@ public sealed class WeaponExporter(BundleSet bundles)
             skipped.Add($"'{asked}': this weapon has no such skin");
 
         DrawPackIcon(tree, directory, skipped);
+        Dress(assets, tree, chosen);
 
         return new WeaponExport(directory, assets, skipped);
     }
+
+    /// Records, against each mesh written out, the textures it is drawn with.
+    ///
+    /// The workspace itself cannot answer this later: it holds a model and a folder of pictures and
+    /// nothing that pairs them. The renderers and materials that decide it are in the game, and a
+    /// workspace made from a skin does not even agree with them — the geometry is the weapon's and
+    /// the renderer names the weapon's paint, while every picture in the workspace is the skin's.
+    /// Here is the one moment that knows both.
+    private void Dress(List<ExportedAsset> assets, WeaponTree tree, WeaponSkinView? chosen)
+    {
+        var named = assets
+            .Select(a => a.Address.Container)
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var pictures = assets
+            .Where(a => a.Class == AssetClassID.Texture2D && a.Address.Container.Length > 0)
+            .Select(a => a.Address)
+            .ToList();
+
+        for (var at = 0; at < assets.Count; at++)
+        {
+            if (assets[at].Class != AssetClassID.Mesh) continue;
+            if (assets[at].Address.PathId is not { } mesh) continue;
+
+            var offered = Wearing(tree, chosen, assets[at].Address.Container, mesh, named)
+                .Where(c => c.Count > 0)
+                .ToList();
+
+            // The one whose paint is here. More than one renderer can draw the same mesh and they do
+            // not agree — the tactical knife's geometry is drawn by its own prefab in one paint and
+            // by a skin's prefab in another — and the one worth recording is the one this workspace
+            // can actually show. Failing that, whichever was found first.
+            var wears = offered.FirstOrDefault(c => c.All(t => Written(pictures, t)))
+                ?? offered.FirstOrDefault()
+                ?? [];
+
+            if (wears.Count > 0)
+                assets[at] = assets[at] with
+                {
+                    Wears = wears
+                        .Select(t => new AssetAddress(
+                            t.Bundle, nameof(AssetClassID.Texture2D), t.Name, PathId: t.PathId))
+                        .ToList(),
+                };
+        }
+    }
+
+    private static bool Written(IReadOnlyList<AssetAddress> pictures, AssetNode texture)
+        => pictures.Any(p => p.PathId == texture.PathId);
+
+    /// Every account of what this mesh is drawn with, best first.
+    private IEnumerable<IReadOnlyList<AssetNode>> Wearing(
+        WeaponTree tree, WeaponSkinView? chosen, string bundle, long mesh, IReadOnlyList<string> lookIn)
+    {
+        // A skin that only repaints hands the weapon's own renderers its own materials, so this
+        // geometry is to be seen in the skin's paint. What the renderer names is the weapon's, and
+        // in a workspace made for the skin that file was deliberately not written.
+        //
+        // The weapon's own mesh and nothing else. A skin repaints the gun; the player's arms and
+        // the muzzle flash beside it are drawn with what they were always drawn with, and neither
+        // of those textures is in a workspace made for a skin.
+        if (chosen is { Model: null } && tree.MainMesh?.PathId == mesh)
+            yield return chosen.Materials
+                .Where(m => m.Main is not null)
+                .Select(m => m.Main! with { Bundle = m.Locate(m.Main!).Bundle })
+                .ToList();
+
+        // What the weapon's own prefab binds, taken from the prefab's own closure rather than from
+        // whatever else in the bundle happens to draw this mesh.
+        if (tree.MeshTextures.FirstOrDefault(m => m.MeshPathId == mesh) is { } dressed)
+            yield return dressed.BySubMesh.Where(t => t is not null).Select(t => t!).ToList();
+
+        // And everything else that draws it, for a model a skin brought with it: its renderer is its
+        // own and is nowhere in the weapon's prefab.
+        foreach (var slots in _dressing.Every(bundle, mesh, lookIn))
+            yield return slots.Where(t => t is not null).Select(t => t!).ToList();
+    }
+
 
     /// Which texels of each of this weapon's textures its own models actually sample.
     ///
@@ -152,7 +237,7 @@ public sealed class WeaponExporter(BundleSet bundles)
     /// A texture nothing here draws is left whole, and that is most of them: a shop icon, a gloss
     /// or mask map bound beside the main slot, anything reached through a component. Clearing those
     /// would mean guessing which mesh reads them, and a wrong guess erases work.
-    private Func<string, long, int, int, bool[]?> Sampled(WeaponTree tree)
+    private Func<TextureShape, bool[]?> Sampled(WeaponTree tree)
     {
         var uses = new Dictionary<(string Bundle, long PathId), List<(long Mesh, int SubMesh)>>();
 
@@ -184,9 +269,10 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         var read = new Dictionary<long, UnityMesh?>();
 
-        return (bundle, pathId, width, height) =>
+        return texture =>
         {
-            if (!uses.TryGetValue((bundle.ToLowerInvariant(), pathId), out var drawn)) return null;
+            if (!uses.TryGetValue((texture.Bundle.ToLowerInvariant(), texture.PathId), out var drawn))
+                return null;
 
             var models = drawn
                 .Select(u => (Mesh: MeshFor(tree, read, u.Mesh), u.SubMesh))
@@ -194,7 +280,9 @@ public sealed class WeaponExporter(BundleSet bundles)
                 .Select(u => (u.Mesh!, u.SubMesh))
                 .ToList();
 
-            return models.Count == 0 ? null : UvCoverage.Of(models, width, height);
+            return models.Count == 0
+                ? null
+                : UvCoverage.Of(models, texture.Width, texture.Height, texture.Margin);
         };
     }
 
@@ -334,7 +422,7 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         var closure = new List<AssetTypeValueField>();
         foreach (var node in ReferenceWalker
-                     .Closure(bundles.Context, file, root.PathId, _graph.Resolve, skip: WeaponResolver.Opaque)
+                     .Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: WeaponResolver.Opaque)
                      .Where(n => Pack.Replaceable.CanShow(n.Class)))
         {
             var bundle = node.Bundle.Length > 0 ? node.Bundle : model.Bundle;

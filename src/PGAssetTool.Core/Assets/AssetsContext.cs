@@ -58,7 +58,17 @@ public sealed class AssetsContext : IDisposable
             .Where(e => !e.Name.EndsWith(".resS", StringComparison.OrdinalIgnoreCase)
                      && !e.Name.EndsWith(".resource", StringComparison.OrdinalIgnoreCase));
 
-    public void Dispose() => _manager.UnloadAll(true);
+    /// Puts everything down.
+    ///
+    /// The library unloads by walking its own list of open bundles, so anything still opening one
+    /// on another thread makes that walk throw. Callers are expected not to do that — the window
+    /// waits for its readers before disposing — and a shutdown is no place to turn somebody else's
+    /// race into a crash on the way out.
+    public void Dispose()
+    {
+        try { _manager.UnloadAll(true); }
+        catch (InvalidOperationException) { }
+    }
 }
 
 public static class ClassPackage

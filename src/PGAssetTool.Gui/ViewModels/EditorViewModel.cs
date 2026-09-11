@@ -605,13 +605,16 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         preview.TextureChoices.Clear();
         if (SelectedWorkspace is not { } workspace) return;
 
-        // Which of the workspace's pictures replace the textures this model is actually drawn with.
-        // The workspace records what each file stands for in the game, and the dressing came back
-        // in those same terms, so the two meet here without either having to know the other's shape.
-        var worn = Files
-            .Where(f => f.Target.PathId is { } id && _wearing.Contains(id))
-            .Select(f => f.RelativePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Which of the workspace's pictures this model is drawn with. The extraction wrote that
+        // down, which is the only account that is right for a workspace made from a skin: the
+        // geometry is the weapon's, the renderer in the game names the weapon's paint, and every
+        // picture here is the skin's. Asking the game would answer about a file that is not here.
+        var worn = SelectedFile?.Wears is { Count: > 0 } named
+            ? named.ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : Files
+                .Where(f => f.Target.PathId is { } id && _wearing.Contains(id))
+                .Select(f => f.RelativePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         preview.TextureChoices.Add(new TextureChoice("(none)", "", 0));
 

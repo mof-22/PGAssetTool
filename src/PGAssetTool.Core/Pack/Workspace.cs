@@ -32,11 +32,28 @@ public static class Workspace
                 Source = Relative(directory, asset.Path),
                 BaselineSha256 = alreadyModified ? null : HashFile(asset.Path),
                 AlphaIsMask = asset.AlphaIsMask,
+
+                // Named by file rather than by address, because that is what the editor has in
+                // front of it. A texture the mesh wears and the export did not write — the base
+                // weapon's, in a workspace made from one of its skins — is simply not listed.
+                Wears = (asset.Wears ?? [])
+                    .Select(t => kept.FirstOrDefault(k => Same(k.Address, t)))
+                    .Where(k => k is not null)
+                    .Select(k => Relative(directory, k!.Path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
             });
         }
 
         return Create(directory, id, name, author, gameVersion, operations, IconIn(directory, kept), subject);
     }
+
+    /// The same asset, wherever the two were written down. A texture reached through a material in
+    /// another file carries that file's bundle; the same texture reached directly carries none.
+    private static bool Same(Assets.AssetAddress asset, Assets.AssetAddress other)
+        => asset.PathId == other.PathId
+            && (asset.Container.Length == 0 || other.Container.Length == 0
+                || string.Equals(asset.Container, other.Container, StringComparison.OrdinalIgnoreCase));
 
     /// Writes a workspace whose operations the caller has already worked out.
     ///

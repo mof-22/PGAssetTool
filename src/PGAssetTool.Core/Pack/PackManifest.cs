@@ -50,6 +50,15 @@ public sealed record PackOperation
     /// Pointers inside this operation's asset that name an added asset instead of a number.
     public List<PointerFixup> Pointers { get; init; } = [];
 
+    /// For a mesh, the other files in this workspace that are the textures it is drawn with.
+    ///
+    /// A workspace is a model and a folder of pictures and holds nothing else that says which goes
+    /// on which — the renderers and materials that decide it are in the game, and a workspace made
+    /// from a skin does not even agree with them: the geometry is the weapon's and the paint is the
+    /// skin's. So the answer is written down at the one moment anything knows it, which is the
+    /// extraction. The editor reads it to show the model dressed.
+    public List<string> Wears { get; init; } = [];
+
     /// Whether the alpha channel of the file this comes from says which part of the image is used
     /// rather than carrying anything of its own.
     ///

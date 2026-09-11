@@ -90,10 +90,17 @@ replaced" coming to mean "a `Material` can be edited here", which it cannot.
 
 ### Textures come out masked to what the model shows
 
-A weapon's texture is an atlas shared with its whole family, and which island belongs to which
-weapon is written in the meshes' UVs and nowhere an image editor can see. `UvCoverage` rasterises
-the triangles into the texture's own grid, and the export clears everything no model of this weapon
-samples — 1,423 of #16's 4,096 texels, 1,720 of the arms' 2,048.
+A weapon's texture is an atlas with a great deal of nothing in it, and which island the model reads
+is written in its UVs and nowhere an image editor can see. `UvCoverage` rasterises the triangles into
+the texture's own grid, and the export clears the rest — 2,561 of #16's 4,096 texels, and 1,824 of
+the 2,048 in the player atlas its arms read from.
+
+The mask is cut exactly to the triangles, because the game reads exactly what it draws: 347 of the
+367 textures in the bundle holding the weapons' art are point-filtered with no mip chain, so nothing
+is sampled that a triangle does not land on. `UvCoverage.MarginFor` reaches one texel further for the
+handful that are filtered or mipped. A flat two-texel margin — the first guess — claimed 65% of #16's
+atlas where its model reads 37%, and the difference is visible against the same UVs opened in
+Blender.
 
 The alpha channel carries that mask outright rather than the original's. It has to: most of these
 textures keep emission there rather than coverage, and `Map_Beretta_A` is 99.8% transparent before
@@ -108,6 +115,23 @@ texture, and nothing else would say so.
 
 A texture no model here draws is written whole: a shop icon, a gloss or mask map bound beside the
 main slot, a particle sheet. Clearing those would mean guessing which mesh reads them.
+
+### A workspace records what each model is drawn with
+
+`PackOperation.Wears` names, for each `.glb`, the pictures beside it that go on it. A workspace holds
+a model and a folder of images and nothing that pairs them, and the pairing cannot be recovered
+afterwards by asking the game:
+
+- More than one renderer draws the same mesh, and they disagree. The tactical knife's geometry is
+  drawn by its own prefab in one paint and by a skin's prefab in another, both in `ecw_8`; #64's
+  mesh answers with #62's texture. The weapon tree picks the renderer inside the weapon's own prefab
+  closure, which is the one that is right.
+- A workspace made from a skin does not agree with the game at all. The geometry is the weapon's, so
+  the renderer names the weapon's paint — and the only pictures in the workspace are the skin's.
+
+So the answer is written down at the one moment that knows it. Where several accounts are possible,
+the export keeps the one whose textures it actually wrote out. Asking the game is still the fallback
+for a workspace that says nothing, which is what `convert` produces.
 
 ### The one thing that is neither
 

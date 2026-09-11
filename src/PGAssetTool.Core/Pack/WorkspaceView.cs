@@ -3,9 +3,13 @@ using PGAssetTool.Core.Assets;
 namespace PGAssetTool.Core.Pack;
 
 /// One replaceable file in a workspace, and whether it has been touched since it was written out.
+/// <param name="Wears">
+/// For a model, the other files in this workspace that are the textures it is drawn with, recorded
+/// at extraction because nothing here could work it out afterwards. See PackOperation.Wears.
+/// </param>
 public sealed record WorkspaceFile(
     string RelativePath, string FullPath, AssetAddress Target, string Operation, bool Edited, long Bytes,
-    bool AlphaIsMask = false)
+    bool AlphaIsMask = false, IReadOnlyList<string>? Wears = null)
 {
     public string Folder
     {
@@ -69,7 +73,8 @@ public sealed record WorkspaceView(string Directory, PackManifest Manifest, IRea
             var info = new FileInfo(full);
             return new WorkspaceFile(
                 operation.Source, full, operation.Target, operation.Op,
-                changed.Contains(operation), info.Exists ? info.Length : 0, operation.AlphaIsMask);
+                changed.Contains(operation), info.Exists ? info.Length : 0, operation.AlphaIsMask,
+                operation.Wears);
         })
         .OrderBy(f => f.Folder, StringComparer.Ordinal)
         .ThenBy(f => f.Name, StringComparer.Ordinal)

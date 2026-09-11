@@ -1324,6 +1324,12 @@ internal static class SelfTest
         finally
         {
             var installation = model.Game;
+
+            // Nothing reading before the reader goes. Deleting a workspace re-reads the folder,
+            // which selects whatever is left and starts loading it — and putting the bundles down
+            // from under that walks the list it is adding to, which surfaces as a crash inside the
+            // library on the way out of a run that had otherwise passed.
+            WaitWhile(() => model.Reading, 30_000);
             model.Dispose();
             try { Directory.Delete(scratch, recursive: true); }
             catch (IOException) { }
@@ -2091,8 +2097,10 @@ internal static class SelfTest
             // what the game had in that channel, or every emissive part of a masked texture goes out.
             var masked = new AssetExporter(bundles)
             {
-                Coverage = (_, _, wide, high) =>
-                    Enumerable.Range(0, wide * high).Select(at => at % wide < wide / 2).ToArray(),
+                Coverage = texture => Enumerable
+                    .Range(0, texture.Width * texture.Height)
+                    .Select(at => at % texture.Width < texture.Width / 2)
+                    .ToArray(),
             }.Export("d_w", file, info, directory, fileNameOverride: "masked");
 
             if (!masked[0].AlphaIsMask) return "a masked export did not record that it was masked";
@@ -2225,7 +2233,10 @@ internal static class SelfTest
         {
             if (dressed[part] is not { } picture) { painted.Add(null); continue; }
 
-            if (Core.Export.Meshes.UvCoverage.Of([(mesh, part)], picture.Width, picture.Height) is not { } used)
+            // No margin: the tightest mask there is, and so the strictest thing to hold it to. A
+            // mask that reaches further can only cover more of what the model shows, never less.
+            if (Core.Export.Meshes.UvCoverage.Of([(mesh, part)], picture.Width, picture.Height, margin: 0)
+                is not { } used)
             {
                 painted.Add(picture);
                 continue;

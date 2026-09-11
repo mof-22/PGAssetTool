@@ -9,13 +9,23 @@ using PGAssetTool.Core.Import.Audio;
 
 namespace PGAssetTool.Core.Export;
 
+/// A texture a mask is being asked about: which one, how big, and how far a mask has to reach past
+/// the triangles for it — which depends on how the game filters this one. See UvCoverage.MarginFor.
+public readonly record struct TextureShape(
+    string Bundle, long PathId, int Width, int Height, int Margin);
+
 /// <param name="AlphaIsMask">
 /// True for a texture written out masked to the part a model samples: its alpha channel is then the
 /// mask rather than anything of the original's, and the operation built from it says so.
 /// </param>
+/// <param name="Wears">
+/// For a mesh, the textures it is drawn with — as addresses, which the manifest turns into the paths
+/// of whichever of them were written out beside it. Worked out at extraction because that is the
+/// only moment anything has the renderers and the materials to hand.
+/// </param>
 public sealed record ExportedAsset(
     string Path, AssetClassID Class, string Name, string Format, long Bytes, AssetAddress Address,
-    bool AlphaIsMask = false);
+    bool AlphaIsMask = false, IReadOnlyList<AssetAddress>? Wears = null);
 
 /// Writes assets out in whatever format is actually editable for their type: an image editor can
 /// open a PNG, an audio editor a WAV. Types with no such format fall back to a readable field dump
@@ -30,9 +40,9 @@ public sealed class AssetExporter(BundleSet bundles)
     /// Write textures with no alpha channel at all. See WriteWithoutAlpha for why anyone would.
     public bool Opaque { get; init; }
 
-    /// Which texels of a texture any model actually samples, given where it lives and how big it
-    /// is. Null, or a null answer, writes the whole image. See UvCoverage and WriteMasked.
-    public Func<string, long, int, int, bool[]?>? Coverage { get; set; }
+    /// Which texels of a texture any model actually samples. Null, or a null answer, writes the
+    /// whole image. See UvCoverage and WriteMasked.
+    public Func<TextureShape, bool[]?>? Coverage { get; set; }
 
     /// `fileNameOverride` keeps distinct assets that share a name from overwriting each other's
     /// output; the caller knows which names repeat and can qualify them. `sourceBytes` is the data
@@ -113,7 +123,9 @@ public sealed class AssetExporter(BundleSet bundles)
         var path = stem + ".png";
         texture.pictureData = pixels;
 
-        var used = Coverage?.Invoke(bundle, pathId, texture.m_Width, texture.m_Height);
+        var used = Coverage?.Invoke(new TextureShape(bundle, pathId, texture.m_Width, texture.m_Height,
+            Meshes.UvCoverage.MarginFor(
+                field["m_TextureSettings"]["m_FilterMode"].AsInt, field["m_MipCount"].AsInt)));
 
         if (used is not null)
         {

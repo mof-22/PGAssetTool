@@ -1150,6 +1150,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// Whether something is reading the game right now.
+    ///
+    /// A preview is loaded on a thread of its own and opens bundles as it goes, so putting the
+    /// reader down while one is in flight walks the very list it is adding to. The window closing
+    /// is when that happens, and a test that drives the window has to wait for quiet before it
+    /// disposes — which it can do, because it is the one pumping the thread the read finishes on.
+    public bool Reading => _reading.CurrentCount == 0;
+
     public void Dispose()
     {
         Editor.Dispose();

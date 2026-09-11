@@ -8,17 +8,22 @@ namespace PGAssetTool.Core.Export.Meshes;
 /// sampled look exactly like the parts that are.
 ///
 /// This rasterises the triangles into the texture's own grid and answers which texels they land on,
-/// so the export can clear the rest. The mask is deliberately generous: every texel a triangle
-/// touches, plus a margin, because a texel on the edge of an island is still read by bilinear
-/// filtering from the texel beside it.
+/// so the export can clear the rest.
 public static class UvCoverage
 {
-    /// How far the answer is grown past what the triangles actually cover.
+    /// How far a mask has to reach past the triangles for a texture the game reads this way.
     ///
-    /// The game samples with filtering on and mipmaps below, both of which read neighbours — so a
-    /// mask cut exactly to the triangles shows a fringe of whatever was cleared beside them. Two
-    /// texels is enough at every size these textures come in, which is 64 to 512 square.
-    public const int Margin = 2;
+    /// Point filtering with no mip chain reads exactly the texel under the coordinate and nothing
+    /// beside it — and that is nearly everything here: 347 of the 367 textures in the bundle holding
+    /// the weapons' own art are point-filtered with one mip. For those the mask is the UVs exactly,
+    /// which is what an author sees when they open the same model in Blender, and a margin would
+    /// only be the tool disagreeing with them. Anything filtered or mipped does read its neighbour,
+    /// and one texel covers that.
+    ///
+    /// It was a flat two before this was looked at, which on a 64x64 texture nearly doubled what the
+    /// mask claimed: 65% of #16's atlas against the 37% its model actually reads.
+    public static int MarginFor(int filterMode, int mipCount)
+        => filterMode == 0 && mipCount <= 1 ? 0 : 1;
 
     /// How far outside the square a coordinate may sit before it counts as leaving it.
     private const float Slack = 0.001f;
@@ -30,8 +35,9 @@ public static class UvCoverage
     /// whose UVs leave the square, which is how a texture is tiled: every texel is then in use, and
     /// clearing any of it would be wrong.
     /// <param name="uses">Each mesh and the submesh of it drawn with this texture.</param>
+    /// <param name="margin">How far to reach past the triangles; see MarginFor.</param>
     public static bool[]? Of(
-        IEnumerable<(UnityMesh Mesh, int SubMesh)> uses, int width, int height)
+        IEnumerable<(UnityMesh Mesh, int SubMesh)> uses, int width, int height, int margin)
     {
         if (width <= 0 || height <= 0) return null;
 
@@ -83,7 +89,7 @@ public static class UvCoverage
             }
         }
 
-        return any ? Grow(used, width, height) : null;
+        return any ? Grow(used, width, height, margin) : null;
     }
 
     private static void Fill(bool[] used, int width, int height, Span<float> px, Span<float> py)
@@ -133,14 +139,14 @@ public static class UvCoverage
         => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
 
     /// Spreads the mask outwards by the margin, in two passes rather than one square per texel.
-    private static bool[] Grow(bool[] used, int width, int height)
+    private static bool[] Grow(bool[] used, int width, int height, int margin)
     {
         var across = new bool[used.Length];
         for (var y = 0; y < height; y++)
         for (var x = 0; x < width; x++)
         {
             if (!used[y * width + x]) continue;
-            for (var at = Math.Max(x - Margin, 0); at <= Math.Min(x + Margin, width - 1); at++)
+            for (var at = Math.Max(x - margin, 0); at <= Math.Min(x + margin, width - 1); at++)
                 across[y * width + at] = true;
         }
 
@@ -149,7 +155,7 @@ public static class UvCoverage
         for (var x = 0; x < width; x++)
         {
             if (!across[y * width + x]) continue;
-            for (var at = Math.Max(y - Margin, 0); at <= Math.Min(y + Margin, height - 1); at++)
+            for (var at = Math.Max(y - margin, 0); at <= Math.Min(y + margin, height - 1); at++)
                 grown[at * width + x] = true;
         }
 
