@@ -49,6 +49,14 @@ public sealed record PackOperation
 
     /// Pointers inside this operation's asset that name an added asset instead of a number.
     public List<PointerFixup> Pointers { get; init; } = [];
+
+    /// Whether the alpha channel of the file this comes from says which part of the image is used
+    /// rather than carrying anything of its own.
+    ///
+    /// Set by an export that masked the texture to what a model samples. The alpha then belongs to
+    /// the tool rather than to the author, so applying keeps what the game already had there — most
+    /// of these textures hold emission in it, and writing a mask over that would put out the lights.
+    public bool AlphaIsMask { get; init; }
 }
 
 /// What a pack is for: which thing in the game, and which of its looks.

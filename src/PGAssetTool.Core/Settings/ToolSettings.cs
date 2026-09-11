@@ -42,6 +42,14 @@ public sealed record ToolSettings
     /// with the colours. An image brought back without an alpha channel is given the original one.
     public bool OpaqueTextures { get; init; }
 
+    /// Whether an exported texture keeps only the part a model actually samples.
+    ///
+    /// On, because a weapon's texture is an atlas and most of it is nothing: which island belongs
+    /// to the gun and which to the sights is written in the mesh's UVs and nowhere an image editor
+    /// can see. Off writes the whole image, which is what to do when a texture is used somewhere
+    /// this tool cannot see. See UvCoverage.
+    public bool MaskUnusedTextures { get; init; } = true;
+
     /// Whether the asset tree starts filtered to what can be written back.
     public bool ReplaceableOnly { get; init; } = true;
 

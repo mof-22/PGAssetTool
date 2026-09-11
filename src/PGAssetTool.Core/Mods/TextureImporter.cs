@@ -42,15 +42,23 @@ public static class TextureImporter
     /// usually — so an author who wants to repaint the colours should not have to reconstruct a
     /// mask they never touched.
     /// </param>
+    /// <param name="alphaIsMask">
+    /// True when the file's alpha channel is the tool's own doing rather than the author's: an
+    /// export masked to the part a model samples writes the mask there, because these textures are
+    /// mostly transparent to begin with and keeping the original alpha would have shown nothing.
+    /// The original alpha is then kept on the way back in, exactly as for a file that arrived
+    /// without one at all.
+    /// </param>
     public static TextureChange Replace(
-        AssetTypeValueField field, string imagePath, byte[]? originalPixels = null)
+        AssetTypeValueField field, string imagePath, byte[]? originalPixels = null,
+        bool alphaIsMask = false)
     {
         var texture = TextureFile.ReadTextureFile(field);
         var original = (TextureFormat)texture.m_TextureFormat;
         int oldWidth = texture.m_Width, oldHeight = texture.m_Height;
 
         var source = ReadImage(imagePath);
-        var keepAlpha = !source.HasAlpha
+        var keepAlpha = (!source.HasAlpha || alphaIsMask)
             && originalPixels is not null
             && source.Width == oldWidth
             && source.Height == oldHeight

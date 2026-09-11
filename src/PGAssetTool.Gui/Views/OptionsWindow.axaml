@@ -42,6 +42,12 @@
     </StackPanel>
 
     <StackPanel Spacing="6">
+      <CheckBox Content="Export only the part of a texture the model uses" IsChecked="{Binding MaskUnusedTextures}" />
+      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                 Text="A weapon's texture is an atlas and most of it is nothing: which island belongs to the gun and which to the sights is written in the model's UVs, and an image editor cannot see any of it. With this on, everything no model samples is written out fully transparent, so what is left is what you can actually see in the game. The part that is kept keeps whatever the original had in its alpha channel, so bringing the file back loses nothing. Turn it off for a texture something outside this weapon also uses." />
+    </StackPanel>
+
+    <StackPanel Spacing="6">
       <CheckBox Content="Protect new packs" IsChecked="{Binding ProtectPacks}" />
       <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
                  Text="Signs a built pack with a key kept beside this tool, and keeps it from opening as a zip. Anyone who alters one afterwards shows up as having done so. It stops a casual look inside and nothing more — this tool's own source says how the scrambling works — and each pack can override this in the editor." />

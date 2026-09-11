@@ -673,7 +673,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                         change = operation.Op switch
                         {
                             PackOperations.ReplaceTexture =>
-                                TextureImporter.Replace(field, source, OriginalPixels(editor, field)),
+                                TextureImporter.Replace(field, source, OriginalPixels(editor, field), operation.AlphaIsMask),
                             PackOperations.ReplaceMesh => MeshImporter.Replace(field, GltfMeshReader.Read(source)),
                             PackOperations.ReplaceAudio => AudioImporter.Replace(field, source, (into, bank) => editor.AppendToStream(into, bank)),
                             _ => throw new NotSupportedException($"unknown operation '{operation.Op}'"),

@@ -244,6 +244,8 @@ internal static class SelfTest
                     if (slots?.Any(s => s is not null) == true && coloured == 0)
                         return Fail($"'{node.Label}' has a texture but drew in flat grey");
 
+                    if (TheMaskKeepsWhatTheModelShows(model) is { } maskProblem) return Fail(maskProblem);
+
                     // The list a weapon's own mesh is offered comes in three bands: what it is
                     // already drawn with, then the paint a skin would put on this same geometry —
                     // what the mesh will be seen wearing in the game — then everything else the
@@ -839,6 +841,9 @@ internal static class SelfTest
             Console.WriteLine($"extract  {operations.Count} replaceable files across "
                 + $"{operations.Select(o => o.Target.Container).Distinct().Count()} bundles");
             if (operations.Count == 0) return Fail("the manifest named nothing replaceable");
+
+            if (TheMaskReachesTheFileAndTheManifest(written, operations) is { } writtenMask)
+                return Fail(writtenMask);
 
 
             // The editor reads the workspace that was just written, and has to notice an edit made
@@ -2079,7 +2084,32 @@ internal static class SelfTest
             Console.WriteLine($"alpha    exported without it, reimported with the original back: "
                 + $"mean {alphaBefore / (before.Bgra.Length / 4.0):F1} -> {alphaAfter / (decoded.Length / 4.0):F1}");
 
-            return alphaBefore == alphaAfter ? null : "the alpha came back different";
+            if (alphaBefore != alphaAfter) return "the alpha came back different";
+
+            // And the same promise for a masked export, whose alpha channel is the tool's own work:
+            // solid where a model reads, empty everywhere else. Applying one of those has to keep
+            // what the game had in that channel, or every emissive part of a masked texture goes out.
+            var masked = new AssetExporter(bundles)
+            {
+                Coverage = (_, _, wide, high) =>
+                    Enumerable.Range(0, wide * high).Select(at => at % wide < wide / 2).ToArray(),
+            }.Export("d_w", file, info, directory, fileNameOverride: "masked");
+
+            if (!masked[0].AlphaIsMask) return "a masked export did not record that it was masked";
+
+            var third = bundles.Context.Deserialize(file, info)!;
+            var kept = TextureImporter.Replace(third, masked[0].Path, pixels, alphaIsMask: true);
+            if (!kept.AlphaKept) return "a masked texture came back without the game's own alpha";
+
+            var back = AssetsTools.NET.Texture.TextureFile.ReadTextureFile(third);
+            var afterMask = back.DecodeTextureRaw(back.pictureData, useBgra: true);
+            long alphaMasked = 0;
+            for (var i = 3; i < afterMask.Length; i += 4) alphaMasked += afterMask[i];
+
+            Console.WriteLine("alpha    a masked export keeps the game's own alpha as well");
+            return alphaMasked == alphaBefore
+                ? null
+                : $"a masked texture's alpha came back as {alphaMasked}, not {alphaBefore}";
         }
         finally
         {
@@ -2125,6 +2155,136 @@ internal static class SelfTest
             }
         }
         return null;
+    }
+
+    /// A masked texture carries the mask in its alpha, and the manifest says that it does.
+    ///
+    /// Both halves matter and they are written in different places. The file has to be solid where
+    /// the model reads and empty everywhere else, which is what makes it worth opening. The manifest
+    /// has to say so, because that is the only thing standing between the mask and the game's own
+    /// alpha channel — apply one of these without it and every emissive part stops glowing.
+    private static string? TheMaskReachesTheFileAndTheManifest(
+        string workspace, IReadOnlyList<Core.Pack.PackOperation> operations)
+    {
+        var masked = operations.Where(o => o.AlphaIsMask).ToList();
+
+        Console.WriteLine($"mask     {masked.Count} of "
+            + $"{operations.Count(o => o.Source.EndsWith(".png", StringComparison.OrdinalIgnoreCase))} "
+            + "image(s) were written masked");
+
+        if (masked.Count == 0) return "nothing was masked, and this weapon's model has UVs to mask by";
+
+        foreach (var operation in masked)
+        {
+            var path = Path.Combine(workspace, operation.Source);
+            if (!File.Exists(path)) return $"'{operation.Source}' is named as masked and is not there";
+
+            using var stream = File.OpenRead(path);
+            var image = StbImageSharp.ImageResult.FromStream(
+                stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+
+            var (clear, solid, between) = (0, 0, 0);
+            for (var at = 3; at < image.Data.Length; at += 4)
+                switch (image.Data[at])
+                {
+                    case 0: clear++; break;
+                    case 255: solid++; break;
+                    default: between++; break;
+                }
+
+            if (between > 0)
+                return $"'{operation.Source}' is masked and has {between} half-transparent pixels";
+            if (clear == 0) return $"'{operation.Source}' is marked masked and nothing was cleared";
+            if (solid == 0) return $"'{operation.Source}' is masked to nothing at all";
+
+            Console.WriteLine($"mask     '{operation.Source}': {solid} kept, {clear} cleared");
+        }
+
+        return null;
+    }
+
+    /// What an export clears out of a texture is never anything the model shows.
+    ///
+    /// The mask is worked out in UV space and written into an image that is stored the other way up,
+    /// and a mistake in that — the flip, a submesh paired with the wrong material — would rub out
+    /// part of the weapon and leave an author repainting something the game never reads. Neither
+    /// shows up in the file size or in the mask's own arithmetic.
+    ///
+    /// So it is checked against the thing it has to agree with: everything outside the mask is
+    /// painted a colour nothing in the game is, the model is drawn with it from six angles, and any
+    /// one of that colour reaching the screen is a texel the mask should have kept.
+    private static string? TheMaskKeepsWhatTheModelShows(MainViewModel model)
+    {
+        if (model.Preview.Mesh is not { } mesh) return "nothing is being shown to check the mask against";
+        if (model.Preview.MeshTextures is not { } dressed) return null;
+
+        var painted = new List<PreviewImage?>();
+        var masked = 0;
+
+        for (var part = 0; part < dressed.Count; part++)
+        {
+            if (dressed[part] is not { } picture) { painted.Add(null); continue; }
+
+            if (Core.Export.Meshes.UvCoverage.Of([(mesh, part)], picture.Width, picture.Height) is not { } used)
+            {
+                painted.Add(picture);
+                continue;
+            }
+
+            masked++;
+            var bgra = (byte[])picture.Bgra.Clone();
+            for (var at = 0; at < used.Length; at++)
+            {
+                if (used[at]) continue;
+
+                // Magenta, opaque. The renderer reads the colour channels and ignores alpha, so the
+                // paint has to be in the colour.
+                bgra[at * 4] = 255;
+                bgra[at * 4 + 1] = 0;
+                bgra[at * 4 + 2] = 255;
+                bgra[at * 4 + 3] = 255;
+            }
+
+            painted.Add(picture with { Bgra = bgra });
+        }
+
+        if (masked == 0)
+        {
+            Console.WriteLine("mask     nothing of this model's textures could be masked");
+            return null;
+        }
+
+        var target = new RenderTarget();
+        target.Resize(320, 320);
+
+        var showing = 0;
+        var drawn = 0;
+
+        foreach (var camera in new[]
+                 {
+                     new Camera(), new Camera(Yaw: 1.6f), new Camera(Yaw: 3.1f), new Camera(Yaw: -1.6f),
+                     new Camera(Pitch: 1.5f), new Camera(Pitch: -1.5f),
+                 })
+        {
+            MeshRenderer.Render(mesh, camera, target, painted);
+
+            for (var at = 0; at < target.Bgra.Length; at += 4)
+            {
+                if (target.Bgra[at + 3] == 0) continue;
+                drawn++;
+
+                // Shaded, so the magenta arrives dimmed — what marks it is red and blue together
+                // with no green, which nothing in these textures is.
+                if (target.Bgra[at] > 60 && target.Bgra[at + 2] > 60 && target.Bgra[at + 1] < 20) showing++;
+            }
+        }
+
+        Console.WriteLine($"mask     {masked} of {dressed.Count} texture(s) masked; "
+            + $"{showing} of {drawn:N0} pixels drawn from what it cleared");
+
+        return showing > 0
+            ? $"the mask cleared {showing} pixels' worth of texture the model actually shows"
+            : null;
     }
 
     /// A model opened in the editor comes up wearing its own paint, and says which of the pictures

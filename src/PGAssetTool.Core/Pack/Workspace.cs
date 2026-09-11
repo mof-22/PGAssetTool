@@ -31,6 +31,7 @@ public static class Workspace
                 Target = asset.Address,
                 Source = Relative(directory, asset.Path),
                 BaselineSha256 = alreadyModified ? null : HashFile(asset.Path),
+                AlphaIsMask = asset.AlphaIsMask,
             });
         }
 

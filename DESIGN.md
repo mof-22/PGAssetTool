@@ -88,6 +88,27 @@ replaced" coming to mean "a `Material` can be edited here", which it cannot.
 
 `addAsset` is the same write into a path id nothing is using.
 
+### Textures come out masked to what the model shows
+
+A weapon's texture is an atlas shared with its whole family, and which island belongs to which
+weapon is written in the meshes' UVs and nowhere an image editor can see. `UvCoverage` rasterises
+the triangles into the texture's own grid, and the export clears everything no model of this weapon
+samples — 1,423 of #16's 4,096 texels, 1,720 of the arms' 2,048.
+
+The alpha channel carries that mask outright rather than the original's. It has to: most of these
+textures keep emission there rather than coverage, and `Map_Beretta_A` is 99.8% transparent before
+anything is done to it, so a masked export that kept the original alpha would be as invisible as the
+one it came from. The colours outside the mask are left exactly as they were, so nothing is painted
+over and nothing is lost.
+
+What the game had in that channel is not lost either. The operation records `AlphaIsMask`, and
+applying one of those keeps the alpha already in the game — the same promise `--opaque` makes, by
+the same route. Whoever drops that flag puts out the lights on every emissive part of every masked
+texture, and nothing else would say so.
+
+A texture no model here draws is written whole: a shop icon, a gloss or mask map bound beside the
+main slot, a particle sheet. Clearing those would mean guessing which mesh reads them.
+
 ### The one thing that is neither
 
 Components, and the scripts that say which component they are, are neither shown nor written.

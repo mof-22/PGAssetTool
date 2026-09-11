@@ -9,8 +9,13 @@ using PGAssetTool.Core.Import.Audio;
 
 namespace PGAssetTool.Core.Export;
 
+/// <param name="AlphaIsMask">
+/// True for a texture written out masked to the part a model samples: its alpha channel is then the
+/// mask rather than anything of the original's, and the operation built from it says so.
+/// </param>
 public sealed record ExportedAsset(
-    string Path, AssetClassID Class, string Name, string Format, long Bytes, AssetAddress Address);
+    string Path, AssetClassID Class, string Name, string Format, long Bytes, AssetAddress Address,
+    bool AlphaIsMask = false);
 
 /// Writes assets out in whatever format is actually editable for their type: an image editor can
 /// open a PNG, an audio editor a WAV. Types with no such format fall back to a readable field dump
@@ -24,6 +29,10 @@ public sealed class AssetExporter(BundleSet bundles)
 
     /// Write textures with no alpha channel at all. See WriteWithoutAlpha for why anyone would.
     public bool Opaque { get; init; }
+
+    /// Which texels of a texture any model actually samples, given where it lives and how big it
+    /// is. Null, or a null answer, writes the whole image. See UvCoverage and WriteMasked.
+    public Func<string, long, int, int, bool[]?>? Coverage { get; set; }
 
     /// `fileNameOverride` keeps distinct assets that share a name from overwriting each other's
     /// output; the caller knows which names repeat and can qualify them. `sourceBytes` is the data
@@ -45,7 +54,7 @@ public sealed class AssetExporter(BundleSet bundles)
         {
             var exported = cls switch
             {
-                AssetClassID.Texture2D => ExportTexture(bundle, field, stem),
+                AssetClassID.Texture2D => ExportTexture(bundle, info.PathId, field, stem),
                 AssetClassID.AudioClip => ExportAudio(bundle, field, stem),
                 AssetClassID.Mesh => ExportMesh(bundle, field, stem),
                 _ => null,
@@ -95,7 +104,7 @@ public sealed class AssetExporter(BundleSet bundles)
         }
     }
 
-    private ExportedAsset? ExportTexture(string bundle, AssetTypeValueField field, string stem)
+    private ExportedAsset? ExportTexture(string bundle, long pathId, AssetTypeValueField field, string stem)
     {
         var texture = TextureFile.ReadTextureFile(field);
         var pixels = ResolvePayload(bundle, field["m_StreamData"], texture.pictureData);
@@ -104,13 +113,65 @@ public sealed class AssetExporter(BundleSet bundles)
         var path = stem + ".png";
         texture.pictureData = pixels;
 
-        if (Opaque)
+        var used = Coverage?.Invoke(bundle, pathId, texture.m_Width, texture.m_Height);
+
+        if (used is not null)
+        {
+            if (!WriteMasked(texture, pixels, path, used)) return null;
+        }
+        else if (Opaque)
         {
             if (!WriteWithoutAlpha(texture, pixels, path)) return null;
         }
         else if (!texture.DecodeTextureImage(pixels, path, ImageExportType.Png, 100)) return null;
 
-        return new ExportedAsset(path, AssetClassID.Texture2D, "", "png", new FileInfo(path).Length, Placeholder);
+        return new ExportedAsset(path, AssetClassID.Texture2D, "", "png", new FileInfo(path).Length,
+            Placeholder, AlphaIsMask: used is not null);
+    }
+
+    /// Writes the image with everything no model samples made fully transparent.
+    ///
+    /// A weapon's texture is an atlas and most of it is nothing: an author opening one has to find
+    /// the part that matters by painting and looking. Cleared rather than outlined, because a
+    /// transparent region is the one marking every image editor shows the same way.
+    ///
+    /// The alpha becomes the mask outright — solid inside, empty outside — rather than the
+    /// original's. It has to: most of these textures keep emission in that channel and Map_Beretta_A
+    /// is 99.8% transparent before anything is done to it, so an export that kept the original alpha
+    /// would come out as invisible as it went in and the mask would show nothing at all.
+    ///
+    /// What the game had there is not lost. The operation this file belongs to is marked
+    /// AlphaIsMask, and applying one of those keeps the alpha already in the game — so the channel
+    /// is the tool's for as long as the file is on disk, and the author's work is the colour.
+    private static bool WriteMasked(TextureFile texture, byte[] pixels, string path, bool[] used)
+    {
+        var bgra = texture.DecodeTextureRaw(pixels, useBgra: true);
+        if (bgra is null || bgra.Length < texture.m_Width * texture.m_Height * 4) return false;
+        if (used.Length != texture.m_Width * texture.m_Height) return false;
+
+        var rgba = new byte[texture.m_Width * texture.m_Height * 4];
+        var stride = texture.m_Width * 4;
+
+        for (var row = 0; row < texture.m_Height; row++)
+        {
+            // Unity stores the bottom row first; a PNG starts at the top. The mask was built the
+            // PNG's way up, so it is read by the row being written rather than the row being read.
+            var from = (texture.m_Height - 1 - row) * stride;
+            var to = row * stride;
+
+            for (var x = 0; x < texture.m_Width; x++)
+            {
+                rgba[to + x * 4] = bgra[from + x * 4 + 2];
+                rgba[to + x * 4 + 1] = bgra[from + x * 4 + 1];
+                rgba[to + x * 4 + 2] = bgra[from + x * 4];
+                rgba[to + x * 4 + 3] = used[row * texture.m_Width + x] ? (byte)255 : (byte)0;
+            }
+        }
+
+        using var file = File.Create(path);
+        new StbImageWriteSharp.ImageWriter().WritePng(
+            rgba, texture.m_Width, texture.m_Height, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, file);
+        return true;
     }
 
     /// Writes the colour channels and drops the alpha entirely.

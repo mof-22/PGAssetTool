@@ -64,6 +64,9 @@ if (command is "-h" or "--help" or "help")
                                rather than transparency there, and an editor opens those as almost
                                invisible. An image brought back without an alpha channel keeps the
                                original one.
+          --whole              Write the whole of every texture. By default the part no model
+                               samples is made transparent, so what is left is what an author can
+                               actually see on the weapon.
           --skin <id or name>  Also write out one of the weapon's skins: its own materials and
                                textures, and the model it brings if it brings one. Off by default,
                                because a weapon carries up to a dozen and writing all of them would
@@ -431,6 +434,7 @@ if (command == "extract")
     {
         Opaque = args.Contains("--opaque"),
         Skin = Option("skin"),
+        MaskUnused = !args.Contains("--whole"),
     };
     var asWorkspace = args.Contains("--workspace");
     var export = asWorkspace

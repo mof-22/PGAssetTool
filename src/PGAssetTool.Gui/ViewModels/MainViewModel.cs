@@ -93,6 +93,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Textures written with no alpha channel. The original is put back on the way in.
     [ObservableProperty] private bool _opaqueTextures;
 
+    /// Whether an exported texture keeps only the part a model samples. See UvCoverage.
+    [ObservableProperty] private bool _maskUnusedTextures = true;
+
+    partial void OnMaskUnusedTexturesChanged(bool value) => Remember();
+
     /// Recorded in the manifest of anything extracted from here on. Editable per pack afterwards.
     [ObservableProperty] private string _author = "";
 
@@ -206,6 +211,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Manager.Order = (ModOrder)_settings.ModOrder;
         ProtectPacks = _settings.ProtectPacks;
         FasterApplies = _settings.FasterApplies;
+        MaskUnusedTextures = _settings.MaskUnusedTextures;
         Manager.Packing = Packing;
         _loading = false;
 
@@ -364,7 +370,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             var skin = ChosenSkin?.Id;
             var export = await Task.Run(() =>
-                new WeaponExporter(_bundles) { Opaque = _settings.OpaqueTextures, Skin = skin }
+                new WeaponExporter(_bundles)
+                {
+                    Opaque = _settings.OpaqueTextures, Skin = skin,
+                    MaskUnused = _settings.MaskUnusedTextures,
+                }
                     .ExportAsWorkspace(tree, WorkspaceRoot, _settings.Author, version));
 
             LastExport = export.Directory;
@@ -734,7 +744,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
-            FasterApplies = FasterApplies,
+            FasterApplies = FasterApplies, MaskUnusedTextures = MaskUnusedTextures,
         };
         try { _settings.Save(SettingsHome); }
         catch (IOException) { }

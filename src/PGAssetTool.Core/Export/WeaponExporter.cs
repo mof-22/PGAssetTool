@@ -26,6 +26,9 @@ public sealed class WeaponExporter(BundleSet bundles)
     /// Write textures with no alpha channel; see AssetExporter for why.
     public bool Opaque { get; init; }
 
+    /// Clear the part of every texture no model in this weapon samples. See UvCoverage.
+    public bool MaskUnused { get; init; }
+
     private AssetExporter _exporter => _writer ??= new AssetExporter(bundles) { Opaque = Opaque };
 
     /// Types worth a file of their own. Everything else is scene plumbing that reads better as part
@@ -56,6 +59,8 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         var assets = new List<ExportedAsset>();
         var skipped = new List<string>();
+
+        _exporter.Coverage = MaskUnused ? Sampled(tree) : null;
 
         // What the weapon itself contributes when a skin was asked for.
         //
@@ -137,6 +142,86 @@ public sealed class WeaponExporter(BundleSet bundles)
         DrawPackIcon(tree, directory, skipped);
 
         return new WeaponExport(directory, assets, skipped);
+    }
+
+    /// Which texels of each of this weapon's textures its own models actually sample.
+    ///
+    /// Built from the same pairing of submesh to material the preview draws with, so what an author
+    /// opens in an image editor and what they see on the model agree about which island is which.
+    ///
+    /// A texture nothing here draws is left whole, and that is most of them: a shop icon, a gloss
+    /// or mask map bound beside the main slot, anything reached through a component. Clearing those
+    /// would mean guessing which mesh reads them, and a wrong guess erases work.
+    private Func<string, long, int, int, bool[]?> Sampled(WeaponTree tree)
+    {
+        var uses = new Dictionary<(string Bundle, long PathId), List<(long Mesh, int SubMesh)>>();
+
+        void Add(string bundle, long pathId, (long, int) use)
+        {
+            var key = ((bundle.Length > 0 ? bundle : tree.PrefabBundle ?? "").ToLowerInvariant(), pathId);
+            if (!uses.TryGetValue(key, out var drawn)) uses[key] = drawn = [];
+            if (!drawn.Contains(use)) drawn.Add(use);
+        }
+
+        foreach (var dressed in tree.MeshTextures)
+            for (var slot = 0; slot < dressed.BySubMesh.Count; slot++)
+                if (dressed.BySubMesh[slot] is { } node)
+                    Add(node.Bundle, node.PathId, (dressed.MeshPathId, slot));
+
+        // A skin repaints the weapon's own geometry, and which of its materials lands in which slot
+        // is the renderer's business rather than the skin's — so a skin's texture is held against
+        // everything this weapon draws. Wider than it needs to be, and wide is the safe direction.
+        var everything = tree.MeshTextures
+            .SelectMany(d => Enumerable.Range(0, d.BySubMesh.Count).Select(slot => (d.MeshPathId, slot)))
+            .ToList();
+
+        foreach (var material in tree.Skins.SelectMany(s => s.Materials))
+            if (material.Main is { } main)
+            {
+                var (bundle, pathId) = material.Locate(main);
+                foreach (var use in everything) Add(bundle, pathId, use);
+            }
+
+        var read = new Dictionary<long, UnityMesh?>();
+
+        return (bundle, pathId, width, height) =>
+        {
+            if (!uses.TryGetValue((bundle.ToLowerInvariant(), pathId), out var drawn)) return null;
+
+            var models = drawn
+                .Select(u => (Mesh: MeshFor(tree, read, u.Mesh), u.SubMesh))
+                .Where(u => u.Mesh is not null)
+                .Select(u => (u.Mesh!, u.SubMesh))
+                .ToList();
+
+            return models.Count == 0 ? null : UvCoverage.Of(models, width, height);
+        };
+    }
+
+    /// One of the weapon's meshes, unpacked, read once however many textures ask about it.
+    private UnityMesh? MeshFor(WeaponTree tree, Dictionary<long, UnityMesh?> read, long pathId)
+    {
+        if (read.TryGetValue(pathId, out var known)) return known;
+
+        if (tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh && a.PathId == pathId)
+            is not { } node) return read[pathId] = null;
+
+        var bundle = node.Bundle.Length > 0 ? node.Bundle : tree.PrefabBundle ?? "";
+
+        try
+        {
+            var file = bundles.Open(bundle);
+            var info = file.file.GetAssetInfo(pathId);
+            var field = info is null ? null : bundles.Context.Deserialize(file, info);
+
+            return read[pathId] = field is null
+                ? null
+                : UnityMesh.Read(field, (path, offset, size) => bundles.ReadResource(bundle, path, offset, size));
+        }
+        catch (Exception e) when (e is IOException or FileNotFoundException or NotSupportedException)
+        {
+            return read[pathId] = null;
+        }
     }
 
     /// Records what was written, without listing the same file twice.

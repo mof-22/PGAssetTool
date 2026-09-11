@@ -4,7 +4,8 @@ namespace PGAssetTool.Core.Pack;
 
 /// One replaceable file in a workspace, and whether it has been touched since it was written out.
 public sealed record WorkspaceFile(
-    string RelativePath, string FullPath, AssetAddress Target, string Operation, bool Edited, long Bytes)
+    string RelativePath, string FullPath, AssetAddress Target, string Operation, bool Edited, long Bytes,
+    bool AlphaIsMask = false)
 {
     public string Folder
     {
@@ -23,7 +24,11 @@ public sealed record WorkspaceFile(
     /// export puts them in folders that say so. A model texture keeps emission there instead, so
     /// honouring it blanks the picture. Decided from the folder because that is what the workspace
     /// actually records; the asset it came from is no longer at hand by the time anyone looks.
-    public bool AlphaIsCoverage => Folder.Contains("icon", StringComparison.OrdinalIgnoreCase);
+    ///
+    /// A masked texture means it too, and for the same reason the other way round: its alpha is
+    /// exactly which part of the image is used, so honouring it is what shows the islands.
+    public bool AlphaIsCoverage =>
+        AlphaIsMask || Folder.Contains("icon", StringComparison.OrdinalIgnoreCase);
 }
 
 /// A directory an author is working in, as it stands right now.
@@ -64,7 +69,7 @@ public sealed record WorkspaceView(string Directory, PackManifest Manifest, IRea
             var info = new FileInfo(full);
             return new WorkspaceFile(
                 operation.Source, full, operation.Target, operation.Op,
-                changed.Contains(operation), info.Exists ? info.Length : 0);
+                changed.Contains(operation), info.Exists ? info.Length : 0, operation.AlphaIsMask);
         })
         .OrderBy(f => f.Folder, StringComparer.Ordinal)
         .ThenBy(f => f.Name, StringComparer.Ordinal)
