@@ -323,7 +323,9 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// where somebody has framed the thing, and a named angle is about which way it faces.
     public IReadOnlyList<ViewPreset> Views { get; } =
     [
-        new("Default", 0.7f, 0.35f),
+        // The opening view is the only one that carries a tilt, because it is the only one copying
+        // the game: the others are the six square-on directions and a tilt would be in the way.
+        new("Default", new Camera().Yaw, new Camera().Pitch, new Camera().Roll),
         new("Front", 0f, 0f),
         new("Back", MathF.PI, 0f),
         new("Left", -MathF.PI / 2, 0f),
@@ -336,7 +338,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     private void Look(ViewPreset? preset)
     {
         if (preset is null) return;
-        Camera = Camera with { Yaw = preset.Yaw, Pitch = preset.Pitch, Roll = 0f };
+        Camera = Camera with { Yaw = preset.Yaw, Pitch = preset.Pitch, Roll = preset.Roll };
     }
 
     /// Going back to the automatic answer is immediate; anything else waits for its picture, which
@@ -393,9 +395,9 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 /// from the one in the list the combo box was showing. The combo box, asked to select something it
 /// did not have, selected nothing instead, and the model went straight back to the texture it
 /// started with. Picking a skin appeared to do nothing at all.
-/// A named way of facing a model. Yaw and pitch only: the rest of the camera is the framing, which
-/// belongs to whoever set it.
-public sealed record ViewPreset(string Name, float Yaw, float Pitch)
+/// A named way of facing a model. Which way it faces and how it is tilted: the rest of the camera
+/// is the framing, which belongs to whoever set it.
+public sealed record ViewPreset(string Name, float Yaw, float Pitch, float Roll = 0f)
 {
     public override string ToString() => Name;
 }

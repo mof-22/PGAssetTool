@@ -19,8 +19,10 @@ public static class PackIcon
 
     public const int Size = 256;
 
-    /// Which way up the model is looked at. How far away is worked out per model rather than fixed.
-    public static Camera Angle { get; } = new(Yaw: 0.7f, Pitch: 0.35f);
+    /// Which way up the model is looked at: the angle the preview opens at, which is the angle the
+    /// game draws its own shop pictures at. How far away is worked out per model rather than fixed,
+    /// which is the one thing this does differently from the preview.
+    public static Camera Angle { get; } = new();
 
     /// How much of the frame the model is made to take up, leaving a margin so it does not read as
     /// a crop of something larger.

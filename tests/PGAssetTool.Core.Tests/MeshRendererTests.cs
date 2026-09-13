@@ -655,8 +655,10 @@ public class MeshRendererTests
         // frame, not about the model's own centre. Pan the right-hand end of a bar into the middle
         // and turn; it has to still be there. Turning about the model centre instead would pull it
         // away, and the middle of the frame would be empty.
+        // Level and untilted, and stated rather than taken from the defaults: what is being
+        // measured is where the pivot ends up, and the opening angle is free to move.
         var bar = Mesh([-1, -0.2f, 0, 1, -0.2f, 0, 1, 0.2f, 0, -1, 0.2f, 0], [0, 1, 2, 0, 2, 3]);
-        var straight = new Camera(Yaw: 0, Pitch: 0);
+        var straight = new Camera(Yaw: 0, Pitch: 0, Roll: 0, Distance: 1.5f);
 
         // A half-frame is Distance radii across and the bar is about a radius long each way, so
         // this puts the middle of the frame just inside its right-hand end.

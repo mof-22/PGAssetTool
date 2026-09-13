@@ -21,8 +21,26 @@ namespace PGAssetTool.Core.Preview;
 /// inside the shorter side of the pane, which is as close as a model can be framed without a
 /// corner of it going off the edge at some angle.
 /// </param>
+/// <param name="Yaw">
+/// The defaults for this, the pitch and the roll are the angle the game draws its own `icon1_big`
+/// shop pictures at, so an author opening a weapon meets the shape they already know.
+///
+/// Measured rather than chosen. Fitting the silhouette to the icons never rose above about 0.8 and
+/// never sharply — the icons carry a drawn outline that fattens their shape — so the author matched
+/// 55 weapons by hand and the angles were read back against each frame the tool might stand a model
+/// up in. Against the bounding box with the muzzle faced they agree to within 8 degrees; against the
+/// bounding box alone the yaw spreads nearly three times as far, which is what facing is worth.
+///
+/// The 39 that fire agree to 4.6 degrees of yaw. The 16 that do not spread over 35 and sit around
+/// the same middle: a blade has no convention rather than a different one, so there is one opening
+/// angle and not two, and a knife will not match its own icon whatever is done.
+/// </param>
+/// <param name="Roll">
+/// Not zero by default, which looks like a mistake and is not: every icon in the game lies along a
+/// diagonal with the muzzle up and to the right.
+/// </param>
 public sealed record Camera(
-    float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1f, float Roll = 0f,
+    float Yaw = -0.794f, float Pitch = -0.314f, float Distance = 1f, float Roll = 0.271f,
     float PivotX = 0f, float PivotY = 0f, float PivotZ = 0f)
 {
     /// <param name="dx">Rightwards, in half-frames: 1 moves the model a half-frame to the right.</param>

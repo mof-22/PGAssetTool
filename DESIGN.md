@@ -412,6 +412,13 @@ than an offset in the frame — so panning something into view and then turning 
 **Pitch is not clamped.** The frame's right axis comes from the yaw alone, so there is no pole for
 it to collapse at, and going over the top is how a model is looked at from underneath.
 
+**The preview opens tilted.** The default camera is the angle the game draws its own `icon1_big`
+shop pictures at — muzzle up and to the right, nearly side-on — so an author meets the shape they
+already know. It was measured, not chosen: fitting silhouettes to the icons stalled at about 0.8
+because the icons carry a drawn outline, so 55 weapons were matched by hand and read back against
+each candidate frame. Against the faced bounding box the 39 that fire agree to within 5 degrees;
+blades scatter over 35 around the same middle, which is no convention rather than a second one.
+
 **A pack's picture is framed from the model's vertices, not from a drawing of it.** A drawing is
 clipped at the frame, so a model three times too wide reads as one that fits exactly.
 
