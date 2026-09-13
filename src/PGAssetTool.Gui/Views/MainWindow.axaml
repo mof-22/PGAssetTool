@@ -142,7 +142,7 @@
                    RenderOptions.BitmapInterpolationMode="None" />
       
             <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
-                          Framing="{Binding Rest}"
+                          Framing="{Binding Rest}" Standing="{Binding Standing}"
                           Camera="{Binding Camera, Mode=TwoWay}"
                           IsVisible="{Binding HasMesh}" />
 

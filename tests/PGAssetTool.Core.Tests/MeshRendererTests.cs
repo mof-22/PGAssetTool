@@ -596,10 +596,13 @@ public class MeshRendererTests
     {
         // Half a frame to the right means half a frame to the right, and the model itself is
         // unchanged — which is what separates a pan from an orbit that happens to look similar.
+        // Far enough back that half a frame of pan still leaves the whole quad on screen: what is
+        // being measured is where it lands, and a clipped model lands wherever the frame ends.
         var quad = Quad(scale: 0.3f);
+        var back = new Camera(Yaw: 0, Pitch: 0, Distance: 2f);
 
-        var centred = Draw(quad, new Camera(Yaw: 0, Pitch: 0));
-        var moved = Draw(quad, new Camera(Yaw: 0, Pitch: 0).Panned(0.5f, 0));
+        var centred = Draw(quad, back);
+        var moved = Draw(quad, back.Panned(0.5f, 0));
 
         Assert.Equal(Covered(centred), Covered(moved), tolerance: 4);
         Assert.Equal(Middle(centred) + Size / 4, Middle(moved), tolerance: 2);
@@ -609,9 +612,10 @@ public class MeshRendererTests
     public void PanningUpMovesItUpTheScreenRatherThanDownIt()
     {
         var quad = Quad(scale: 0.3f);
+        var back = new Camera(Yaw: 0, Pitch: 0, Distance: 2f);
 
-        var centred = Rows(Draw(quad, new Camera(Yaw: 0, Pitch: 0)));
-        var raised = Rows(Draw(quad, new Camera(Yaw: 0, Pitch: 0).Panned(0, 0.5f)));
+        var centred = Rows(Draw(quad, back));
+        var raised = Rows(Draw(quad, back.Panned(0, 0.5f)));
 
         Assert.True(raised < centred, $"panning up put it at row {raised}, below row {centred}");
     }

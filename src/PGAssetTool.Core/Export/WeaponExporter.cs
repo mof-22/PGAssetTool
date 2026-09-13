@@ -476,7 +476,17 @@ public sealed class WeaponExporter(BundleSet bundles)
             if (subject.Mesh is null) return;
 
             var textures = subject.Slots.BySubMesh.Select(TextureFor).ToList();
-            var picture = Preview.PackIcon.Render(subject.Mesh, textures);
+
+            // Standing the way the preview stands it, so a pack's picture faces the same way as the
+            // model the author built it from — and so a shelf of packs does not read as a shelf of
+            // weapons pointing at each other.
+            var node = tree.PrefabAssets.FirstOrDefault(a => a.PathId == subject.Slots.MeshPathId);
+            var bundle = node?.Bundle is { Length: > 0 } named ? named : tree.PrefabBundle;
+            var standing = bundle is null
+                ? (Preview.MeshRenderer.Basis?)null
+                : Preview.Facing.Standing(bundles, bundle, subject.Mesh, subject.Slots.MeshPathId);
+
+            var picture = Preview.PackIcon.Render(subject.Mesh, textures, standing: standing);
             if (Preview.PackIcon.IsBlank(picture)) return;
 
             Preview.PackIcon.Write(picture, Path.Combine(directory, Preview.PackIcon.FileName));

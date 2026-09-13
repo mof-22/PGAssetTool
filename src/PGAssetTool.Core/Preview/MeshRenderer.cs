@@ -16,8 +16,13 @@ namespace PGAssetTool.Core.Preview;
 /// In radii rather than in model units so it means the same thing on a pistol and a launcher, and
 /// so a resized pane keeps the framing rather than throwing it away.
 /// </param>
+/// <param name="Distance">
+/// How many of the model's own radii the half-frame covers. One puts the bounding sphere exactly
+/// inside the shorter side of the pane, which is as close as a model can be framed without a
+/// corner of it going off the edge at some angle.
+/// </param>
 public sealed record Camera(
-    float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1.5f, float Roll = 0f,
+    float Yaw = 0.7f, float Pitch = 0.35f, float Distance = 1f, float Roll = 0f,
     float PivotX = 0f, float PivotY = 0f, float PivotZ = 0f)
 {
     /// <param name="dx">Rightwards, in half-frames: 1 moves the model a half-frame to the right.</param>
@@ -88,6 +93,18 @@ public sealed record Camera(
     public Camera Zoomed(float factor) => this with { Distance = Math.Clamp(Distance * factor, 0.4f, 20f) };
 }
 
+/// The two rotations between a model's own vertices and the screen, for a caller that wants to
+/// decide them itself rather than take the ones a <see cref="Camera"/> implies.
+///
+/// <c>Standing</c> stands the model up before anybody looks at it; the renderer's own answer is the
+/// bounding box sorted by extent, which knows nothing about which way a gun points — see
+/// <see cref="Facing"/>, which does. <c>View</c> is where the viewer is standing.
+///
+/// Both are ordinary rotations, so a caller with its own answer to either draws through the same
+/// rasterizer as everything else instead of a copy of it. Distance and pivot still come from the
+/// camera.
+public readonly record struct Viewpoint(MeshRenderer.Basis Standing, MeshRenderer.Basis View);
+
 /// Draws a mesh into a pixel buffer, in software.
 ///
 /// Avalonia has no 3D of its own, and reaching for OpenGL would trade a few hundred lines for a
@@ -137,9 +154,13 @@ public static class MeshRenderer
     /// magazine is out, so what an author sees is the whole gun sliding about rather than the part
     /// that is actually moving. Framing by the model at rest holds the camera still.
     /// </param>
+    /// <param name="viewpoint">
+    /// The two rotations to draw with, when the caller has its own answer. Null takes the bounding
+    /// box for the standing pose and the camera's angles for the view.
+    /// </param>
     public static void Render(
         UnityMesh mesh, Camera camera, RenderTarget target, IReadOnlyList<PreviewImage?>? textures = null,
-        UnityMesh? framing = null)
+        UnityMesh? framing = null, Viewpoint? viewpoint = null)
     {
         if (target.IsEmpty) return;
 
@@ -153,10 +174,10 @@ public static class MeshRenderer
         var uvs = mesh.Get(VertexAttribute.TexCoord0);
         var held = framing ?? mesh;
         var (centre, size, radius) = Bounds(held, held.Get(VertexAttribute.Position) ?? positions);
-        var upright = Upright.For(size);
+        var upright = viewpoint?.Standing ?? Upright.For(size).AsBasis();
         if (radius <= 0) radius = 1;
 
-        var view = View(camera);
+        var view = viewpoint?.View ?? View(camera);
         // Distance is literally how many model radii the half-frame covers, so 1.5 leaves a margin.
         var scale = Math.Min(width, height) * 0.5f / (radius * camera.Distance);
 
@@ -226,6 +247,19 @@ public static class MeshRenderer
         }
     }
 
+    /// How this model is stood up when nobody says otherwise: the bounding box sorted by extent.
+    ///
+    /// Exposed so something that knows better — <see cref="Facing"/> — can start from this answer
+    /// and correct it rather than work out a second one.
+    public static Basis Standing(UnityMesh mesh)
+    {
+        var positions = mesh.Get(VertexAttribute.Position);
+        if (positions is null || mesh.VertexCount == 0) return Basis.Identity;
+
+        var (_, size, _) = Bounds(mesh, positions);
+        return Upright.For(size).AsBasis();
+    }
+
     /// Where the model lands on screen for a given view, in half-frames from the middle: -1 is the
     /// left or top edge of a square frame, +1 the right or bottom.
     ///
@@ -233,7 +267,8 @@ public static class MeshRenderer
     /// A model three times too wide for the frame covers it edge to edge, and everything read off
     /// that says the framing is already perfect — which is why an icon of a long weapon, zoomed in,
     /// came out with both ends cut off however many times the framing was corrected.
-    public static (float Left, float Top, float Right, float Bottom)? Extent(UnityMesh mesh, Camera camera)
+    public static (float Left, float Top, float Right, float Bottom)? Extent(
+        UnityMesh mesh, Camera camera, Viewpoint? viewpoint = null)
     {
         var positions = mesh.Get(VertexAttribute.Position);
         if (positions is null || mesh.VertexCount == 0) return null;
@@ -241,8 +276,8 @@ public static class MeshRenderer
         var (centre, size, radius) = Bounds(mesh, positions);
         if (radius <= 0) radius = 1;
 
-        var upright = Upright.For(size);
-        var view = View(camera);
+        var upright = viewpoint?.Standing ?? Upright.For(size).AsBasis();
+        var view = viewpoint?.View ?? View(camera);
         var (pivotX, pivotY, pivotZ) =
             (camera.PivotX * radius, camera.PivotY * radius, camera.PivotZ * radius);
 
@@ -268,7 +303,7 @@ public static class MeshRenderer
     }
 
     /// How much a vertex's normal points at the viewer. Negative is turned away.
-    private static float Facing(Basis view, Upright upright, float[] normals, int vertex)
+    private static float Facing(Basis view, Basis upright, float[] normals, int vertex)
     {
         var (ux, uy, uz) = upright.Apply(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]);
         var (_, _, nz) = view.Apply(ux, uy, uz);
@@ -277,7 +312,7 @@ public static class MeshRenderer
 
     /// A single light over the viewer's shoulder, with enough ambient that faces turned away stay
     /// readable instead of going black.
-    private static float Lambert(Basis view, Upright upright, float[] normals, int vertex)
+    private static float Lambert(Basis view, Basis upright, float[] normals, int vertex)
     {
         var (ux, uy, uz) = upright.Apply(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]);
         var (nx, ny, nz) = view.Apply(ux, uy, uz);
@@ -392,17 +427,26 @@ public static class MeshRenderer
             var odd = (order[0], order[1]) is (0, 2) or (1, 0) or (2, 1);
             return new Upright(order[0], order[1], order[2], odd ? -1f : 1f);
         }
+
+        /// The same permutation as three rows, so something that stands a model up another way can
+        /// hand over a rotation and be treated identically.
+        public Basis AsBasis() => new(
+            Right == 0 ? 1 : 0, Right == 1 ? 1 : 0, Right == 2 ? 1 : 0,
+            Up == 0 ? 1 : 0, Up == 1 ? 1 : 0, Up == 2 ? 1 : 0,
+            Depth == 0 ? Flip : 0, Depth == 1 ? Flip : 0, Depth == 2 ? Flip : 0);
     }
 
     /// The camera's axes, as three rows that turn a model-space vector into view space.
-    internal readonly record struct Basis(
+    public readonly record struct Basis(
         float Rx, float Ry, float Rz, float Ux, float Uy, float Uz, float Fx, float Fy, float Fz)
     {
+        public static Basis Identity => new(1, 0, 0, 0, 1, 0, 0, 0, 1);
+
         public (float X, float Y, float Z) Apply(float x, float y, float z)
             => (Rx * x + Ry * y + Rz * z, Ux * x + Uy * y + Uz * z, Fx * x + Fy * y + Fz * z);
     }
 
-    internal static Basis View(Camera camera)
+    public static Basis View(Camera camera)
     {
         var (cy, sy) = (MathF.Cos(camera.Yaw), MathF.Sin(camera.Yaw));
         var (cp, sp) = (MathF.Cos(camera.Pitch), MathF.Sin(camera.Pitch));

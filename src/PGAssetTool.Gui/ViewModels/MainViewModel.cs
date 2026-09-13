@@ -1206,6 +1206,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         Clips()))
                     : (null, []);
 
+                // Which way round it opens, from the prefab rather than from the bounding box, so
+                // every weapon points the same way. Read here because it needs the bundle, which
+                // the renderer has no business holding; on the same thread and lock as the rest.
+                var standing = loaded is UnityMesh model
+                    ? await Task.Run(() => Facing.Standing(_bundles!, node.Bundle, model, node.PathId))
+                    : (MeshRenderer.Basis?)null;
+
                 switch (loaded)
                 {
                     case PreviewImage picture:
@@ -1222,7 +1229,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                             subject: node.Within is { } within
                                 ? $"{within.Path}/{node.Bundle}:{node.PathId}"
                                 : $"{node.Bundle}:{node.PathId}",
-                            skeleton: skeleton, motions: motions);
+                            skeleton: skeleton, motions: motions, standing: standing);
 
                         // After the model, which puts back whatever this mesh was last wearing.
                         // Taken whether or not it was found, so it cannot arrive on the next one.

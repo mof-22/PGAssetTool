@@ -34,6 +34,10 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     [ObservableProperty] private UnityMesh? _mesh;
     [ObservableProperty] private PreviewSound? _sound;
 
+    /// How this model is stood up, when something knew better than the bounding box. Null is the
+    /// renderer's own answer, which is what anything that is not a weapon gets.
+    [ObservableProperty] private MeshRenderer.Basis? _standing;
+
     /// One per submesh, resolved from the materials the renderer drawing this mesh holds.
     [ObservableProperty] private IReadOnlyList<PreviewImage?>? _meshTextures;
 
@@ -280,8 +284,14 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// A model nobody has looked at yet starts square, since an angle chosen for a pistol says
     /// nothing about a rocket launcher.
     /// </param>
+    /// <param name="standing">
+    /// How to stand the model up, when the caller knows better than the bounding box. For a weapon
+    /// that is Facing, which reads the prefab so the barrel points the same way every time; for a
+    /// mesh opened on its own there is no prefab to ask and this stays null.
+    /// </param>
     public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures,
-        string? subject = null, Skeleton? skeleton = null, IReadOnlyList<Motion>? motions = null)
+        string? subject = null, Skeleton? skeleton = null, IReadOnlyList<Motion>? motions = null,
+        MeshRenderer.Basis? standing = null)
     {
         Dress(skeleton, motions);
         _subject = subject;
@@ -294,6 +304,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Image = null;
         Rest = mesh;
         Mesh = mesh;
+        Standing = standing;
         MeshTextures = textures;
         ChosenTexture = seen?.Texture;
         Camera = seen?.Camera ?? new Camera();

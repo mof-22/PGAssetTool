@@ -37,14 +37,25 @@ public static class PackIcon
     /// The whole of it, whatever the view being copied was showing. The pane a snapshot is taken
     /// from is usually much wider than it is tall, and a square picture of the same view cuts both
     /// ends off a long weapon — so what the icon keeps is the angle, and it finds its own distance.
+    /// <param name="standing">
+    /// How to stand the model up, when the caller knows better than the bounding box does — which
+    /// for a weapon means <see cref="Facing"/>, so every icon points the same way. Null takes the
+    /// renderer's own answer.
+    /// </param>
     public static PreviewImage Render(
-        UnityMesh mesh, IReadOnlyList<PreviewImage?>? textures, Camera? camera = null, int size = Size)
+        UnityMesh mesh, IReadOnlyList<PreviewImage?>? textures, Camera? camera = null, int size = Size,
+        MeshRenderer.Basis? standing = null)
     {
         var target = new RenderTarget();
         target.Resize(size, size);
 
-        var view = Frame(mesh, camera ?? Angle);
-        MeshRenderer.Render(mesh, view, target, textures);
+        var at = camera ?? Angle;
+        var viewpoint = standing is { } stood
+            ? new Viewpoint(stood, MeshRenderer.View(at))
+            : (Viewpoint?)null;
+
+        var view = Frame(mesh, at, viewpoint);
+        MeshRenderer.Render(mesh, view, target, textures, viewpoint: viewpoint);
 
         // The rasterizer writes an opaque pixel where it draws and leaves the rest at zero, so what
         // it produces is already straight alpha and needs no unpicking.
@@ -56,9 +67,9 @@ public static class PackIcon
     /// Exact rather than iterative, because it is measured from the model and not from a picture of
     /// it: a drawing is clipped at the frame, so a model that overflows reads as one that fits, and
     /// correcting from that could only ever creep towards the answer a few percent at a time.
-    private static Camera Frame(UnityMesh mesh, Camera camera)
+    private static Camera Frame(UnityMesh mesh, Camera camera, Viewpoint? viewpoint)
     {
-        if (MeshRenderer.Extent(mesh, camera) is not { } at) return camera;
+        if (MeshRenderer.Extent(mesh, camera, viewpoint) is not { } at) return camera;
 
         // Panned takes half-frames rightwards and upwards; the extent counts downwards.
         var centred = camera.Panned(

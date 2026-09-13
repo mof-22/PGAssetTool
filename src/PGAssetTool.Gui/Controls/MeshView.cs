@@ -57,6 +57,23 @@ public sealed class MeshView : Control
         set => SetValue(FramingProperty, value);
     }
 
+    /// How to stand the model up, when something upstream knows better than the bounding box.
+    ///
+    /// For a weapon that is Facing, which reads the prefab and turns the model so the barrel points
+    /// the same way every time. Null leaves the renderer to sort the bounding box, which is right
+    /// for anything that is not a weapon and for a mesh opened on its own in the editor.
+    public static readonly StyledProperty<MeshRenderer.Basis?> StandingProperty =
+        AvaloniaProperty.Register<MeshView, MeshRenderer.Basis?>(nameof(Standing));
+
+    public MeshRenderer.Basis? Standing
+    {
+        get => GetValue(StandingProperty);
+        set => SetValue(StandingProperty, value);
+    }
+
+    private Viewpoint? Viewpoint
+        => Standing is { } stood ? new Viewpoint(stood, MeshRenderer.View(Camera)) : null;
+
     public Camera Camera
     {
         get => GetValue(CameraProperty);
@@ -74,7 +91,8 @@ public sealed class MeshView : Control
         // another or the same one has merely been read again is a question the control cannot
         // answer, and answering it wrongly threw away an angle somebody had just chosen; whoever
         // owns the camera decides.
-        AffectsRender<MeshView>(MeshProperty, TexturesProperty, CameraProperty, FramingProperty);
+        AffectsRender<MeshView>(
+            MeshProperty, TexturesProperty, CameraProperty, FramingProperty, StandingProperty);
     }
 
     /// Set while the middle button is down, which pans instead of turning.
@@ -86,7 +104,7 @@ public sealed class MeshView : Control
     /// pane is neither. The camera is the one the person turned to, which is the whole point —
     /// they have already decided what shows the model best.
     public PreviewImage? Snapshot(int size)
-        => Mesh is { } mesh ? PackIcon.Render(mesh, Textures, Camera, size) : null;
+        => Mesh is { } mesh ? PackIcon.Render(mesh, Textures, Camera, size, Standing) : null;
 
     /// Puts the view back to square. A tilt or a pan is easy to lose track of, and hunting the way
     /// back by hand is worse than either was useful.
@@ -160,7 +178,7 @@ public sealed class MeshView : Control
             _target.Resize(width, height);
         }
 
-        MeshRenderer.Render(mesh, Camera, _target, Textures, Framing);
+        MeshRenderer.Render(mesh, Camera, _target, Textures, Framing, Viewpoint);
 
         using (var locked = _bitmap.Lock())
             System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);

@@ -415,6 +415,17 @@ it to collapse at, and going over the top is how a model is looked at from under
 **A pack's picture is framed from the model's vertices, not from a drawing of it.** A drawing is
 clipped at the frame, so a model three times too wide reads as one that fits exactly.
 
+**Which end a weapon's barrel is on comes from the prefab, not from the model's shape.** The
+bounding box says which side is longest and nothing about which end is which, so half the weapons
+opened pointing left. Guessing from the geometry does not work: four signals measured against 157
+weapons labelled by hand all read the same thing — that one end carries more of the model — and the
+best, counting vertices, called 74.5%. The prefab knows outright: `GunFlash`, `BulletSpawnPoint` and
+`Point_Arm_Left` are where the muzzle and the hand are, and the first of them present is right for
+150 of the 151 weapons it answers for. `Facing` turns the model a half circle about the vertical
+when the muzzle would be on the left — a half circle and not a mirror, or every texture with writing
+on it reads backwards — and decides which end is which along the long axis only, because the other
+two axes swing into the answer as the opening angle changes.
+
 **`FsbAdpcm`** decodes the game's ADPCM here because Fmod5Sharp does not saturate the predictor. The
 container layout was read off the data; it is not documented anywhere reachable.
 
