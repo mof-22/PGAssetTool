@@ -453,6 +453,10 @@ container layout was read off the data; it is not documented anywhere reachable.
 each other only once both are filled. Mirroring mid-load writes one model's angle into another's
 memory.
 
+**A pack's protection and picture are saved the moment they are chosen; its text waits for Save.**
+A three-state checkbox turned protection off on its first click, and only Save made anything stick.
+And because any write to a workspace makes the editor read it again, a re-read keeps text typed and
+not yet saved rather than refilling the form from disk, which it used to do without a word.
 ---
 
 ## Verifying a change

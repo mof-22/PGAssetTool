@@ -126,7 +126,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Whether a built pack is signed and scrambled unless its own manifest says otherwise.
     [ObservableProperty] private bool _protectPacks;
 
-    partial void OnProtectPacksChanged(bool value) => Remember();
+    partial void OnProtectPacksChanged(bool value)
+    {
+        // The editor names this answer in its own list, so it has to hear when it changes.
+        Editor.ProtectsByDefault = value;
+        Remember();
+    }
 
     /// Whether writing to the game is done for speed rather than for size. See BundlePacking.
     [ObservableProperty] private bool _fasterApplies;

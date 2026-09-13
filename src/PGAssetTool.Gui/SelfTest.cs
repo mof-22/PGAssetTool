@@ -899,6 +899,9 @@ internal static class SelfTest
             if (PGAssetTool.Core.Pack.Workspace.Changed(written, saved).Count != 0)
                 return Fail("saving the details made untouched files look edited");
 
+            if (ChoicesSaveAtOnceAndLeaveTypingAlone(model, written) is { } choiceProblem)
+                return Fail(choiceProblem);
+
             if (PackIconIsTheModel(model, written) is { } iconProblem) return Fail(iconProblem);
 
             // Built protected once, so the whole loop is exercised on a signed pack rather than on
@@ -2772,6 +2775,48 @@ internal static class SelfTest
         PGAssetTool.Core.Pack.Workspace.Save(
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
+    }
+
+    /// Protection is picked from a list and saved the moment it is picked, and the re-read that the
+    /// save sets off leaves whatever is half-typed in the form where it was.
+    ///
+    /// Both halves failed once. A three-state checkbox turned protection off on the first click, and
+    /// the only way to make it stick was Save; and every re-read of the workspace refilled the form
+    /// from disk, so a description being typed vanished whenever anything in the folder was written.
+    private static string? ChoicesSaveAtOnceAndLeaveTypingAlone(MainViewModel model, string written)
+    {
+        const string typed = "half-typed, never saved";
+
+        model.ProtectPacks = true;
+        var followingLabel = model.Editor.ProtectChoices[0].Label;
+        model.ProtectPacks = false;
+        var followingLater = model.Editor.ProtectChoices[0].Label;
+
+        model.Editor.PackDescription = typed;
+        model.Editor.SelectedProtect = model.Editor.ProtectChoices.First(c => c.Value == true);
+
+        var onDisk = PGAssetTool.Core.Pack.Workspace.Read(written);
+
+        // What the watcher would do a moment later. Asked directly: its timer does not run here.
+        model.Editor.Refresh();
+        var survived = model.Editor.PackDescription == typed;
+        var stillChosen = model.Editor.SelectedProtect?.Value;
+
+        Console.WriteLine($"editor   protection: '{followingLabel}', then '{followingLater}'; "
+            + $"picking 'protect' wrote {onDisk.Protect?.ToString() ?? "nothing"} at once, the form still says "
+            + $"{stillChosen?.ToString() ?? "follow"}, and the typed description {(survived ? "survived" : "was lost in")} the re-read");
+
+        model.Editor.RevertDetailsCommand.Execute(null);
+
+        if (!followingLabel.Contains("— protected") || !followingLater.Contains("not protected"))
+            return "the first protection choice does not say what Options currently answers";
+        if (onDisk.Protect != true) return "picking 'protect this pack' did not reach the manifest until Save";
+        if (onDisk.Description == typed) return "picking protection saved the half-typed description along with it";
+        if (stillChosen != true) return "the re-read after picking protection put the old choice back";
+        if (!survived) return "re-reading the workspace threw away text typed into the form";
+        if (model.Editor.PackDescription == typed) return "Revert kept the typing it was asked to throw away";
+
+        return null;
     }
 
     /// Options keeps its Close button on screen however little screen there is and however much

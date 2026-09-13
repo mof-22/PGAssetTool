@@ -137,7 +137,8 @@ into **Remove and delete**, which throws the kept pack file away as well.
 **Build pack** writes a `.pgmod` into the workspace. Hand it to anyone; it names assets in their
 installation rather than carrying game content.
 
-Turn on **Protect this pack** and it is signed as well. Signing says the contents are what the holder
+Choose **Protect this pack** under *Protection* in the pack details — or leave it following Options
+with protection on — and it is signed as well. Signing says the contents are what the holder
 of your key put in, so a pack somebody altered afterwards shows as altered — and your name is signed
 with them, so it cannot be moved onto somebody else's work, or taken off yours.
 

@@ -178,29 +178,131 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private string? _iconFile;
 
-    /// Whether this pack is signed and scrambled when built. Null means whatever the setting says.
-    [ObservableProperty] private bool? _protect;
+    /// Whether this pack is signed and scrambled when built: as Options says, or decided for this
+    /// pack alone.
+    ///
+    /// Three named choices rather than a three-state checkbox. The checkbox drew "as Options says"
+    /// as a dash, and one click on the dash turned protection *off* rather than on — so a pack meant
+    /// to be protected was built unsigned by somebody who had clicked exactly once, and nothing on
+    /// screen said otherwise. The first choice says what Options currently answers, so what will
+    /// happen is read rather than remembered.
+    public IReadOnlyList<ProtectChoice> ProtectChoices { get; } =
+    [
+        new(null, "As Options says — not protected"),
+        new(true, "Protect this pack"),
+        new(false, "Don't protect this pack"),
+    ];
 
-    private void ShowDetails(WorkspaceItem? workspace)
+    [ObservableProperty] private ProtectChoice? _selectedProtect;
+
+    /// What Options answers for a pack that has not decided, which the first choice names. Set by
+    /// the window's model whenever the setting changes.
+    public bool ProtectsByDefault
+    {
+        get => _protectsByDefault;
+        set
+        {
+            _protectsByDefault = value;
+            ProtectChoices[0].Label = value ? "As Options says — protected" : "As Options says — not protected";
+        }
+    }
+
+    private bool _protectsByDefault;
+
+    /// Set while the form is being filled from disk, so filling it is not mistaken for a choice.
+    private bool _loading;
+
+    /// A choice from a list is saved the moment it is made, and the text fields are not.
+    ///
+    /// The difference is deliberate. A half-typed version string is not something to write into a
+    /// directory other programs are watching; picking "Protect this pack" is finished the moment it
+    /// is picked, and leaving it to a Save button is how it came to be built unsigned.
+    partial void OnSelectedProtectChanged(ProtectChoice? value)
+    {
+        if (_loading || value is null) return;
+
+        SaveAtOnce(manifest => manifest with { Protect = value.Value }, value.Value switch
+        {
+            true => "Saved: this pack will be protected.",
+            false => "Saved: this pack will not be protected.",
+            null => "Saved: this pack does what Options says.",
+        });
+    }
+
+    partial void OnIconFileChanged(string? value)
+    {
+        if (_loading || value is null) return;
+        SaveAtOnce(manifest => manifest with { Icon = value == None ? "" : value }, "Saved: the pack's icon.");
+    }
+
+    private void SaveAtOnce(Func<PackManifest, PackManifest> change, string said)
+    {
+        if (SelectedWorkspace is not { } workspace) return;
+
+        try
+        {
+            Workspace.Save(workspace.Directory, change(Workspace.Read(workspace.Directory)));
+            Status = said;
+        }
+        catch (Exception ex)
+        {
+            Status = $"{ex.Message}  (while saving the pack details)";
+        }
+    }
+
+    /// The workspace the form was last filled from, and what its text fields said at that moment.
+    private (string Directory, string Folder, string Name, string Author, string Version, string Description)? _shown;
+
+    private bool TextEdited => _shown is { } shown
+        && (FolderName != shown.Folder || PackName != shown.Name || PackAuthor != shown.Author
+            || PackVersion != shown.Version || PackDescription != shown.Description);
+
+    /// <param name="keepTyping">
+    /// Whether text typed into the form and not yet saved survives the re-read. Revert is the one
+    /// caller that means to throw it away.
+    /// </param>
+    private void ShowDetails(WorkspaceItem? workspace, bool keepTyping = true)
     {
         var manifest = workspace is null ? null : Details(workspace.Directory);
 
-        IconChoices.Clear();
-        IconChoices.Add(None);
-        if (workspace is not null)
-            foreach (var picture in Workspace.Pictures(workspace.Directory)) IconChoices.Add(picture);
+        // The watcher re-reads the workspace whenever anything in it is written — the form's own
+        // saves, and a texture saved from an image editor alike — and every re-read refilled the
+        // form from disk. Whatever was half-typed into the description went with it, without a
+        // word. The same workspace keeps its typing now; a different one, or Revert, starts again
+        // from the file.
+        var keep = keepTyping && workspace is not null && TextEdited
+            && string.Equals(_shown?.Directory, workspace.Directory, StringComparison.OrdinalIgnoreCase);
 
-        // Whatever the manifest names, if it is still there. A pack that claims a picture it no
-        // longer carries is worse than one with none.
-        IconFile = manifest?.Icon is { Length: > 0 } named && IconChoices.Contains(named) ? named : None;
-        Protect = manifest?.Protect;
+        _loading = true;
+        try
+        {
+            IconChoices.Clear();
+            IconChoices.Add(None);
+            if (workspace is not null)
+                foreach (var picture in Workspace.Pictures(workspace.Directory)) IconChoices.Add(picture);
 
-        FolderName = workspace?.Name ?? "";
-        PackId = manifest?.Id ?? "";
-        PackName = manifest?.Name ?? "";
-        PackAuthor = manifest?.Author ?? "";
-        PackVersion = manifest?.Version ?? "";
-        PackDescription = manifest?.Description ?? "";
+            // Whatever the manifest names, if it is still there. A pack that claims a picture it no
+            // longer carries is worse than one with none.
+            IconFile = manifest?.Icon is { Length: > 0 } named && IconChoices.Contains(named) ? named : None;
+            SelectedProtect = ProtectChoices.First(c => c.Value == manifest?.Protect);
+            PackId = manifest?.Id ?? "";
+
+            if (keep) return;
+
+            FolderName = workspace?.Name ?? "";
+            PackName = manifest?.Name ?? "";
+            PackAuthor = manifest?.Author ?? "";
+            PackVersion = manifest?.Version ?? "";
+            PackDescription = manifest?.Description ?? "";
+
+            _shown = workspace is null
+                ? null
+                : (workspace.Directory, FolderName, PackName, PackAuthor, PackVersion, PackDescription);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private static PackManifest? Details(string directory)
@@ -227,9 +329,13 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 Version = PackVersion.Trim(),
                 Description = PackDescription.Trim(),
                 Icon = IconFile is null || IconFile == None ? "" : IconFile,
-                Protect = Protect,
+                Protect = SelectedProtect?.Value,
             };
             Workspace.Save(workspace.Directory, manifest);
+
+            // What was typed is now what is on disk, so the re-read that follows fills the form
+            // afresh rather than keeping the typing it has just saved.
+            _shown = null;
 
             // The watcher holds a handle on the directory it is watching, and Windows will not
             // rename a directory out from under one. Rescan puts a watcher back on wherever it ends.
@@ -257,7 +363,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     /// Puts the form back to what is on disk, for after a change nobody wants to keep.
     [RelayCommand]
-    private void RevertDetails() => ShowDetails(SelectedWorkspace);
+    private void RevertDetails() => ShowDetails(SelectedWorkspace, keepTyping: false);
 
     /// What is about to be deleted, while it is being asked about; null the rest of the time.
     [ObservableProperty] private Confirmation? _asking;
@@ -806,4 +912,16 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _watcher?.Dispose();
         _settle?.Dispose();
     }
+}
+
+/// One of the three answers to whether a pack is protected. The label of the first one changes
+/// with the setting it follows, so it is an object that says so rather than a string.
+public sealed partial class ProtectChoice(bool? value, string label) : ObservableObject
+{
+    /// What the manifest records: null for "as Options says".
+    public bool? Value { get; } = value;
+
+    [ObservableProperty] private string _label = label;
+
+    public override string ToString() => Label;
 }
