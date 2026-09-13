@@ -116,6 +116,12 @@ texture, and nothing else would say so.
 A texture no model here draws is written whole: a shop icon, a gloss or mask map bound beside the
 main slot, a particle sheet. Clearing those would mean guessing which mesh reads them.
 
+A texel is kept once a triangle covers a hundredth of it, and nothing more is asked. A texel a
+triangle only clips looks from Blender like one that does not belong, but how much of it is covered
+says nothing about whether the game draws it: a sliver of UV stretched over a large face lands on a
+great many pixels. Cleared one at a time and rendered from sixty angles, 55 of #64's 60 thinnest kept
+texels were drawn, and #416 has one covered 1.9% that lands on nearly forty thousand pixels — while
+texels covered 18% turned up that nothing draws at all. No threshold separates the two.
 ### A model plays its own animations
 
 The game's weapons are one skinned mesh on three or four bones — the slide, the magazine, the hands —

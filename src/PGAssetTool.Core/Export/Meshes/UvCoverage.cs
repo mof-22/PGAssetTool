@@ -39,6 +39,16 @@ public static class UvCoverage
     /// A hundredth of a texel is far below anything a triangle really covers — a UV island one texel
     /// wide still covers whole texels along its length — and far above what touching a boundary
     /// produces, which is nothing at all.
+    ///
+    /// Not higher, though a texel a triangle only clips looks from Blender like one that does not
+    /// belong. How much of a texel a triangle covers says nothing about whether the game draws it:
+    /// a sliver of UV stretched over a large face is magnified onto a great many pixels. Measured by
+    /// painting everything cleared magenta and rendering from 60 angles: on #64, 55 of the 60
+    /// thinnest kept texels were drawn when cleared on their own, one at 13.7% coverage on 1,128
+    /// pixels; on #416 a texel covered 1.9% is on 39,556. Raising this to 5% changed nothing on #64
+    /// and cleared seven drawn texels on #416, and 18–20% coverage turned up texels nothing draws at
+    /// all — so no threshold separates the two, and this stays where it removes only what touching a
+    /// boundary produces.
     private const float Least = 0.01f;
 
     /// The texels these submeshes sample, or null when the answer is "all of it".
