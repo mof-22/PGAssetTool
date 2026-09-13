@@ -86,7 +86,6 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     public double Length => Clip?.Motion.Length ?? 0;
 
     private Skeleton? _skeleton;
-    private Avalonia.Threading.DispatcherTimer? _ticking;
 
     /// What a model can be made to do, if anything.
     private void Dress(Skeleton? skeleton, IReadOnlyList<Motion>? motions)
@@ -118,31 +117,46 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     partial void OnTimeChanged(double value) => Pose();
 
+    /// How the window asks to be called once for each frame it draws. Set by the window; null where
+    /// there is none, which is a test, and then the clip moves only when Advance is called.
+    public Action<Action<TimeSpan>>? RequestFrame { get; set; }
+
+    /// Which run of playing the frames belong to, so stopping and starting again cannot leave two
+    /// loops of frames running and the clip playing at twice the speed.
+    private int _playback;
+
+    /// Plays on the display's own frames, each moving the clip on by the time that really passed.
+    ///
+    /// It was a timer at thirty a second moving the clip a thirtieth each tick. On a 120Hz screen
+    /// that read as a stutter — three frames out of four showed nothing new — and any slow frame
+    /// put the clip behind the clock for good, because a missed tick was never made up.
     partial void OnPlayingChanged(bool value)
     {
-        if (value && Clip is not null)
-        {
-            _ticking ??= new Avalonia.Threading.DispatcherTimer
-            {
-                Interval = TimeSpan.FromSeconds(1 / 30.0),
-            };
+        var mine = ++_playback;
+        if (!value || Clip is null || RequestFrame is not { } request) return;
 
-            _ticking.Tick -= Tick;
-            _ticking.Tick += Tick;
-            _ticking.Start();
-            return;
+        TimeSpan? last = null;
+
+        void Frame(TimeSpan now)
+        {
+            if (mine != _playback || !Playing || Clip is null) return;
+
+            // The first frame only notes the time. Any gap is capped, so a window that was dragged
+            // or covered for a while carries on from where it was rather than leaping ahead.
+            if (last is { } then) Advance(Math.Min((now - then).TotalSeconds, 0.25));
+            last = now;
+
+            request(Frame);
         }
 
-        _ticking?.Stop();
+        request(Frame);
     }
-
-    private void Tick(object? sender, EventArgs e) => Advance(1 / 30.0);
 
     /// Moves the clip on by so much, and the model with it.
     ///
-    /// Apart from the timer that calls it, because a clock is a poor thing to test through: the one
-    /// on screen is the window's own and does not tick in a test that has no window. Everything the
-    /// tick does is here, where it can be driven a frame at a time.
+    /// Apart from the frames that call it, because a clock is a poor thing to test through: the one
+    /// on screen is the window's own and does not tick in a test that has no window. Everything a
+    /// frame does is here, where it can be driven one at a time.
     public void Advance(double seconds)
     {
         if (Clip is not { } clip || Rest is null) { Stop(); return; }

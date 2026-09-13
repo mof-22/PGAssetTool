@@ -63,6 +63,11 @@ public partial class MainWindow : Window
 
             model.SearchRequested += FocusSearch;
 
+            // Animations play on this window's own frames, by the time that really passed between
+            // them — so a 120Hz screen shows 120 steps a second rather than a fixed thirty.
+            foreach (var preview in new[] { model.Preview, model.Editor.Original, model.Editor.Edited })
+                preview.RequestFrame = frame => RequestAnimationFrame(frame);
+
             // A file watcher fires on its own thread; everything it leads to touches the UI.
             model.Editor.Settled += () => Avalonia.Threading.Dispatcher.UIThread.Post(model.Editor.Refresh);
 

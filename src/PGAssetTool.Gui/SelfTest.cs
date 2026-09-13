@@ -2195,6 +2195,72 @@ internal static class SelfTest
         return null;
     }
 
+    /// Playing moves the clip on by the time that really passed between the display's frames, and
+    /// stopping and starting again leaves exactly one run of frames going.
+    ///
+    /// It was a timer at thirty a second stepping a fixed thirtieth: on a 120Hz screen something new
+    /// showed one frame in four, and a slow frame put the clip behind the clock for good. The
+    /// window's frame clock does not run without a window, so one is stood in for here.
+    private static string? PlayingFollowsTheFrames(PreviewViewModel preview, MotionChoice clip)
+    {
+        var frames = new Queue<Action<TimeSpan>>();
+        preview.RequestFrame = frames.Enqueue;
+
+        try
+        {
+            var span = Math.Min(0.5, clip.Motion.Length * 0.4);
+            var late = 0.1;
+
+            preview.Time = 0;
+            preview.Playing = true;
+
+            // A 120Hz screen for that long, with one frame arriving a tenth of a second late.
+            var now = TimeSpan.Zero;
+            var steps = (int)Math.Round(span * 120);
+            for (var frame = 0; frame <= steps && frames.TryDequeue(out var next); frame++)
+            {
+                next(now);
+                now += TimeSpan.FromSeconds(1 / 120.0) + (frame == steps / 2 ? TimeSpan.FromSeconds(late) : TimeSpan.Zero);
+            }
+
+            var elapsed = steps / 120.0 + late;
+            var expected = elapsed % Math.Max(clip.Motion.Length, 0.001);
+            var played = preview.Time;
+
+            // Stopped and started twice over before a frame arrives: every run still going queues
+            // itself again once a frame, and only the last should be.
+            preview.Playing = false;
+            preview.Playing = true;
+            preview.Playing = false;
+            preview.Playing = true;
+
+            for (var round = 0; round < 8 && frames.Count > 0; round++)
+            {
+                var pending = frames.Count;
+                for (var i = 0; i < pending; i++) frames.Dequeue()(now);
+                now += TimeSpan.FromSeconds(1 / 120.0);
+            }
+
+            var running = frames.Count;
+
+            Console.WriteLine($"anim     {steps + 1} frames at 120Hz over {elapsed:0.###}s moved '{clip.Name}' to "
+                + $"{played:0.###}s (the clock says {expected:0.###}s); after stopping and starting twice, "
+                + $"{running} run(s) of frames going");
+
+            if (Math.Abs(played - expected) > 0.002)
+                return $"{elapsed:0.###}s of frames moved the clip {played:0.###}s rather than {expected:0.###}s";
+            if (running != 1)
+                return $"stopping and starting again left {running} runs of frames driving the clip";
+
+            return null;
+        }
+        finally
+        {
+            preview.Stop();
+            preview.RequestFrame = null;
+        }
+    }
+
     /// A weapon's model plays its own animations, and comes back where it started.
     ///
     /// The game's weapons are one skinned mesh on three or four bones — the slide, the magazine, the
@@ -2247,6 +2313,8 @@ internal static class SelfTest
 
         preview.Stop();
         if (preview.Playing) return "stopping did not stop it";
+
+        if (PlayingFollowsTheFrames(preview, reload) is { } frames) return frames;
 
         // At the beginning, the model is the model.
         preview.Time = 0;

@@ -132,7 +132,7 @@ follow. Twelve of twelve weapons sampled animate, along with half the capes, mos
 the pets; hats, masks and boots are rigid and have no bones at all, and avatars are on bones whose
 clips are not in their own prefab.
 
-Three things about it that look arbitrary:
+Four things about it that look arbitrary:
 
 - **The space comes from the model at rest, not from the renderer's transform.** A bind pose is
   written against whatever the model was parented to when it was rigged, and the prefab no longer
@@ -144,6 +144,9 @@ Three things about it that look arbitrary:
   where it started, which looks exactly like an animation that does nothing.
 - **The view is framed by the model at rest.** A pistol with its magazine out is a taller model than
   the same pistol at rest, and a frame sized to the moment slides about for the length of the clip.
+- **It plays on the display's own frames, by the time that really passed between them.** A timer at
+  thirty a second stepping a fixed thirtieth showed something new one frame in four on a 120Hz
+  screen, and a slow frame put the clip behind the clock for good.
 
 ### A workspace records what each model is drawn with
 
