@@ -6,73 +6,127 @@
         Title="Options" Width="460" SizeToContent="Height"
         WindowStartupLocation="CenterOwner" CanResize="False">
 
-  <StackPanel Margin="20" Spacing="16">
-
-    <StackPanel Spacing="6">
-      <TextBlock Text="The game" FontWeight="SemiBold" />
+  <!-- The way out is docked and the settings scroll, so a screen too short for the whole of it
+       loses the middle of the list rather than the Close button. It was one stack with Close at the
+       bottom, sized to its content and not resizable: at 1920x1080 half the button was below the
+       edge of the screen and nothing could bring it back. -->
+  <DockPanel>
+    <Border DockPanel.Dock="Bottom" Padding="20,10,20,16" BorderThickness="0,1,0,0"
+            BorderBrush="#30808080">
       <DockPanel>
-        <Button DockPanel.Dock="Right" Content="Choose…" Click="OnChooseGame" Margin="6,0,0,0" />
-        <TextBox Text="{Binding GameDirectory}" Watermark="Left blank to find it through Steam" />
+        <!-- Escape closes it too, which is what anybody reaches for first in a dialog. -->
+        <Button DockPanel.Dock="Right" Name="CloseButton" Content="Close" Click="OnClose"
+                IsCancel="True" Margin="12,0,0,0" />
+        <StackPanel Spacing="2" VerticalAlignment="Center">
+          <TextBlock Opacity="0.55" FontSize="11" Text="Settings are kept beside the executable:" />
+          <TextBlock Opacity="0.55" FontSize="11" FontFamily="Consolas, Menlo, monospace"
+                     Text="{Binding SettingsPath}" TextWrapping="Wrap" />
+        </StackPanel>
       </DockPanel>
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="The folder holding the game's own *_Data directory. Only Steam can be asked where it put the game, so an installation from anywhere else is named here — as is a copy of the game data, which is the safe way to work on this without touching what you play. Changing it opens that installation instead." />
-      <TextBlock Text="{Binding GameDescribed}" Opacity="0.55" FontSize="11"
-                 FontFamily="Consolas, Menlo, monospace" TextWrapping="Wrap" />
-    </StackPanel>
+    </Border>
 
-    <StackPanel Spacing="6">
-      <TextBlock Text="Weapon names" FontWeight="SemiBold" />
-      <ComboBox ItemsSource="{Binding Languages}" SelectedValue="{Binding Language}"
-                SelectedValueBinding="{Binding Bundle}" HorizontalAlignment="Stretch" />
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="Which of the translation tables shipped with the game names are read from. Changing it reads the game again." />
-    </StackPanel>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+      <!-- Every explanation is behind its own "?", closed to begin with. They are worth having and
+           were most of the height: a window of settings reads as a wall of prose otherwise. -->
+      <StackPanel Margin="20,20,20,12" Spacing="14">
+        <StackPanel.Styles>
+          <Style Selector="ToggleButton.why">
+            <Setter Property="Padding" Value="7,0" />
+            <Setter Property="MinHeight" Value="20" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="ToolTip.Tip" Value="What this does" />
+          </Style>
+          <Style Selector="TextBlock.why">
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+          </Style>
+        </StackPanel.Styles>
 
-    <StackPanel Spacing="6">
-      <TextBlock Text="Author" FontWeight="SemiBold" />
-      <TextBox Text="{Binding Author}" Watermark="Left blank if you would rather not be named" />
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="Recorded in the manifest of everything extracted from here on, and shown to whoever installs the pack. It can be changed per pack in the editor." />
-    </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyGame" Classes="why" Content="?" />
+            <TextBlock Text="The game" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Choose…" Click="OnChooseGame" Margin="6,0,0,0" />
+            <TextBox Text="{Binding GameDirectory}" Watermark="Left blank to find it through Steam" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyGame.IsChecked}"
+                     Text="The folder holding the game's own *_Data directory. Only Steam can be asked where it put the game, so an installation from anywhere else is named here — as is a copy of the game data, which is the safe way to work on this without touching what you play. Changing it opens that installation instead." />
+          <TextBlock Text="{Binding GameDescribed}" Opacity="0.55" FontSize="11"
+                     FontFamily="Consolas, Menlo, monospace" TextWrapping="Wrap" />
+        </StackPanel>
 
-    <StackPanel Spacing="6">
-      <CheckBox Content="Write textures without an alpha channel" IsChecked="{Binding OpaqueTextures}" />
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="Most weapon textures keep emission rather than transparency in that channel, so an image editor opens them almost invisible. An image brought back without an alpha channel is given the original one, so nothing is lost by turning this on." />
-    </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyLanguage" Classes="why" Content="?" />
+            <TextBlock Text="Weapon names" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <ComboBox ItemsSource="{Binding Languages}" SelectedValue="{Binding Language}"
+                    SelectedValueBinding="{Binding Bundle}" HorizontalAlignment="Stretch" />
+          <TextBlock Classes="why" IsVisible="{Binding #WhyLanguage.IsChecked}"
+                     Text="Which of the translation tables shipped with the game names are read from. Changing it reads the game again." />
+        </StackPanel>
 
-    <StackPanel Spacing="6">
-      <CheckBox Content="Export only the part of a texture the model uses" IsChecked="{Binding MaskUnusedTextures}" />
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="A weapon's texture is an atlas and most of it is nothing: which island belongs to the gun and which to the sights is written in the model's UVs, and an image editor cannot see any of it. With this on, everything no model samples is written out fully transparent, so what is left is what you can actually see in the game. The part that is kept keeps whatever the original had in its alpha channel, so bringing the file back loses nothing. Turn it off for a texture something outside this weapon also uses." />
-    </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyAuthor" Classes="why" Content="?" />
+            <TextBlock Text="Author" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <TextBox Text="{Binding Author}" Watermark="Left blank if you would rather not be named" />
+          <TextBlock Classes="why" IsVisible="{Binding #WhyAuthor.IsChecked}"
+                     Text="Recorded in the manifest of everything extracted from here on, and shown to whoever installs the pack. It can be changed per pack in the editor." />
+        </StackPanel>
 
-    <StackPanel Spacing="6">
-      <CheckBox Content="Protect new packs" IsChecked="{Binding ProtectPacks}" />
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="Signs a built pack with a key kept beside this tool, and keeps it from opening as a zip. Anyone who alters one afterwards shows up as having done so. It stops a casual look inside and nothing more — this tool's own source says how the scrambling works — and each pack can override this in the editor." />
-      <TextBlock Text="{Binding AuthorFingerprint}" Opacity="0.55" FontSize="11"
-                 FontFamily="Consolas, Menlo, monospace" TextWrapping="Wrap" />
-    </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyOpaque" Classes="why" Content="?" />
+            <CheckBox Content="Write textures without an alpha channel" IsChecked="{Binding OpaqueTextures}" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyOpaque.IsChecked}"
+                     Text="Most weapon textures keep emission rather than transparency in that channel, so an image editor opens them almost invisible. An image brought back without an alpha channel is given the original one, so nothing is lost by turning this on." />
+        </StackPanel>
 
-    <StackPanel Spacing="6">
-      <CheckBox Content="Rebuild bundles for speed rather than size" IsChecked="{Binding FasterApplies}" />
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="Every install, and every mod turned on or off, rebuilds the bundles those mods touch. Squeezing them less makes that part about four times quicker and the bundles about a sixth larger — thirty megabytes across a game with thirty mods on it — which comes to about a tenth off a whole apply here, and more on a machine with fewer cores to spread the work across. The game loads both at the same speed. Turning this back off does not undo it: the next change writes the bundles small again." />
-    </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyMask" Classes="why" Content="?" />
+            <CheckBox Content="Export only the part of a texture the model uses" IsChecked="{Binding MaskUnusedTextures}" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyMask.IsChecked}"
+                     Text="A weapon's texture is an atlas and most of it is nothing: which island belongs to the gun and which to the sights is written in the model's UVs, and an image editor cannot see any of it. With this on, everything no model samples is written out fully transparent, so what is left is what you can actually see in the game. The part that is kept keeps whatever the original had in its alpha channel, so bringing the file back loses nothing. Turn it off for a texture something outside this weapon also uses." />
+        </StackPanel>
 
-    <StackPanel Spacing="6">
-      <CheckBox Content="Show only what can be replaced" IsChecked="{Binding ReplaceableOnly}" />
-      <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                 Text="Hides the transforms, scripts and animation an asset tree is mostly made of. What counts as replaceable follows what the tool can actually write back." />
-    </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyProtect" Classes="why" Content="?" />
+            <CheckBox Content="Protect new packs" IsChecked="{Binding ProtectPacks}" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyProtect.IsChecked}"
+                     Text="Signs a built pack with a key kept beside this tool, and keeps it from opening as a zip. Anyone who alters one afterwards shows up as having done so. It stops a casual look inside and nothing more — this tool's own source says how the scrambling works — and each pack can override this in the editor." />
+          <TextBlock Text="{Binding AuthorFingerprint}" Opacity="0.55" FontSize="11"
+                     FontFamily="Consolas, Menlo, monospace" TextWrapping="Wrap" />
+        </StackPanel>
 
-    <StackPanel Spacing="4">
-      <TextBlock Opacity="0.55" FontSize="11" Text="Settings are kept beside the executable:" />
-      <TextBlock Opacity="0.55" FontSize="11" FontFamily="Consolas, Menlo, monospace"
-                 Text="{Binding SettingsPath}" TextWrapping="Wrap" />
-    </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyFaster" Classes="why" Content="?" />
+            <CheckBox Content="Rebuild bundles for speed rather than size" IsChecked="{Binding FasterApplies}" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyFaster.IsChecked}"
+                     Text="Every install, and every mod turned on or off, rebuilds the bundles those mods touch. Squeezing them less makes that part about four times quicker and the bundles about a sixth larger — thirty megabytes across a game with thirty mods on it — which comes to about a tenth off a whole apply here, and more on a machine with fewer cores to spread the work across. The game loads both at the same speed. Turning this back off does not undo it: the next change writes the bundles small again." />
+        </StackPanel>
 
-    <Button Content="Close" Click="OnClose" HorizontalAlignment="Right" />
-  </StackPanel>
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyReplaceable" Classes="why" Content="?" />
+            <CheckBox Content="Show only what can be replaced" IsChecked="{Binding ReplaceableOnly}" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyReplaceable.IsChecked}"
+                     Text="Hides the transforms, scripts and animation an asset tree is mostly made of. What counts as replaceable follows what the tool can actually write back." />
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
 </Window>

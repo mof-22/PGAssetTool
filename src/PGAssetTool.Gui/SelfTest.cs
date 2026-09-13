@@ -1131,6 +1131,7 @@ internal static class SelfTest
             // Before the window the tiles are counted in exists. Finding switches tabs and back, and
             // a tab switched back to is built again from nothing: counted straight afterwards, its
             // tiles had not been laid out and every picture read as missing.
+            if (OptionsCanBeClosedOnAShortScreen(model) is { } stuck) return Fail(stuck);
             if (FindingStaysInTheWorkspaceItIsAskedIn(model) is { } wandered) return Fail(wandered);
 
             // One first. Turning it off restores its bundles; the confirmation is what stands
@@ -2771,6 +2772,50 @@ internal static class SelfTest
         PGAssetTool.Core.Pack.Workspace.Save(
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
+    }
+
+    /// Options keeps its Close button on screen however little screen there is and however much
+    /// of it is open, and Escape closes it.
+    ///
+    /// It was one stack sized to its content and not resizable, with Close at the bottom: at
+    /// 1920x1080 half the button was below the edge of the screen and nothing could reach it.
+    private static string? OptionsCanBeClosedOnAShortScreen(MainViewModel model)
+    {
+        const double tall = 420;
+
+        var window = new Views.OptionsWindow { DataContext = model };
+        window.Show();
+
+        // After showing, which is when the window caps itself to the real screen.
+        window.MaxHeight = tall;
+
+        var explanations = window.GetVisualDescendants()
+            .OfType<Avalonia.Controls.Primitives.ToggleButton>()
+            .Where(t => t.Content is "?")
+            .ToList();
+        foreach (var why in explanations) why.IsChecked = true;
+
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        window.Measure(new Avalonia.Size(460, tall));
+        window.Arrange(new Avalonia.Rect(0, 0, 460, tall));
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        var close = window.GetVisualDescendants().OfType<Avalonia.Controls.Button>()
+            .FirstOrDefault(b => b.Name == "CloseButton");
+        var bottom = close?.TranslatePoint(new Avalonia.Point(0, close.Bounds.Height), window);
+
+        Console.WriteLine($"options  at 460x{tall} with all {explanations.Count} explanations open, "
+            + $"Close ends at {bottom?.Y:0} and Escape {(close?.IsCancel == true ? "closes it" : "does nothing")}");
+
+        window.Close();
+
+        if (close is null) return "the options window has no Close button";
+        if (explanations.Count == 0) return "the options window has no explanations to open";
+        if (bottom is null || bottom.Value.Y > tall)
+            return $"with every explanation open the Close button ends at {bottom?.Y:0}, below a {tall}px screen";
+        if (!close.IsCancel) return "Escape does not close the options window";
+
+        return null;
     }
 
     /// Ctrl+F looks in the workspace it was pressed in and never takes you somewhere else.
