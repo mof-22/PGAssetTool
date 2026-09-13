@@ -53,6 +53,7 @@ first.
 A weapon with skins has two default looks, depending on whether a player has ever changed its skin.
 Where the second is painted with a copy of the weapon's own texture, your edit is written to both;
 where it is a different picture, both are written out and the Editor says so.
+
 **4. Edit a file.** Open one of the PNGs in whatever you draw in, change it, save it. The **Editor**
 tab is watching the folder and marks the file as edited the moment you do.
 
@@ -170,6 +171,11 @@ mod accounts for. If another tool wrote it, this one has no original to put back
 **A pack will not apply.** It says why. Usually the asset it names has moved in a game update; a pack
 records the item's name and class as well as its id, and looks it up again when the id no longer
 finds it.
+
+**The game was updated.** An update replaces the bundles your mods were written into, so they are not
+in the game any more even though the Manager still lists them as on. The tool notices when it opens
+and says so across the top; **Reapply everything** writes them into the new bundles. Every asset the
+packs kept here name sits at the same place in 26.10 and 26.11, so those would apply unchanged.
 
 **Undo everything.** Remove every mod in the Manager. Every bundle goes back to the copy taken before
 the first write.

@@ -122,6 +122,7 @@ says nothing about whether the game draws it: a sliver of UV stretched over a la
 great many pixels. Cleared one at a time and rendered from sixty angles, 55 of #64's 60 thinnest kept
 texels were drawn, and #416 has one covered 1.9% that lands on nearly forty thousand pixels — while
 texels covered 18% turned up that nothing draws at all. No threshold separates the two.
+
 ### A model plays its own animations
 
 The game's weapons are one skinned mesh on three or four bones — the slide, the magazine, the hands —
@@ -376,6 +377,17 @@ installed over it. Reading the live bundles showed the mod, and an extract then 
 out as the weapon's own — and since a pack carries only what changed after the extract, an author
 could build a pack around somebody else's installed work without either of them seeing it. Applying,
 verifying and the manager read the live files, which is what they are about.
+
+A game update replaces bundles under new hashes and the game loads those, so every mod on them is out
+of the game while the ledger lists it as on. `GameUpdate` notices when the game is opened, from the
+hash each mod recorded for every bundle it wrote to — kept current by every reconcile, including for a
+bundle it left alone — so a moved hash is an update, and reapplying records the new one and clears it.
+The version the game reports is only for saying so. Across the updates on hand, 26.10.1 and 26.10.2
+share 2,164 of their 2,296 bundles with 26.11.0 and replaced 132, and all 44 operations in the 37 packs
+kept here found their targets by path id in every one of them. Against 24.3.7, 1,240 of 1,538 bundles
+were replaced and 19 of those operations name an asset the bundle does not hold there: an address
+follows an asset that moves within its bundle, not one filed in another.
+
 A reconcile is organised by bundle rather than by mod: every enabled mod's operations for one bundle
 are gathered first, and the bundle is opened, edited and written once. Going mod by mod meant
 rebuilding a bundle once per mod on it, and a rebuild is a decompress and a recompress — thirty-one
@@ -489,6 +501,7 @@ memory.
 A three-state checkbox turned protection off on its first click, and only Save made anything stick.
 And because any write to a workspace makes the editor read it again, a re-read keeps text typed and
 not yet saved rather than refilling the form from disk, which it used to do without a word.
+
 ---
 
 ## Verifying a change

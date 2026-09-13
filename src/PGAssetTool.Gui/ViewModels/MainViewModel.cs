@@ -299,6 +299,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 : catalogs.Items.Search(text, catalogs.Names).Select(w => w.GameNumber).ToHashSet();
 
             Manager.Refresh();
+            UpdateNotice = UpdateNoticeFor(_installation!, _bundles!);
             Status = $"{_catalogs.Items.Count} weapons, {_catalogs.Kinds.Count - 1} other kinds";
             OnPropertyChanged(nameof(GameDescribed));
         }
@@ -1285,6 +1286,42 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// What Browse and extraction read through, for a check that it is the game as shipped.
     internal BundleSet? Reader => _bundles;
+
+    /// Said across the top of the window when the game has been updated under installed mods.
+    [ObservableProperty] private string? _updateNotice;
+
+    /// Goes to the manager and asks it to reapply, which confirms first and refuses while the game
+    /// is running like everything else there that writes.
+    [RelayCommand]
+    private void ReapplyAfterUpdate()
+    {
+        UpdateNotice = null;
+        Workspace = ManagerTab;
+        Manager.ReapplyCommand.Execute(null);
+    }
+
+    [RelayCommand]
+    private void DismissUpdate() => UpdateNotice = null;
+
+    /// Worked out on opening the game, not on being asked: after an update nothing else about the
+    /// tool looks wrong. See GameUpdate.
+    private static string? UpdateNoticeFor(GameInstallation game, BundleSet bundles)
+    {
+        try
+        {
+            var stale = GameUpdate.Stale(new ModStore(game).Read(), game.ReadManifest());
+            if (stale.Count == 0) return null;
+
+            var version = bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null;
+            return GameUpdate.Notice(stale, version);
+        }
+        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidOperationException)
+        {
+            // Not being able to tell is not worth failing to open the game over.
+            return null;
+        }
+    }
+
     public void Dispose()
     {
         Editor.Dispose();

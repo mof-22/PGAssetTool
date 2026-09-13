@@ -220,6 +220,20 @@
       </MenuItem>
     </Menu>
 
+    <!-- A game update replaces the bundles the mods were written into, so they are simply not in
+         the game any more while the manager goes on listing them as on. Said across the top, where
+         it cannot be missed on the one occasion it matters. -->
+    <Border DockPanel.Dock="Top" Background="#3b2f12" Padding="12,8"
+            IsVisible="{Binding UpdateNotice, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0">
+          <Button Content="Reapply everything" Command="{Binding ReapplyAfterUpdateCommand}" />
+          <Button Content="Not now" Command="{Binding DismissUpdateCommand}" />
+        </StackPanel>
+        <TextBlock Text="{Binding UpdateNotice}" TextWrapping="Wrap" VerticalAlignment="Center" />
+      </DockPanel>
+    </Border>
+
     <Border DockPanel.Dock="Bottom" Height="26" Background="#18181b" Padding="10,0">
       <Grid ColumnDefinitions="Auto,*">
         <ProgressBar Grid.Column="0" Width="80" Height="3" Margin="0,0,10,0"
