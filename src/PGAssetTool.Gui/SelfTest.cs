@@ -2583,6 +2583,17 @@ internal static class SelfTest
         var game = model.Game!;
         var store = new ModStore(game);
 
+        // Nothing enabled means nothing is written into any bundle, so a reconcile restores and
+        // leaves nothing alone — correctly. Asked of the ledger rather than of the backups: a
+        // backup outlives the mod that caused it, so counting those says a game is modded long
+        // after every mod on it has been turned off, and the check then fails on a game that is
+        // behaving exactly as it should.
+        if (!store.Read().Any(m => m.Enabled))
+        {
+            Console.WriteLine("shortcut no mod is enabled, so there is nothing to leave alone");
+            return null;
+        }
+
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var settling = new Core.Mods.ModApplier(game, store).Reconcile();
         var settled = clock.ElapsedMilliseconds;
