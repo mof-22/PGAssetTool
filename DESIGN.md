@@ -406,11 +406,24 @@ stands on the far side of the model from Unity's own camera, so what that camera
 on their left. Getting this wrong draws every model mirrored, which is invisible on a gun and
 obvious the moment a texture has writing on it.
 
-**`Camera.Dragged` un-rolls the drag** before turning, and the pivot is a point of the model rather
-than an offset in the frame — so panning something into view and then turning keeps it in view.
+**The camera holds one rotation, not a yaw, a pitch and a roll.** It held three angles for a long
+time and that made it a turntable: sideways turned the model about one axis of its own whatever the
+picture was tilted to, so a tilted view dragged about an axis that no longer looked vertical, and
+the pitch had to stop at the poles because past them a drag to the right walked the viewer left.
+Every one of those is a property of keeping the rotation as three numbers in a fixed order. The
+turntable, an arcball and a trackball were built side by side and driven against the same models,
+and the trackball was kept: a drag turns the model about the axis lying across it on the screen, so
+there is no axis of the model to become unstable and no pole to collapse at. What it gives up is a
+level horizon — the named views are how a model is put back square. `Camera.Facing` still takes a
+yaw, a pitch and a roll, built through the old frame so every angle written down means what it did.
 
-**Pitch is not clamped.** The frame's right axis comes from the yaw alone, so there is no pole for
-it to collapse at, and going over the top is how a model is looked at from underneath.
+**A drag's turn goes on the left of the rotation, with its axis turned over in y and z.** On the
+left because a drag is a movement of the picture, not of the model; turned over because the frame
+is drawn mirrored in x, and conjugating a turn by that mirror is exactly the sign change. Without it
+a drag downwards tips the model the wrong way and a tilt winds backwards.
+
+**The pivot is a point of the model rather than an offset in the frame**, so panning something into
+view and then turning keeps it in view.
 
 **The preview opens tilted.** The default camera is the angle the game draws its own `icon1_big`
 shop pictures at — muzzle up and to the right, nearly side-on — so an author meets the shape they

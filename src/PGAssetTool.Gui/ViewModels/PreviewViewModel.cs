@@ -321,11 +321,13 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// comparing a change against the original, or taking the same picture of two weapons, wants
     /// the same angle twice rather than nearly. Distance and pivot are left as they are: those are
     /// where somebody has framed the thing, and a named angle is about which way it faces.
+    /// These matter more than they did. A trackball has no level horizon holding a model upright,
+    /// so square-on is reached by asking for it rather than by dragging carefully back to it.
     public IReadOnlyList<ViewPreset> Views { get; } =
     [
         // The opening view is the only one that carries a tilt, because it is the only one copying
         // the game: the others are the six square-on directions and a tilt would be in the way.
-        new("Default", new Camera().Yaw, new Camera().Pitch, new Camera().Roll),
+        new("Default", new Camera().Angles.Yaw, new Camera().Angles.Pitch, new Camera().Angles.Roll),
         new("Front", 0f, 0f),
         new("Back", MathF.PI, 0f),
         new("Left", -MathF.PI / 2, 0f),
@@ -338,7 +340,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     private void Look(ViewPreset? preset)
     {
         if (preset is null) return;
-        Camera = Camera with { Yaw = preset.Yaw, Pitch = preset.Pitch, Roll = preset.Roll };
+        Camera = Camera.Looking(preset.Yaw, preset.Pitch, preset.Roll);
     }
 
     /// Going back to the automatic answer is immediate; anything else waits for its picture, which

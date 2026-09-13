@@ -1,9 +1,29 @@
+using System.Numerics;
 using PGAssetTool.Core.Export.Meshes;
 
 namespace PGAssetTool.Core.Preview;
 
-/// How the model is being looked at. Angles are radians; distance is a multiple of the model's own
-/// radius, so a pistol and a rocket launcher both start out filling the frame.
+/// How the model is being looked at: one orientation, how far back, and what is held in the middle.
+///
+/// The orientation is a whole rotation rather than a yaw, a pitch and a roll. It was three angles
+/// for a long time and that made a turntable — sideways turned the model about one axis of its own,
+/// whatever the picture was tilted to, and the pitch stopped at the poles because past them a drag
+/// to the right walked the viewer left. Every one of those is a property of holding the rotation as
+/// three numbers in a fixed order, and none of them survives holding it as one.
+///
+/// What is given up is that there is no longer a level horizon holding the model upright: a
+/// trackball can leave it leaning, and square-on is reached by asking for it rather than by dragging
+/// carefully. <see cref="Facing"/> and the named views are what ask.
+/// <param name="Turn">
+/// From the model's own space to the viewer's. Kept as a quaternion because nothing about a drag
+/// knows which axis it is about, and composing turns is what a drag does.
+/// </param>
+/// <param name="Distance">
+/// How many of the model's own radii the half-frame covers, so a pistol and a rocket launcher both
+/// open at the same apparent size. One puts the bounding sphere exactly inside the shorter side of
+/// the pane, which is as close as a model can be framed without a corner of it going off the edge
+/// at some angle.
+/// </param>
 /// <param name="PivotX">
 /// The point of the model held at the middle of the frame, offset from the model's own centre and
 /// measured in model radii. Zero is the centre of the model, which is where a view starts.
@@ -16,33 +36,48 @@ namespace PGAssetTool.Core.Preview;
 /// In radii rather than in model units so it means the same thing on a pistol and a launcher, and
 /// so a resized pane keeps the framing rather than throwing it away.
 /// </param>
-/// <param name="Distance">
-/// How many of the model's own radii the half-frame covers. One puts the bounding sphere exactly
-/// inside the shorter side of the pane, which is as close as a model can be framed without a
-/// corner of it going off the edge at some angle.
-/// </param>
-/// <param name="Yaw">
-/// The defaults for this, the pitch and the roll are the angle the game draws its own `icon1_big`
-/// shop pictures at, so an author opening a weapon meets the shape they already know.
-///
-/// Measured rather than chosen. Fitting the silhouette to the icons never rose above about 0.8 and
-/// never sharply — the icons carry a drawn outline that fattens their shape — so the author matched
-/// 55 weapons by hand and the angles were read back against each frame the tool might stand a model
-/// up in. Against the bounding box with the muzzle faced they agree to within 8 degrees; against the
-/// bounding box alone the yaw spreads nearly three times as far, which is what facing is worth.
-///
-/// The 39 that fire agree to 4.6 degrees of yaw. The 16 that do not spread over 35 and sit around
-/// the same middle: a blade has no convention rather than a different one, so there is one opening
-/// angle and not two, and a knife will not match its own icon whatever is done.
-/// </param>
-/// <param name="Roll">
-/// Not zero by default, which looks like a mistake and is not: every icon in the game lies along a
-/// diagonal with the muzzle up and to the right.
-/// </param>
-public sealed record Camera(
-    float Yaw = -0.794f, float Pitch = -0.314f, float Distance = 1f, float Roll = 0.271f,
-    float PivotX = 0f, float PivotY = 0f, float PivotZ = 0f)
+public sealed record Camera
 {
+    /// Where a view starts: the angle the game draws its own `icon1_big` shop pictures at, so an
+    /// author opening a weapon meets the shape they already know rather than a technical view of it.
+    ///
+    /// Measured rather than chosen. Fitting the silhouette to the icons never rose above about 0.8
+    /// and never sharply — the icons carry a drawn outline that fattens their shape — so the author
+    /// matched 55 weapons by hand and the angles were read back against each frame the tool might
+    /// stand a model up in. Against the bounding box with the muzzle faced they agree to within 5
+    /// degrees; against the bounding box alone the yaw spreads three times as far, which is what
+    /// facing the model is worth.
+    ///
+    /// The 39 that fire agree to 4.6 degrees of yaw. The 16 that do not spread over 35 and sit
+    /// around the same middle: a blade has no convention rather than a different one, so there is
+    /// one opening angle here and not two, and a knife will not match its own icon whatever is done.
+    ///
+    /// The roll is not zero, which looks like a mistake and is not: every icon in the game lies
+    /// along a diagonal with the muzzle up and to the right.
+    public static Quaternion Opening { get; } = Orientation(-0.794f, -0.314f, 0.271f);
+
+    public Quaternion Turn { get; init; } = Opening;
+
+    public float Distance { get; init; } = 1f;
+
+    public float PivotX { get; init; }
+    public float PivotY { get; init; }
+    public float PivotZ { get; init; }
+
+    /// A view facing the model the way a yaw, a pitch and a roll used to describe it.
+    ///
+    /// Kept because a named view is exactly that — "from the front", "from above" — and because
+    /// every angle written down anywhere in this repository is in those terms. Distance and pivot
+    /// are the framing and belong to whoever set them, so this only says which way to face.
+    public static Camera Facing(float yaw, float pitch, float roll = 0f)
+        => new() { Turn = Orientation(yaw, pitch, roll) };
+
+    public Camera Looking(float yaw, float pitch, float roll = 0f)
+        => this with { Turn = Orientation(yaw, pitch, roll) };
+
+    /// The three angles this view would be described by. The inverse of <see cref="Facing"/>.
+    public (float Yaw, float Pitch, float Roll) Angles => MeshRenderer.View(this).Angles();
+
     /// <param name="dx">Rightwards, in half-frames: 1 moves the model a half-frame to the right.</param>
     /// <param name="dy">Upwards, in the same units.</param>
     public Camera Panned(float dx, float dy)
@@ -62,53 +97,72 @@ public sealed record Camera(
 
     /// Turns the model by a drag across the screen: rightwards and downwards, in radians.
     ///
-    /// Sideways is always the turntable's own axis and up-and-down is always the pitch, whatever
-    /// the view is tilted to. That is what a turntable is: the platter turns about one axis that
-    /// does not move, and tilting your head does not change which axis that is.
+    /// A trackball. The model turns about the axis lying across the drag, by an angle proportional
+    /// to how far the cursor went — so sideways spins it about the screen's own vertical, downwards
+    /// tips its top towards the viewer, and a diagonal does both at once. Nothing here is an axis of
+    /// the model, so there is no axis to become unstable and no pole to collapse at.
     ///
-    /// The drag used to be taken out of the roll first and split between yaw and pitch, so that it
-    /// followed the picture as it stood. It reads well for a small drag and it does not hold
-    /// together: yaw and pitch do not commute, so the same drag applied in pieces does not arrive
-    /// where it does applied whole, and the model wanders as you work it. Once the pitch was stopped
-    /// at the poles it became plainly wrong — a sideways drag turned partly into a pitch, ran into
-    /// the stop, and what was left of it went on turning the model about the vertical while the
-    /// cursor moved horizontally. Nothing about that is recoverable by adjusting the mixture.
-    ///
-    /// Sideways and yaw agree in sign because the picture is no longer mirrored: dragging right
-    /// walks the viewer round towards the model's own right, which is the side of the screen that
-    /// side is now drawn on.
-    public Camera Dragged(float right, float down) => Turned(right, down);
-
-    /// Pitch stops at straight up and straight down, which is what makes this a turntable.
-    ///
-    /// It did not, for a while: the frame is square at every pitch — screen-right comes from the
-    /// yaw alone, so there is no pole for it to collapse at — and carrying on over the top looked
-    /// like something gained for nothing. What it cost was the two things anybody actually
-    /// noticed. Past the top the frame's up vector is inverted, so a drag to the right walked the
-    /// viewer left; and a drag on a rolled view is taken apart into yaw and pitch, which past the
-    /// top puts the pieces back in the wrong places and the model tumbles end over end.
-    ///
-    /// Nothing is out of reach for the stopping. Above and below are both inside a quarter turn
-    /// either way, and going over the top only ever arrived at a view already reachable by
-    /// dragging the other way — upside down.
-    ///
-    /// Exactly at the pole rather than short of it: the frame is well defined there, so there is
-    /// no reason for the wall to stand two degrees inside the thing it is protecting.
-    public Camera Turned(float dYaw, float dPitch) => this with
+    /// Chosen by trying it. The turntable it replaces, an arcball where the point under the cursor
+    /// stays under the cursor, and this were built side by side and driven against the same
+    /// models; this is the one that was kept. What it gives up is that a closed loop of the cursor
+    /// does not bring the model back to where it started, which nobody noticed.
+    public Camera Dragged(float right, float down)
     {
-        Yaw = Yaw + dYaw,
-        Pitch = Math.Clamp(Pitch + dPitch, -MathF.PI / 2, MathF.PI / 2),
-    };
+        var angle = MathF.Sqrt(right * right + down * down);
+        return angle <= 0 ? this : TurnedOnScreen(down, right, 0, angle);
+    }
 
-    /// Tilts the model in the plane of the screen.
+    /// Tilts the model in the plane of the screen, about the axis pointing out of it.
     ///
-    /// Yaw and pitch orbit the camera, which covers two of the three ways an object can be turned;
-    /// this is the third. Without it a weapon can be looked at from any side but never straightened,
-    /// and the automatic uprighting has to be right for every model in the game because nothing can
-    /// correct it by hand.
-    public Camera Rolled(float dRoll) => this with { Roll = Roll + dRoll };
+    /// Orbiting covers two of the three ways a thing can be turned; this is the third. A trackball
+    /// reaches it by dragging in a circle, which is a poor way to ask for a small deliberate tilt.
+    public Camera Rolled(float dRoll) => TurnedOnScreen(0, 0, 1, dRoll);
+
+    /// A turn about an axis given in the terms of the screen: x right, y up, z out of it.
+    ///
+    /// The axis turns over in y and z on the way in. The renderer draws through this rotation
+    /// mirrored in x — screen-right is the negative of the frame's own right axis, because forward
+    /// points at the viewer — and conjugating a turn by a mirror in x is exactly that sign change.
+    /// Without it a drag downwards tips the model the wrong way and a roll winds backwards.
+    private Camera TurnedOnScreen(float ax, float ay, float az, float angle)
+    {
+        var length = MathF.Sqrt(ax * ax + ay * ay + az * az);
+        if (length <= 1e-9f || angle == 0) return this;
+
+        var delta = Quaternion.CreateFromAxisAngle(
+            new Vector3(ax / length, -ay / length, -az / length), angle);
+
+        return this with { Turn = Quaternion.Normalize(delta * Turn) };
+    }
 
     public Camera Zoomed(float factor) => this with { Distance = Math.Clamp(Distance * factor, 0.4f, 20f) };
+
+    /// A yaw, a pitch and a roll as one rotation, in the order the frame used to be built in: face
+    /// the model, tilt up, then turn the picture in its own plane.
+    ///
+    /// Read out of the frame rather than composed, so that a named view means exactly what it has
+    /// always meant. The trigonometry below is the frame the renderer was written against, and
+    /// deriving the quaternion from it is the only way to be sure the two agree.
+    private static Quaternion Orientation(float yaw, float pitch, float roll)
+    {
+        var (cy, sy) = (MathF.Cos(yaw), MathF.Sin(yaw));
+        var (cp, sp) = (MathF.Cos(pitch), MathF.Sin(pitch));
+
+        // Forward points from the model towards the camera, so a larger Z is nearer the viewer.
+        var (fx, fy, fz) = (cp * sy, sp, cp * cy);
+        var (rx, ry, rz) = (cy, 0f, -sy);
+        var (ux, uy, uz) = (fy * rz - fz * ry, fz * rx - fx * rz, fx * ry - fy * rx);
+
+        if (roll != 0)
+        {
+            var (cr, sr) = (MathF.Cos(roll), MathF.Sin(roll));
+            (rx, ry, rz, ux, uy, uz) = (
+                rx * cr + ux * sr, ry * cr + uy * sr, rz * cr + uz * sr,
+                ux * cr - rx * sr, uy * cr - ry * sr, uz * cr - rz * sr);
+        }
+
+        return MeshRenderer.Basis.Of(rx, ry, rz, ux, uy, uz, fx, fy, fz).Turn();
+    }
 }
 
 /// The two rotations between a model's own vertices and the screen, for a caller that wants to
@@ -174,7 +228,8 @@ public static class MeshRenderer
     /// </param>
     /// <param name="viewpoint">
     /// The two rotations to draw with, when the caller has its own answer. Null takes the bounding
-    /// box for the standing pose and the camera's angles for the view.
+    /// box for the rest pose and the camera's angles for the view, which is what everything in the
+    /// tool itself does.
     /// </param>
     public static void Render(
         UnityMesh mesh, Camera camera, RenderTarget target, IReadOnlyList<PreviewImage?>? textures = null,
@@ -267,8 +322,8 @@ public static class MeshRenderer
 
     /// How this model is stood up when nobody says otherwise: the bounding box sorted by extent.
     ///
-    /// Exposed so something that knows better — <see cref="Facing"/> — can start from this answer
-    /// and correct it rather than work out a second one.
+    /// Exposed so a caller offering some other answer can start from this one and compare against
+    /// it, which is the only way to tell whether the other answer is better.
     public static Basis Standing(UnityMesh mesh)
     {
         var positions = mesh.Get(VertexAttribute.Position);
@@ -446,15 +501,24 @@ public static class MeshRenderer
             return new Upright(order[0], order[1], order[2], odd ? -1f : 1f);
         }
 
-        /// The same permutation as three rows, so something that stands a model up another way can
-        /// hand over a rotation and be treated identically.
+        /// The same permutation as three rows, so anything that wants to stand a model up some
+        /// other way can hand over a rotation and be treated identically.
         public Basis AsBasis() => new(
             Right == 0 ? 1 : 0, Right == 1 ? 1 : 0, Right == 2 ? 1 : 0,
             Up == 0 ? 1 : 0, Up == 1 ? 1 : 0, Up == 2 ? 1 : 0,
             Depth == 0 ? Flip : 0, Depth == 1 ? Flip : 0, Depth == 2 ? Flip : 0);
     }
 
-    /// The camera's axes, as three rows that turn a model-space vector into view space.
+    /// The camera's axes, as three rows that turn a model-space vector into view space: screen
+    /// right, screen up, and the direction out of the screen.
+    ///
+    /// The first row is the *negative* of the frame's own right axis, because forward points at the
+    /// viewer: they stand on the far side of the model from Unity's own camera, and what that
+    /// camera has on its right is on their left. Taking it as right drew every model as its own
+    /// mirror image — invisible on a gun, obvious the moment a texture has writing on it. So this
+    /// is an orthonormal frame with a determinant of minus one, and reading that as a mistake is
+    /// the mistake. <see cref="Of"/> and <see cref="Turn"/> are where the sign is put on and taken
+    /// off; nothing else should touch it.
     public readonly record struct Basis(
         float Rx, float Ry, float Rz, float Ux, float Uy, float Uz, float Fx, float Fy, float Fz)
     {
@@ -462,40 +526,119 @@ public static class MeshRenderer
 
         public (float X, float Y, float Z) Apply(float x, float y, float z)
             => (Rx * x + Ry * y + Rz * z, Ux * x + Uy * y + Uz * z, Fx * x + Fy * y + Fz * z);
-    }
 
-    public static Basis View(Camera camera)
-    {
-        var (cy, sy) = (MathF.Cos(camera.Yaw), MathF.Sin(camera.Yaw));
-        var (cp, sp) = (MathF.Cos(camera.Pitch), MathF.Sin(camera.Pitch));
+        /// From a frame's own right, up and forward — the screen-right sign goes on here.
+        public static Basis Of(
+            float rx, float ry, float rz, float ux, float uy, float uz, float fx, float fy, float fz)
+            => new(-rx, -ry, -rz, ux, uy, uz, fx, fy, fz);
 
-        // Forward points from the model towards the camera, so a larger Z is *nearer* the viewer and
-        // the depth test keeps the largest.
-        var (fx, fy, fz) = (cp * sy, sp, cp * cy);
-        var (rx, ry, rz) = (cy, 0f, -sy);
-        var (ux, uy, uz) = (fy * rz - fz * ry, fz * rx - fx * rz, fx * ry - fy * rx);
-
-        // Roll turns the frame about the direction it already looks along, so the model tilts in
-        // the plane of the screen and nothing about which side is facing you changes.
-        if (camera.Roll != 0)
+        /// The rotation this frame is, with that sign taken off again.
+        public Quaternion Turn()
         {
-            var (cr, sr) = (MathF.Cos(camera.Roll), MathF.Sin(camera.Roll));
-            (rx, ry, rz, ux, uy, uz) = (
-                rx * cr + ux * sr, ry * cr + uy * sr, rz * cr + uz * sr,
-                ux * cr - rx * sr, uy * cr - ry * sr, uz * cr - rz * sr);
+            float m00 = -Rx, m01 = -Ry, m02 = -Rz;
+            float m10 = Ux, m11 = Uy, m12 = Uz;
+            float m20 = Fx, m21 = Fy, m22 = Fz;
+
+            // Whichever of the four parts is largest is taken first, which keeps the square root
+            // away from zero: solving for w always loses all precision on a half turn, where w is
+            // itself zero.
+            var trace = m00 + m11 + m22;
+
+            if (trace > 0)
+            {
+                var s = MathF.Sqrt(trace + 1) * 2;
+                return Quaternion.Normalize(new Quaternion(
+                    (m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, s / 4));
+            }
+
+            if (m00 > m11 && m00 > m22)
+            {
+                var s = MathF.Sqrt(1 + m00 - m11 - m22) * 2;
+                return Quaternion.Normalize(new Quaternion(
+                    s / 4, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s));
+            }
+
+            if (m11 > m22)
+            {
+                var s = MathF.Sqrt(1 + m11 - m00 - m22) * 2;
+                return Quaternion.Normalize(new Quaternion(
+                    (m01 + m10) / s, s / 4, (m12 + m21) / s, (m02 - m20) / s));
+            }
+
+            var t = MathF.Sqrt(1 + m22 - m00 - m11) * 2;
+            return Quaternion.Normalize(new Quaternion(
+                (m02 + m20) / t, (m12 + m21) / t, t / 4, (m10 - m01) / t));
         }
 
-        // Screen-right is the opposite of the axis that comes out of the frame above, because
-        // forward points at the viewer: they are standing on the far side of the model from Unity's
-        // own camera, and what that camera has on its right is on their left. Taking it as right
-        // drew every model as its own mirror image — invisible on a gun, obvious the moment a
-        // texture has writing on it.
-        //
-        // Flipped here, after the roll, rather than by building the frame the other way round. The
-        // roll turns the two screen axes into each other, so a frame that starts out mirrored is
-        // not a mirrored frame once it has been rolled — it is a different view altogether.
-        return new Basis(-rx, -ry, -rz, ux, uy, uz, fx, fy, fz);
+        public static Basis From(Quaternion q)
+        {
+            var n = Quaternion.Normalize(q);
+            float x = n.X, y = n.Y, z = n.Z, w = n.W;
+            float xx = x * x, yy = y * y, zz = z * z;
+            float xy = x * y, xz = x * z, yz = y * z;
+            float wx = w * x, wy = w * y, wz = w * z;
+
+            return Of(
+                1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy),
+                2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx),
+                2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy));
+        }
+
+        /// The inverse, which for an orthonormal frame is its transpose — mirrored row and all.
+        public Basis Inverse() => new(Rx, Ux, Fx, Ry, Uy, Fy, Rz, Uz, Fz);
+
+        /// <c>outer</c> applied after <c>inner</c>, which is the order the renderer draws in: the
+        /// model is stood up and then looked at.
+        public static Basis Compose(Basis outer, Basis inner)
+        {
+            var (rx, ry, rz) = inner.Column(0);
+            var (ux, uy, uz) = inner.Column(1);
+            var (fx, fy, fz) = inner.Column(2);
+
+            var r = (outer.Rx, outer.Ry, outer.Rz);
+            var u = (outer.Ux, outer.Uy, outer.Uz);
+            var f = (outer.Fx, outer.Fy, outer.Fz);
+
+            return new Basis(
+                Dot(r, (rx, ry, rz)), Dot(r, (ux, uy, uz)), Dot(r, (fx, fy, fz)),
+                Dot(u, (rx, ry, rz)), Dot(u, (ux, uy, uz)), Dot(u, (fx, fy, fz)),
+                Dot(f, (rx, ry, rz)), Dot(f, (ux, uy, uz)), Dot(f, (fx, fy, fz)));
+        }
+
+        private (float, float, float) Column(int at) => at switch
+        {
+            0 => (Rx, Ux, Fx),
+            1 => (Ry, Uy, Fy),
+            _ => (Rz, Uz, Fz),
+        };
+
+        private static float Dot((float X, float Y, float Z) a, (float X, float Y, float Z) b)
+            => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+
+        /// The yaw, pitch and roll this frame would be described by.
+        ///
+        /// Read off rather than searched for: the forward row is built from the yaw and pitch alone,
+        /// so those come straight out of it, and the roll is then the angle the screen-right row
+        /// sits at from where it would be with no roll on it.
+        public (float Yaw, float Pitch, float Roll) Angles()
+        {
+            var pitch = MathF.Asin(Math.Clamp(Fy, -1f, 1f));
+            var yaw = MathF.Atan2(Fx, Fz);
+
+            var (cy, sy) = (MathF.Cos(yaw), MathF.Sin(yaw));
+            var (rx, ry, rz) = (cy, 0f, -sy);
+            var (ux, uy, uz) = (Fy * rz - Fz * ry, Fz * rx - Fx * rz, Fx * ry - Fy * rx);
+
+            var (sx, syy, sz) = (-Rx, -Ry, -Rz);
+            var roll = MathF.Atan2(
+                sx * ux + syy * uy + sz * uz,
+                sx * rx + syy * ry + sz * rz);
+
+            return (yaw, pitch, roll);
+        }
     }
+
+    public static Basis View(Camera camera) => Basis.From(camera.Turn);
 
     private static ((float X, float Y, float Z) Centre, (float X, float Y, float Z) Size, float Radius)
         Bounds(UnityMesh mesh, float[] positions)

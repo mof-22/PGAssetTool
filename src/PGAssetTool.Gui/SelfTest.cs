@@ -261,18 +261,35 @@ internal static class SelfTest
                     // A named angle puts the model back somewhere exact, which turning by hand is a
                     // poor way to reach — and it leaves the framing alone, because how close in
                     // somebody has come is theirs and which way it faces is the question here.
-                    model.Preview.Camera = new Camera(Yaw: 2.2f, Pitch: -0.4f, Distance: 3f, Roll: 1.1f);
+                    model.Preview.Camera = (Camera.Facing(2.2f, -0.4f, 1.1f) with { Distance = 3f });
                     if (model.Preview.Views.FirstOrDefault(v => v.Name == "Top") is { } top)
                     {
                         model.Preview.LookCommand.Execute(top);
                         var looking = model.Preview.Camera;
+                        var (yaw, pitch, roll) = looking.Angles;
 
-                        Console.WriteLine($"         the Top preset: yaw {looking.Yaw:0.00} "
-                            + $"pitch {looking.Pitch:0.00} roll {looking.Roll:0.00} distance {looking.Distance:0.00}");
+                        Console.WriteLine($"         the Top preset: yaw {yaw:0.00} "
+                            + $"pitch {pitch:0.00} roll {roll:0.00} distance {looking.Distance:0.00}");
 
-                        if (Math.Abs(looking.Pitch - MathF.PI / 2) > 0.001f || Math.Abs(looking.Yaw) > 0.001f)
-                            return Fail($"the Top preset came out at {looking.Yaw}, {looking.Pitch}");
-                        if (looking.Roll != 0) return Fail("a named angle left the model tilted");
+                        // Compared as a frame rather than as three numbers. Straight up is a pole of
+                        // that reading: forward is the vertical there, so the yaw is whatever the
+                        // arithmetic of atan2(0, 0) lands on and the roll takes up the slack. The
+                        // view is right — it comes back as yaw 3.14 with a roll of 3.14, which is
+                        // the same view as yaw 0 with no roll — and asking the numbers to be tidy
+                        // asks for something a pole cannot give.
+                        var asked = Core.Preview.MeshRenderer.View(
+                            Camera.Facing(top.Yaw, top.Pitch, top.Roll));
+                        var got = Core.Preview.MeshRenderer.View(looking);
+
+                        if (Math.Abs(asked.Rx - got.Rx) > 0.001f || Math.Abs(asked.Ry - got.Ry) > 0.001f
+                            || Math.Abs(asked.Rz - got.Rz) > 0.001f || Math.Abs(asked.Ux - got.Ux) > 0.001f
+                            || Math.Abs(asked.Uy - got.Uy) > 0.001f || Math.Abs(asked.Uz - got.Uz) > 0.001f
+                            || Math.Abs(asked.Fx - got.Fx) > 0.001f || Math.Abs(asked.Fy - got.Fy) > 0.001f
+                            || Math.Abs(asked.Fz - got.Fz) > 0.001f)
+                            return Fail("the Top preset did not face the model the way it asked to");
+
+                        if (Math.Abs(got.Fy - 1f) > 0.001f)
+                            return Fail($"the Top preset is not looking down: forward is {got.Fy}");
                         if (looking.Distance != 3f) return Fail("a named angle threw away the framing");
                     }
 
@@ -1701,7 +1718,7 @@ internal static class SelfTest
         if (model.Editor.Edited.TextureChoices.FirstOrDefault(c => c.PathId == -1) is not { } wearing)
             return "the editor offered none of the workspace's own textures to put on the model";
 
-        var turned = new Camera(Yaw: 2.1f, Pitch: -0.4f, Distance: 0.9f);
+        var turned = (Camera.Facing(2.1f, -0.4f) with { Distance = 0.9f });
         model.Editor.Edited.Camera = turned;
         model.Editor.Edited.ChosenTexture = wearing;
 
@@ -1884,8 +1901,8 @@ internal static class SelfTest
 
         Camera[] views =
         [
-            new(Yaw: 1.1f, Pitch: 0.2f, Distance: 1.3f),
-            new(Yaw: -0.6f, Pitch: -0.9f, Distance: 2.2f),
+            Camera.Facing(1.1f, 0.2f) with { Distance = 1.3f },
+            Camera.Facing(-0.6f, -0.9f) with { Distance = 2.2f },
         ];
 
         for (var i = 0; i < 2; i++)
@@ -1945,7 +1962,7 @@ internal static class SelfTest
 
         try
         {
-            var turned = new Camera(Yaw: 0.77f, Pitch: 0.33f, Distance: 1.9f);
+            var turned = (Camera.Facing(0.77f, 0.33f) with { Distance = 1.9f });
 
             if (Model(model, first) is not { } mine) return $"'{first.Name}' has no model to look at";
             model.Editor.Edited.Camera = turned;
@@ -1954,8 +1971,8 @@ internal static class SelfTest
                 return $"'{second.Name}' has no model to look at";
 
             Console.WriteLine($"editor   two takes on one weapon: '{mine.Name}' in {first.Name} at "
-                + $"{turned.Yaw:0.00}, the same file in {second.Name} at "
-                + $"{model.Editor.Edited.Camera.Yaw:0.00}");
+                + $"{turned.Angles.Yaw:0.00}, the same file in {second.Name} at "
+                + $"{model.Editor.Edited.Camera.Angles.Yaw:0.00}");
 
             if (model.Editor.Edited.Camera == turned)
                 return "a second workspace of the same weapon opened at the first one's angle";
@@ -2468,8 +2485,8 @@ internal static class SelfTest
 
         foreach (var camera in new[]
                  {
-                     new Camera(), new Camera(Yaw: 1.6f), new Camera(Yaw: 3.1f), new Camera(Yaw: -1.6f),
-                     new Camera(Pitch: 1.5f), new Camera(Pitch: -1.5f),
+                     new Camera(), Camera.Facing(1.6f, 0), Camera.Facing(3.1f, 0), Camera.Facing(-1.6f, 0),
+                     Camera.Facing(0, 1.5f), Camera.Facing(0, -1.5f),
                  })
         {
             MeshRenderer.Render(mesh, camera, target, painted);
@@ -2948,7 +2965,7 @@ internal static class SelfTest
         if (AssetPreview.FromFile(glb) is not PGAssetTool.Core.Export.Meshes.UnityMesh mesh) return $"'{Path.GetFileName(glb)}' would not read back";
 
         var turned = PGAssetTool.Core.Preview.PackIcon.Render(
-            mesh, null, new PGAssetTool.Core.Preview.Camera(Yaw: 2.1f, Pitch: -0.4f));
+            mesh, null, PGAssetTool.Core.Preview.Camera.Facing(2.1f, -0.4f));
         if (PGAssetTool.Core.Preview.PackIcon.IsBlank(turned)) return "drawing it from another angle came out empty";
 
         var before = File.ReadAllBytes(drawn);

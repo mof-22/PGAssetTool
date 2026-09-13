@@ -40,7 +40,7 @@ public class PackIconTests : IDisposable
         // The icon keeps the angle a view was turned to and finds its own distance and centre, so
         // a snapshot taken while zoomed into one end of a weapon still shows the weapon. It used to
         // measure the framing off the drawing, which says nothing at all when there is no drawing.
-        var picture = PackIcon.Render(Quad(), null, new Camera(Distance: 0.4f).Panned(40, 0), size: 64);
+        var picture = PackIcon.Render(Quad(), null, (new Camera { Distance = 0.4f }).Panned(40, 0), size: 64);
 
         Assert.False(PackIcon.IsBlank(picture));
     }
@@ -85,7 +85,7 @@ public class PackIconTests : IDisposable
             BoneNameHashes = [],
         };
 
-        var picture = PackIcon.Render(bar, null, new Camera(Yaw: 0, Pitch: 0, Distance: 0.4f), size: 64);
+        var picture = PackIcon.Render(bar, null, (Camera.Facing(0, 0) with { Distance = 0.4f }), size: 64);
 
         // Nothing may touch the left or right edge: what does is a model running off the side.
         for (var y = 0; y < 64; y++)
@@ -100,8 +100,8 @@ public class PackIconTests : IDisposable
     [Fact]
     public void TheAngleItIsDrawnFromIsTheOneItWasAskedFor()
     {
-        var straight = PackIcon.Render(Quad(), null, new Camera(Yaw: 0, Pitch: 0), size: 64);
-        var edgeOn = PackIcon.Render(Quad(), null, new Camera(Yaw: 1.4f, Pitch: 0), size: 64);
+        var straight = PackIcon.Render(Quad(), null, Camera.Facing(0, 0), size: 64);
+        var edgeOn = PackIcon.Render(Quad(), null, Camera.Facing(1.4f, 0), size: 64);
 
         Assert.NotEqual(Drawn(straight), Drawn(edgeOn));
     }
@@ -152,7 +152,7 @@ public class PackIconTests : IDisposable
     {
         // A fixed distance is a multiple of the bounding sphere, which for anything long is mostly
         // empty air — so the icon came out as a small object in a large empty square.
-        var picture = PackIcon.Render(Quad(), null, new Camera(Yaw: 0, Pitch: 0), size: 128);
+        var picture = PackIcon.Render(Quad(), null, Camera.Facing(0, 0), size: 128);
 
         var (left, top, right, bottom) = Extent(picture);
         Assert.True(right - left >= 112, $"only {right - left + 1} of 128 columns were used");
@@ -164,7 +164,7 @@ public class PackIconTests : IDisposable
     {
         // Scaled by whichever side is wider, or a bar would be fitted to its height and hang off
         // both edges.
-        var picture = PackIcon.Render(Bar(), null, new Camera(Yaw: 0, Pitch: 0), size: 128);
+        var picture = PackIcon.Render(Bar(), null, Camera.Facing(0, 0), size: 128);
 
         var (left, top, right, bottom) = Extent(picture);
         Assert.True(right - left >= 112, $"only {right - left + 1} of 128 columns were used");
@@ -176,7 +176,7 @@ public class PackIconTests : IDisposable
     {
         // Framing has to undo a pan as well as a zoom: an icon of a model shoved into one corner is
         // not an icon of the model.
-        var pushed = new Camera(Yaw: 0, Pitch: 0).Panned(0.6f, -0.4f);
+        var pushed = Camera.Facing(0, 0).Panned(0.6f, -0.4f);
         var picture = PackIcon.Render(Quad(), null, pushed, size: 128);
 
         var (left, top, right, bottom) = Extent(picture);

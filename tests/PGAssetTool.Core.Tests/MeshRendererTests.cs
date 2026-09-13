@@ -149,7 +149,7 @@ public class MeshRendererTests
     public void AQuadFacingTheCameraIsDrawnAroundTheMiddle()
     {
         // Looked at straight on, so the whole thing is in frame and the centre is covered.
-        var pixels = Draw(Quad(), new Camera(Yaw: 0, Pitch: 0));
+        var pixels = Draw(Quad(), Camera.Facing(0, 0));
 
         Assert.True(Covered(pixels) > 0, "nothing was drawn at all");
         Assert.NotNull(At(pixels, Size / 2, Size / 2));
@@ -163,7 +163,7 @@ public class MeshRendererTests
         // model's own centre, not at zero.
         var far = Mesh([99, 99, 0, 101, 99, 0, 101, 101, 0, 99, 101, 0], [0, 1, 2, 0, 2, 3]);
 
-        Assert.NotNull(At(Draw(far, new Camera(Yaw: 0, Pitch: 0)), Size / 2, Size / 2));
+        Assert.NotNull(At(Draw(far, Camera.Facing(0, 0)), Size / 2, Size / 2));
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class MeshRendererTests
     {
         // The distance is a multiple of the model's radius, so a pistol and a rocket launcher both
         // arrive framed rather than one being a speck.
-        var straight = new Camera(Yaw: 0, Pitch: 0);
+        var straight = Camera.Facing(0, 0);
         var small = Covered(Draw(Quad(scale: 0.01f), straight));
         var large = Covered(Draw(Quad(scale: 100f), straight));
 
@@ -199,7 +199,7 @@ public class MeshRendererTests
         int[] near = [0, 1, 2, 0, 2, 3];
         int[] far = [4, 5, 6, 4, 6, 7];
 
-        var camera = new Camera(Yaw: 0, Pitch: 0);
+        var camera = Camera.Facing(0, 0);
         var expected = At(Draw(Lit(positions, normals, near), camera), Size / 2, Size / 2);
         Assert.NotNull(expected);
 
@@ -231,53 +231,132 @@ public class MeshRendererTests
         BoneNameHashes = [],
     };
 
-    [Fact]
-    public void TurningAllTheWayRoundComesBackToWhereItStarted()
+    /// The two views draw the same picture, which is the only sense in which two cameras are equal:
+    /// a quaternion and its negative are the same rotation and do not compare equal.
+    private static void AssertSameView(Camera expected, Camera got, string what)
     {
-        var mesh = Quad();
-        var start = new Camera(Yaw: 0.4f, Pitch: 0.2f);
-        var round = start.Turned(MathF.Tau, 0);
+        var (a, b) = (MeshRenderer.View(expected), MeshRenderer.View(got));
 
-        Assert.Equal(Covered(Draw(mesh, start)), Covered(Draw(mesh, round)));
+        Assert.True(
+            MathF.Abs(a.Rx - b.Rx) < 1e-4f && MathF.Abs(a.Ry - b.Ry) < 1e-4f && MathF.Abs(a.Rz - b.Rz) < 1e-4f
+            && MathF.Abs(a.Ux - b.Ux) < 1e-4f && MathF.Abs(a.Uy - b.Uy) < 1e-4f && MathF.Abs(a.Uz - b.Uz) < 1e-4f
+            && MathF.Abs(a.Fx - b.Fx) < 1e-4f && MathF.Abs(a.Fy - b.Fy) < 1e-4f && MathF.Abs(a.Fz - b.Fz) < 1e-4f,
+            what);
     }
 
     [Fact]
-    public void TheCameraStopsAtTheTopRatherThanTumblingOverIt()
+    public void DraggingAllTheWayRoundComesBackToWhereItStarted()
     {
-        // Straight up and straight down are as far as it goes, and it arrives exactly there rather
-        // than at a wall short of it — the frame is square at the pole, so there is nothing to
-        // stand back from.
-        Assert.Equal(MathF.PI / 2, new Camera().Turned(0, 9f).Pitch);
-        Assert.Equal(-MathF.PI / 2, new Camera().Turned(0, -9f).Pitch);
-        Assert.Equal(MathF.PI / 2, new Camera().Turned(0, MathF.Tau).Pitch);
+        var start = Camera.Facing(0.4f, 0.2f);
+        AssertSameView(start, start.Dragged(MathF.Tau, 0), "a whole turn sideways did not come back");
+        AssertSameView(start, start.Dragged(0, MathF.Tau), "a whole turn downwards did not come back");
+    }
 
+    [Fact]
+    public void ThereIsNoPoleToCollapseAt()
+    {
+        // What the turntable this replaces had to stop at. Its pitch was measured about one axis of
+        // the model, so at the pole the frame turned over and a drag to the right walked the viewer
+        // left; the stop was there to keep anything from reaching that. A trackball turns about the
+        // axis lying across the drag, which is a direction on the screen and not on the model, so
+        // there is no axis to line up with and nothing to collapse.
+        //
         // A solid rather than a flat one: a plane seen exactly edge-on draws nothing however good
-        // the frame is, which says nothing about the frame.
+        // the frame is, which would say nothing about the frame.
         var solid = Mesh(
             [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
             [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3]);
 
-        foreach (var pitch in new[] { MathF.PI / 2, -MathF.PI / 2 })
-            Assert.True(Covered(Draw(solid, new Camera(Yaw: 0.3f, Pitch: pitch))) > 0,
-                $"nothing was drawn at a pitch of {pitch}");
+        var at = Camera.Facing(0.3f, 0);
+
+        // Twice round, the long way over the top, stopping at every step of a tenth of a radian.
+        for (var step = 0; step < 130; step++)
+        {
+            at = at.Dragged(0, 0.1f);
+
+            Assert.True(Covered(Draw(solid, at)) > 0, $"nothing was drawn after {step} steps over the top");
+            AssertStillARotation(at, $"the frame came apart after {step} steps over the top");
+        }
     }
 
     [Fact]
-    public void DraggingRightTurnsTheModelRightAtEveryReachableAngle()
+    public void DraggingRightMovesTheNearFaceRightAtEveryAngle()
     {
-        // The reason the pitch stops. Past the top the frame's up vector is inverted, and yaw —
-        // which is measured about the world's up, not the frame's — then reads backwards: dragging
-        // right walked the viewer left. Nothing reachable by dragging is on that side of the pole
-        // any more, and this walks the whole range to say so.
-        // Read through panning, which is the public way to ask which way the frame's up points:
-        // dragging the model up moves the pivot down along that axis, so an inverted frame sends
-        // the pivot the other way.
-        for (var pitch = -MathF.PI / 2; pitch <= MathF.PI / 2; pitch += 0.15f)
-        {
-            var lifted = new Camera(Yaw: 0.3f, Pitch: pitch).Panned(0, 1);
+        // The property the pole used to break. Whatever the model has been turned to, a drag to the
+        // right takes it with the cursor — the face that was towards the viewer moves towards the
+        // right of the screen. Asked of the frame rather than of an angle, because there is no
+        // longer an angle to ask.
+        var at = new Camera();
 
-            Assert.True(lifted.PivotY <= 1e-5f,
-                $"the frame is upside down at a pitch of {pitch}: lifting moved the pivot to {lifted.PivotY}");
+        for (var step = 0; step < 60; step++)
+        {
+            at = at.Dragged(0.21f, 0.13f);
+
+            var before = MeshRenderer.View(at);
+            var after = MeshRenderer.View(at.Dragged(0.2f, 0));
+
+            // Where the face that was towards the viewer has gone, in the new frame.
+            var (x, _, _) = after.Apply(before.Fx, before.Fy, before.Fz);
+
+            Assert.True(x > 0, $"a drag to the right moved the near face to {x} after {step} steps");
+        }
+    }
+
+    [Fact]
+    public void DraggingDownTipsTheTopTowardsTheViewer()
+    {
+        // The other half of the drag, and the easy one to get backwards: pulling the cursor down
+        // rolls the model towards you, so the face that was towards the viewer goes down the screen
+        // and the top of it comes round to face you.
+        var at = new Camera();
+
+        var before = MeshRenderer.View(at);
+        var after = MeshRenderer.View(at.Dragged(0, 0.3f));
+
+        var (_, y, _) = after.Apply(before.Fx, before.Fy, before.Fz);
+        Assert.True(y < 0, $"a drag downwards moved the near face to {y}");
+
+        var (_, _, z) = after.Apply(before.Ux, before.Uy, before.Uz);
+        Assert.True(z > 0, $"a drag downwards left the top at {z} rather than facing the viewer");
+    }
+
+    private static void AssertStillARotation(Camera camera, string what)
+    {
+        var b = MeshRenderer.View(camera);
+
+        Span<float> rows = [b.Rx, b.Ry, b.Rz, b.Ux, b.Uy, b.Uz, b.Fx, b.Fy, b.Fz];
+
+        for (var i = 0; i < 3; i++)
+        {
+            var length = MathF.Sqrt(
+                rows[i * 3] * rows[i * 3] + rows[i * 3 + 1] * rows[i * 3 + 1] + rows[i * 3 + 2] * rows[i * 3 + 2]);
+            Assert.True(MathF.Abs(length - 1) < 1e-3f, $"{what}: row {i} is {length} long");
+
+            for (var j = i + 1; j < 3; j++)
+            {
+                var dot = rows[i * 3] * rows[j * 3]
+                    + rows[i * 3 + 1] * rows[j * 3 + 1]
+                    + rows[i * 3 + 2] * rows[j * 3 + 2];
+                Assert.True(MathF.Abs(dot) < 1e-3f, $"{what}: rows {i} and {j} are not square");
+            }
+        }
+    }
+
+    [Fact]
+    public void AnAngleAskedForIsTheAngleThatComesBack()
+    {
+        // Named views are still written as a yaw, a pitch and a roll, and every angle recorded
+        // anywhere in this repository is in those terms. Facing has to mean what it used to.
+        foreach (var (yaw, pitch, roll) in new[]
+                 {
+                     (0f, 0f, 0f), (0.4f, 0.2f, 0f), (2.1f, -0.4f, 1.1f),
+                     (-1.3f, 1.2f, -2.5f), (3f, -1.5f, 0.2f),
+                 })
+        {
+            var (gotYaw, gotPitch, gotRoll) = Camera.Facing(yaw, pitch, roll).Angles;
+            AssertSameView(
+                Camera.Facing(yaw, pitch, roll), Camera.Facing(gotYaw, gotPitch, gotRoll),
+                $"reading back ({yaw}, {pitch}, {roll}) gave ({gotYaw}, {gotPitch}, {gotRoll})");
         }
     }
 
@@ -335,7 +414,7 @@ public class MeshRendererTests
         // A Mesh carries no orientation of its own: in the game the renderer's transform places it,
         // and a preview has nothing to place it with. Weapons are authored with the barrel along Y,
         // so without this they hang straight down.
-        var pixels = Draw(Bar(axis), new Camera(Yaw: 0, Pitch: 0));
+        var pixels = Draw(Bar(axis), Camera.Facing(0, 0));
 
         var (minX, maxX, minY, maxY) = Extent(pixels);
         Assert.True(maxX - minX > maxY - minY,
@@ -354,10 +433,10 @@ public class MeshRendererTests
         float[] positions = [0, 0, 0, 2, 0, 0, 2, 0.4f, 0, 0, 0.1f, 0];
         var lopsided = Mesh(positions, [0, 1, 2, 0, 2, 3]);
 
-        var (left, right) = Halves(Draw(lopsided, new Camera(Yaw: MathF.PI, Pitch: 0)));
+        var (left, right) = Halves(Draw(lopsided, Camera.Facing(MathF.PI, 0)));
         Assert.True(right > left, $"from the game's own side the heavy end drew {right} right, {left} left");
 
-        var (fromBehindLeft, fromBehindRight) = Halves(Draw(lopsided, new Camera(Yaw: 0, Pitch: 0)));
+        var (fromBehindLeft, fromBehindRight) = Halves(Draw(lopsided, Camera.Facing(0, 0)));
         Assert.True(fromBehindLeft > fromBehindRight,
             $"from behind the heavy end drew {fromBehindRight} right, {fromBehindLeft} left");
     }
@@ -397,7 +476,7 @@ public class MeshRendererTests
         var mesh = Quad();
         var target = new RenderTarget();
         target.Resize(Size, Size);
-        var angles = Enumerable.Range(0, 20).Select(i => new Camera(Yaw: i * 0.1f)).ToArray();
+        var angles = Enumerable.Range(0, 20).Select(i => Camera.Facing(i * 0.1f, 0)).ToArray();
         MeshRenderer.Render(mesh, angles[0], target);   // warm anything lazy
 
         // Per-thread, not process-wide: xUnit runs test classes in parallel, so the process-wide
@@ -423,7 +502,7 @@ public class MeshRendererTests
 
         // A stale depth buffer from the larger size would leave the new frame testing against
         // whatever the old one held.
-        MeshRenderer.Render(Quad(), new Camera(Yaw: 0, Pitch: 0), target);
+        MeshRenderer.Render(Quad(), Camera.Facing(0, 0), target);
         Assert.True(Covered(target.Bgra) > 0);
     }
 
@@ -470,7 +549,7 @@ public class MeshRendererTests
     public void AMeshWithNoTextureIsStillDrawn()
     {
         // Nothing resolves a texture for a great many meshes, and those must not come out blank.
-        Assert.True(Covered(Draw(TexturedQuad(), new Camera(Yaw: 0, Pitch: 0))) > 0);
+        Assert.True(Covered(Draw(TexturedQuad(), Camera.Facing(0, 0))) > 0);
     }
 
     [Fact]
@@ -478,7 +557,7 @@ public class MeshRendererTests
     {
         var target = new RenderTarget();
         target.Resize(Size, Size);
-        MeshRenderer.Render(TexturedQuad(), new Camera(Yaw: 0, Pitch: 0), target, [Swatch(200, 0, 0)]);
+        MeshRenderer.Render(TexturedQuad(), Camera.Facing(0, 0), target, [Swatch(200, 0, 0)]);
 
         var at = ((Size / 2) * Size + Size / 2) * 4;
         Assert.True(target.Bgra[at] > target.Bgra[at + 2],
@@ -502,7 +581,7 @@ public class MeshRendererTests
 
         // From the side the game's own camera looks from, where the model's -X is the screen's
         // left, so the halves are where the lines above say they are.
-        MeshRenderer.Render(twoHalves, new Camera(Yaw: MathF.PI, Pitch: 0), target,
+        MeshRenderer.Render(twoHalves, Camera.Facing(MathF.PI, 0), target,
             [Swatch(200, 0, 0), Swatch(0, 0, 200)]);
 
         // Well inside the drawing: the model is framed with a margin, so a quarter of the way in
@@ -522,7 +601,7 @@ public class MeshRendererTests
 
         var target = new RenderTarget();
         target.Resize(Size, Size);
-        MeshRenderer.Render(twoParts, new Camera(Yaw: 0, Pitch: 0), target, [Swatch(200, 0, 0), null]);
+        MeshRenderer.Render(twoParts, Camera.Facing(0, 0), target, [Swatch(200, 0, 0), null]);
 
         Assert.True(Covered(target.Bgra) > 0);
     }
@@ -538,7 +617,7 @@ public class MeshRendererTests
 
         var target = new RenderTarget();
         target.Resize(Size, Size);
-        MeshRenderer.Render(tiled, new Camera(Yaw: 0, Pitch: 0), target, [Swatch(200, 0, 0)]);
+        MeshRenderer.Render(tiled, Camera.Facing(0, 0), target, [Swatch(200, 0, 0)]);
 
         Assert.True(Covered(target.Bgra) > 0);
     }
@@ -551,8 +630,8 @@ public class MeshRendererTests
         // from turning the camera.
         var bar = Mesh([-1, -0.1f, 0, 1, -0.1f, 0, 1, 0.1f, 0, -1, 0.1f, 0], [0, 1, 2, 0, 2, 3]);
 
-        var flat = Draw(bar, new Camera(Yaw: 0, Pitch: 0));
-        var tilted = Draw(bar, new Camera(Yaw: 0, Pitch: 0).Rolled(MathF.PI / 2));
+        var flat = Draw(bar, Camera.Facing(0, 0));
+        var tilted = Draw(bar, Camera.Facing(0, 0).Rolled(MathF.PI / 2));
 
         Assert.NotNull(At(flat, Size / 2, Size / 2));
         Assert.NotNull(At(tilted, Size / 2, Size / 2));
@@ -569,8 +648,8 @@ public class MeshRendererTests
         var bar = Mesh([-1, -0.1f, 0, 1, -0.1f, 0, 1, 0.1f, 0, -1, 0.1f, 0], [0, 1, 2, 0, 2, 3]);
 
         Assert.Equal(
-            Covered(Draw(bar, new Camera(Yaw: 0.4f, Pitch: 0.2f))),
-            Covered(Draw(bar, new Camera(Yaw: 0.4f, Pitch: 0.2f).Rolled(MathF.Tau))),
+            Covered(Draw(bar, Camera.Facing(0.4f, 0.2f))),
+            Covered(Draw(bar, Camera.Facing(0.4f, 0.2f).Rolled(MathF.Tau))),
             tolerance: 4);
     }
 
@@ -599,7 +678,7 @@ public class MeshRendererTests
         // Far enough back that half a frame of pan still leaves the whole quad on screen: what is
         // being measured is where it lands, and a clipped model lands wherever the frame ends.
         var quad = Quad(scale: 0.3f);
-        var back = new Camera(Yaw: 0, Pitch: 0, Distance: 2f);
+        var back = (Camera.Facing(0, 0) with { Distance = 2f });
 
         var centred = Draw(quad, back);
         var moved = Draw(quad, back.Panned(0.5f, 0));
@@ -612,7 +691,7 @@ public class MeshRendererTests
     public void PanningUpMovesItUpTheScreenRatherThanDownIt()
     {
         var quad = Quad(scale: 0.3f);
-        var back = new Camera(Yaw: 0, Pitch: 0, Distance: 2f);
+        var back = (Camera.Facing(0, 0) with { Distance = 2f });
 
         var centred = Rows(Draw(quad, back));
         var raised = Rows(Draw(quad, back.Panned(0, 0.5f)));
@@ -658,14 +737,14 @@ public class MeshRendererTests
         // Level and untilted, and stated rather than taken from the defaults: what is being
         // measured is where the pivot ends up, and the opening angle is free to move.
         var bar = Mesh([-1, -0.2f, 0, 1, -0.2f, 0, 1, 0.2f, 0, -1, 0.2f, 0], [0, 1, 2, 0, 2, 3]);
-        var straight = new Camera(Yaw: 0, Pitch: 0, Roll: 0, Distance: 1.5f);
+        var straight = (Camera.Facing(0, 0, 0) with { Distance = 1.5f });
 
         // A half-frame is Distance radii across and the bar is about a radius long each way, so
         // this puts the middle of the frame just inside its right-hand end.
         var panned = straight.Panned(-0.6f, 0);
         Assert.NotNull(At(Draw(bar, panned), Size / 2, Size / 2));
 
-        var turned = Draw(bar, panned.Turned(1.2f, 0));
+        var turned = Draw(bar, panned.Dragged(1.2f, 0));
         Assert.True(
             Enumerable.Range(Size / 2 - 2, 5).Any(y => At(turned, Size / 2, y) is not null),
             "turning moved the panned end out of the middle of the frame");
@@ -675,7 +754,7 @@ public class MeshRendererTests
     public void PanningBackTheWayItCameLeavesTheViewWhereItStarted()
     {
         var quad = Quad(scale: 0.3f);
-        var start = new Camera(Yaw: 0.4f, Pitch: 0.2f, Roll: 0.3f);
+        var start = Camera.Facing(0.4f, 0.2f, 0.3f);
 
         var there = start.Panned(0.4f, -0.25f);
         var back = there.Panned(-0.4f, 0.25f);
@@ -687,41 +766,82 @@ public class MeshRendererTests
     }
 
     [Fact]
-    public void ADragIsNothingMoreThanAYawAndAPitch()
+    public void ADragMeansTheSameOnScreenWhateverTheModelHasBeenTurnedTo()
     {
-        var start = new Camera(Yaw: 0.2f, Pitch: 0.3f);
+        // The complaint that started this. A turntable turns about one axis of the model, so once
+        // the picture is tilted a sideways drag turns it about something that no longer looks
+        // vertical — the axis wanders as you work.
+        //
+        // What a trackball promises instead is that the drag is a movement of the picture: the turn
+        // it adds, read in the frame the viewer is looking at, is the same turn whatever the model
+        // was showing beforehand. That is what is asserted, by taking the frame before the drag
+        // back out of the frame after it.
+        var drag = (Camera at) => MeshRenderer.Basis.Compose(
+            MeshRenderer.View(at.Dragged(0.25f, -0.1f)), MeshRenderer.View(at).Inverse());
 
-        Assert.Equal(start.Turned(0.1f, 0.2f), start.Dragged(0.1f, 0.2f));
-        Assert.Equal(start.Rolled(1.1f).Turned(0.1f, 0.2f), start.Rolled(1.1f).Dragged(0.1f, 0.2f));
-    }
+        var upright = Camera.Facing(0.2f, 0.3f);
+        var expected = drag(upright);
 
-    [Fact]
-    public void ATiltDoesNotChangeWhichWayADragTurnsTheModel()
-    {
-        // A turntable turns about one axis and tilting your head does not change which. The drag
-        // used to be taken out of the roll and split between yaw and pitch so that it followed the
-        // picture; it reads well for a small drag and does not hold together, because yaw and pitch
-        // do not commute — and once the pitch stopped at the poles, a sideways drag could run into
-        // that stop and spend what was left of itself spinning the model about the vertical.
-        var upright = new Camera(Yaw: 0.2f, Pitch: 0.3f);
-        var tilted = upright.Rolled(MathF.PI / 2);
+        foreach (var at in new[]
+                 {
+                     upright.Rolled(0.4f), upright.Rolled(MathF.PI / 2), upright.Rolled(-1.9f),
+                     Camera.Facing(2.6f, -1.1f, 0.8f), new Camera(),
+                 })
+        {
+            var got = drag(at);
 
-        Assert.Equal(upright.Dragged(0.25f, 0).Yaw, tilted.Dragged(0.25f, 0).Yaw, 5);
-        Assert.Equal(upright.Dragged(0, 0.25f).Pitch, tilted.Dragged(0, 0.25f).Pitch, 5);
-
-        // And each direction keeps to its own angle.
-        Assert.Equal(tilted.Pitch, tilted.Dragged(0.25f, 0).Pitch, 5);
-        Assert.Equal(tilted.Yaw, tilted.Dragged(0, 0.25f).Yaw, 5);
+            Assert.True(
+                MathF.Abs(expected.Rx - got.Rx) < 1e-4f && MathF.Abs(expected.Ry - got.Ry) < 1e-4f
+                && MathF.Abs(expected.Rz - got.Rz) < 1e-4f && MathF.Abs(expected.Ux - got.Ux) < 1e-4f
+                && MathF.Abs(expected.Uy - got.Uy) < 1e-4f && MathF.Abs(expected.Uz - got.Uz) < 1e-4f
+                && MathF.Abs(expected.Fx - got.Fx) < 1e-4f && MathF.Abs(expected.Fy - got.Fy) < 1e-4f
+                && MathF.Abs(expected.Fz - got.Fz) < 1e-4f,
+                $"the same drag turned the picture differently from {at.Angles}");
+        }
     }
 
     [Fact]
     public void ADragAndItsOppositeCancelAtAnyTilt()
     {
-        var tilted = new Camera(Yaw: 0.2f, Pitch: 0.3f).Rolled(0.9f);
+        var tilted = Camera.Facing(0.2f, 0.3f).Rolled(0.9f);
 
-        var back = tilted.Dragged(0.2f, -0.15f).Dragged(-0.2f, 0.15f);
+        AssertSameView(
+            tilted, tilted.Dragged(0.2f, -0.15f).Dragged(-0.2f, 0.15f),
+            "a drag and its opposite did not cancel");
+    }
 
-        Assert.Equal(tilted.Yaw, back.Yaw, 5);
-        Assert.Equal(tilted.Pitch, back.Pitch, 5);
+    [Fact]
+    public void TiltingByAnAngleIsTheSameAsAskingForThatAngle()
+    {
+        // Rolled composes a turn about the axis out of the screen; Facing builds the roll into the
+        // frame the old way. They have to agree, or every tilt in the tool reads backwards from
+        // every tilt written down — and the ones written down are the game's own.
+        foreach (var roll in new[] { 0.3f, -0.7f, 1.9f })
+            AssertSameView(
+                Camera.Facing(0.4f, 0.2f, roll), Camera.Facing(0.4f, 0.2f).Rolled(roll),
+                $"rolling by {roll} is not the same as facing at a roll of {roll}");
+    }
+
+    [Fact]
+    public void ATiltLeavesWhichSideIsFacingYouAlone()
+    {
+        // A roll turns the picture in its own plane, so the direction out of the screen cannot move.
+        var start = Camera.Facing(0.3f, -0.2f);
+        var (before, after) = (MeshRenderer.View(start), MeshRenderer.View(start.Rolled(0.7f)));
+
+        Assert.Equal(before.Fx, after.Fx, 4);
+        Assert.Equal(before.Fy, after.Fy, 4);
+        Assert.Equal(before.Fz, after.Fz, 4);
+    }
+
+    [Fact]
+    public void ThousandsOfDragsDoNotWearTheFrameOut()
+    {
+        // Every drag multiplies one more turn onto the last, so whatever error each leaves is
+        // carried and not corrected. Left alone that tells as a model that slowly shears.
+        var at = new Camera();
+        for (var i = 0; i < 5000; i++) at = at.Dragged(0.03f, -0.017f).Rolled(0.004f);
+
+        AssertStillARotation(at, "five thousand drags left the frame out of square");
     }
 }
