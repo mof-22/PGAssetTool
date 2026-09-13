@@ -165,6 +165,23 @@ So the answer is written down at the one moment that knows it. Where several acc
 the export keeps the one whose textures it actually wrote out. Asking the game is still the fallback
 for a workspace that says nothing, which is what `convert` produces.
 
+### A weapon's paint reaches its default skin
+
+A weapon with skins has two default looks, and which one a player gets depends on their own history:
+the weapon's own paint until they first change its skin, and the default skin — filed as
+`<prefab>_default` — ever after. A pack that replaced only the weapon's texture showed to some
+players and not to others.
+
+The game has it both ways. #416's default skin paints with the weapon's own texture, the same asset,
+and needs nothing. #507's paints with a separate asset whose pixels are identical to the weapon's.
+For that case the extract writes the one picture to both addresses — one file, two operations — so
+the author edits once and every player sees it. Where the two pictures really differ, both are
+written out and the author is told, because painting one over the other would be a guess.
+
+Everything keyed by file already copes with a file standing for two assets: what counts as edited,
+what is packed (a source goes into the pack once), what the editor lists (a row per file). Only the
+write is per address.
+
 ### The one thing that is neither
 
 Components, and the scripts that say which component they are, are neither shown nor written.

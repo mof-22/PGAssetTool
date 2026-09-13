@@ -7,10 +7,15 @@ using PGAssetTool.Core.Weapons;
 
 namespace PGAssetTool.Core.Export;
 
+/// <param name="Notes">
+/// Things the author should know about what was written, which are not failures: that one picture
+/// is written to two assets, or that two pictures which look alike have to be edited apart.
+/// </param>
 public sealed record WeaponExport(
     string Directory,
     IReadOnlyList<ExportedAsset> Assets,
-    IReadOnlyList<string> Skipped);
+    IReadOnlyList<string> Skipped,
+    IReadOnlyList<string>? Notes = null);
 
 /// Writes out everything belonging to one weapon, arranged so the result is browsable: images in
 /// one place, audio in another, and the object graph as a single readable document rather than a
@@ -66,6 +71,7 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         var assets = new List<ExportedAsset>();
         var skipped = new List<string>();
+        var notes = new List<string>();
 
         _exporter.Coverage = MaskUnused ? Sampled(tree) : null;
 
@@ -146,10 +152,92 @@ public sealed class WeaponExporter(BundleSet bundles)
         else if (Skin is { Length: > 0 } asked)
             skipped.Add($"'{asked}': this weapon has no such skin");
 
+        if (chosen is null) PairTheDefaultSkin(tree, directory, assets, notes, skipped);
+
         DrawPackIcon(tree, directory, skipped);
         Dress(assets, tree, chosen);
 
-        return new WeaponExport(directory, assets, skipped);
+        return new WeaponExport(directory, assets, skipped, notes);
+    }
+
+    /// The skin the game shows once a player has ever changed skins on this weapon.
+    ///
+    /// A weapon with skins has two default looks, and which one a player gets depends on their own
+    /// history: the weapon's own paint until they first touch its skins, and this one ever after.
+    /// It is filed among the skins under the weapon's own prefab name — Weapon834_default — and
+    /// named in the shop exactly as the weapon is.
+    private static WeaponSkinView? DefaultSkin(WeaponTree tree)
+        => tree.Skins.FirstOrDefault(s => s.Model is null
+               && string.Equals(s.Record.Id, tree.Record.PrefabName + "_default", StringComparison.OrdinalIgnoreCase))
+           ?? tree.Skins.FirstOrDefault(s => s.Model is null
+               && string.Equals(s.DisplayName, tree.DisplayName, StringComparison.OrdinalIgnoreCase));
+
+    /// Makes an edit to the weapon's own paint reach its default skin as well, so a pack looks the
+    /// same to every player.
+    ///
+    /// Without this, a re-skin showed only to players who had never touched the skins: the default
+    /// skin can paint with a texture of its own, and nothing the author edited was in it. The game
+    /// has it both ways. #416's default skin draws with the weapon's own texture — the same asset —
+    /// and needs nothing. #507's draws with a separate asset whose pixels are identical to the
+    /// weapon's, so the one picture the author edits is written to both. Where the two pictures
+    /// really differ, both are written out and the author is told, because painting one over the
+    /// other would be a guess about which the author meant.
+    private void PairTheDefaultSkin(
+        WeaponTree tree, string directory, List<ExportedAsset> assets, List<string> notes, List<string> skipped)
+    {
+        if (DefaultSkin(tree) is not { } skin || tree.MainMesh is not { } body) return;
+        if (tree.MeshTextures.FirstOrDefault(m => m.MeshPathId == body.PathId) is not { } slots) return;
+
+        var index = new ContainerIndex(bundles.Context);
+
+        // Slot for slot: a skin names one material per material the renderer has, in its order.
+        for (var slot = 0; slot < Math.Min(slots.BySubMesh.Count, skin.Materials.Count); slot++)
+        {
+            if (slots.BySubMesh[slot] is not { } own) continue;
+            if (skin.Materials[slot].Main is not { } main) continue;
+
+            var ownBundle = own.Bundle.Length > 0 ? own.Bundle : tree.PrefabBundle ?? "";
+            var (bundle, pathId) = skin.Materials[slot].Locate(main);
+            if (pathId == own.PathId && string.Equals(bundle, ownBundle, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var written = assets.FirstOrDefault(a => a.Class == AssetClassID.Texture2D
+                && a.Address.PathId == own.PathId
+                && string.Equals(a.Address.Container, ownBundle, StringComparison.OrdinalIgnoreCase));
+            if (written is null) continue;
+
+            var ours = TextureFor(own with { Bundle = ownBundle });
+            var theirs = TextureFor(new AssetNode(pathId, AssetClassID.Texture2D, main.Name, bundle));
+            if (ours is null || theirs is null)
+            {
+                skipped.Add($"{main.Name}: the default skin's texture could not be read to compare");
+                continue;
+            }
+
+            if (ours.Width == theirs.Width && ours.Height == theirs.Height && ours.Bgra.AsSpan().SequenceEqual(theirs.Bgra))
+            {
+                AssetsFileInstance file;
+                try { file = bundles.Open(bundle); }
+                catch (Exception ex) when (ex is IOException or FileNotFoundException)
+                {
+                    skipped.Add($"{main.Name}: {ex.Message}");
+                    continue;
+                }
+                if (file.file.GetAssetInfo(pathId) is not { } info) continue;
+
+                // The same file, a second address. Everything downstream keys by file — what is
+                // edited, what is packed — and by address only when it writes, so one edit writes both.
+                assets.Add(written with { Address = index.AddressOf(bundle, file, info, main.Name), Wears = null });
+                notes.Add($"{Path.GetFileName(written.Path)} is also what the default skin paints with "
+                    + $"({main.Name}), so editing it changes both.");
+            }
+            else
+            {
+                ExportByName(bundle, main.Name, Path.Combine(directory, "textures", "default skin"),
+                    assets, skipped, AssetClassID.Texture2D);
+                notes.Add($"The default skin paints with {main.Name}, which is not the same picture as {own.Name}. "
+                    + "Both are written out: a player who has ever changed skins sees the one in 'textures/default skin'.");
+            }
+        }
     }
 
     /// Records, against each mesh written out, the textures it is drawn with.

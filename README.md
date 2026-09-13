@@ -50,6 +50,9 @@ ordinary files — PNGs, WAVs, glTF models — plus a small `pgmod.json` recordi
 from. To change only one skin rather than the whole weapon, pick it in the dropdown above the tree
 first.
 
+A weapon with skins has two default looks, depending on whether a player has ever changed its skin.
+Where the second is painted with a copy of the weapon's own texture, your edit is written to both;
+where it is a different picture, both are written out and the Editor says so.
 **4. Edit a file.** Open one of the PNGs in whatever you draw in, change it, save it. The **Editor**
 tab is watching the folder and marks the file as edited the moment you do.
 

@@ -997,10 +997,15 @@ internal static class SelfTest
                 var packing = string.Equals(Path.GetFullPath(w.Directory), written,
                     StringComparison.OrdinalIgnoreCase) ? 3 : 1;
 
+                // Counted by file: one picture can be written to two assets, and it is still one
+                // edited file however many operations follow from it.
                 var differ = PGAssetTool.Core.Pack.Workspace.Changed(
-                    w.Directory, PGAssetTool.Core.Pack.Workspace.Read(w.Directory));
+                        w.Directory, PGAssetTool.Core.Pack.Workspace.Read(w.Directory))
+                    .Select(o => o.Source)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
                 Console.WriteLine($"batch    {w.Name}: {differ.Count} of {w.Files} files differ"
-                    + (differ.Count > 0 ? $" ({string.Join(", ", differ.Select(o => o.Source))})" : ""));
+                    + (differ.Count > 0 ? $" ({string.Join(", ", differ)})" : ""));
                 if (differ.Count != packing)
                     return Fail($"'{w.Name}' should be packing {packing} and is packing {differ.Count}");
             }
@@ -1138,6 +1143,7 @@ internal static class SelfTest
             // tiles had not been laid out and every picture read as missing.
             if (OptionsCanBeClosedOnAShortScreen(model) is { } stuck) return Fail(stuck);
             if (FindingStaysInTheWorkspaceItIsAskedIn(model) is { } wandered) return Fail(wandered);
+            if (AnEditToTheWeaponReachesItsDefaultSkin(model) is { } unpaired) return Fail(unpaired);
 
             // One first. Turning it off restores its bundles; the confirmation is what stands
             // between a click and the game being rewritten.
@@ -2845,6 +2851,67 @@ internal static class SelfTest
         PGAssetTool.Core.Pack.Workspace.Save(
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
+    }
+
+    /// An edit to a weapon's own paint reaches its default skin as well, where the two are copies.
+    ///
+    /// A weapon with skins has two default looks, and which a player sees depends on whether they
+    /// have ever changed skins. #507's default skin paints with a separate texture whose pixels are
+    /// the weapon's own, so a pack that replaced only the weapon's showed to some players and not
+    /// to others. #416's paints with the very same asset, and pairing it would be a second write of
+    /// one texture.
+    private static string? AnEditToTheWeaponReachesItsDefaultSkin(MainViewModel model)
+    {
+        if (model.Reader is not { } reader) return "the game is not open to extract from";
+
+        var catalogs = PGAssetTool.Core.Catalog.GameCatalogs.Load(reader);
+        var resolver = new PGAssetTool.Core.Weapons.WeaponResolver(reader, catalogs);
+        var weapons = catalogs.Of(PGAssetTool.Core.Catalog.ItemKinds.Weapon);
+        var root = Path.Combine(Path.GetTempPath(), $"pgassettool-selftest-skins-{Guid.NewGuid():N}");
+
+        try
+        {
+            (int Shared, int Rows, int Files, string Names, int Notes) Extract(int number)
+            {
+                var tree = resolver.Resolve(weapons.First(w => w.GameNumber == number));
+                var export = new PGAssetTool.Core.Export.WeaponExporter(reader) { MaskUnused = true }
+                    .ExportAsWorkspace(tree, root, "self test", null);
+
+                var pairs = PGAssetTool.Core.Pack.Workspace.Read(export.Directory).Operations
+                    .Where(o => o.Op == PGAssetTool.Core.Pack.PackOperations.ReplaceTexture)
+                    .GroupBy(o => o.Source, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() > 1)
+                    .ToList();
+
+                var view = PGAssetTool.Core.Pack.WorkspaceView.Open(export.Directory)!;
+                return (pairs.Count, view.Files.Count,
+                    view.Files.Select(f => f.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    string.Join("; ", pairs.Select(g => $"{g.Key} -> {string.Join(" + ", g.Select(o => o.Target.Name))}")),
+                    export.Notes?.Count ?? 0);
+            }
+
+            var knife = Extract(507);
+            var ultimatum = Extract(416);
+
+            Console.WriteLine($"skins    #507: {knife.Shared} picture(s) written to two assets ({knife.Names}), "
+                + $"{knife.Notes} note(s); #416: {ultimatum.Shared}; each file listed once: "
+                + $"{knife.Rows == knife.Files && ultimatum.Rows == ultimatum.Files}");
+
+            if (knife.Shared == 0 || !knife.Names.Contains("Weapon928_default", StringComparison.OrdinalIgnoreCase))
+                return "#507's default skin paints with a copy of its texture, and an edit to the weapon's does not reach it";
+            if (knife.Notes == 0) return "#507's paint was written to two assets and the author was not told";
+            if (ultimatum.Shared != 0)
+                return $"#416's default skin paints with the weapon's own texture and was paired anyway: {ultimatum.Names}";
+            if (knife.Rows != knife.Files || ultimatum.Rows != ultimatum.Files)
+                return "a picture written to two assets is listed twice in the editor";
+
+            return null;
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+        }
     }
 
     /// Browse and extraction read the game as shipped, not the mods installed over it.

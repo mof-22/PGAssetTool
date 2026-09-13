@@ -446,8 +446,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             LastExport = export.Directory;
             Editor.Rescan(WorkspaceRoot);
             Manager.Refresh();
-            Status = $"{export.Assets.Count} files written to {export.Directory}"
-                + (export.Skipped.Count > 0 ? $", {export.Skipped.Count} skipped" : "");
+            // By file: one picture can be written to two assets, and that is still one file.
+            Status = $"{export.Assets.Select(a => a.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count()} files written to {export.Directory}"
+                + (export.Skipped.Count > 0 ? $", {export.Skipped.Count} skipped" : "")
+                + (export.Notes is { Count: > 0 } notes ? ".  " + string.Join("  ", notes) : "");
         });
     }
 

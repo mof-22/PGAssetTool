@@ -67,15 +67,21 @@ public sealed record WorkspaceView(string Directory, PackManifest Manifest, IRea
 
         var changed = Workspace.Changed(directory, manifest).ToHashSet();
 
-        var files = manifest.Operations.Select(operation =>
-        {
-            var full = Path.Combine(directory, operation.Source);
-            var info = new FileInfo(full);
-            return new WorkspaceFile(
-                operation.Source, full, operation.Target, operation.Op,
-                changed.Contains(operation), info.Exists ? info.Length : 0, operation.AlphaIsMask,
-                operation.Wears);
-        })
+        // One row per file rather than per operation. A file can stand for more than one asset — a
+        // weapon's paint and the identical copy its default skin paints with are both written from
+        // the one picture — and a row per operation listed the same image twice.
+        var files = manifest.Operations
+            .GroupBy(o => o.Source, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var operation = group.First();
+                var full = Path.Combine(directory, operation.Source);
+                var info = new FileInfo(full);
+                return new WorkspaceFile(
+                    operation.Source, full, operation.Target, operation.Op,
+                    group.Any(changed.Contains), info.Exists ? info.Length : 0, operation.AlphaIsMask,
+                    operation.Wears);
+            })
         .OrderBy(f => f.Folder, StringComparer.Ordinal)
         .ThenBy(f => f.Name, StringComparer.Ordinal)
         .ToList();

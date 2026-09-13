@@ -474,7 +474,9 @@ if (command == "extract")
 
     Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
     Console.WriteLine($"  -> {export.Directory}");
-    foreach (var group in export.Assets.GroupBy(a => Path.GetDirectoryName(a.Path)).OrderBy(g => g.Key))
+    // By file: a picture written to two assets is one file on disk and is listed once.
+    var files = export.Assets.DistinctBy(a => a.Path, StringComparer.OrdinalIgnoreCase).ToList();
+    foreach (var group in files.GroupBy(a => Path.GetDirectoryName(a.Path)).OrderBy(g => g.Key))
     {
         var folder = Path.GetRelativePath(export.Directory, group.Key!).Replace('\\', '/');
         Console.WriteLine($"    {folder}/  ({group.Count()})");
@@ -486,11 +488,17 @@ if (command == "extract")
         Console.WriteLine($"\n  Skipped ({export.Skipped.Count})");
         foreach (var reason in export.Skipped.Take(10)) Console.WriteLine($"    {reason}");
     }
+    if (export.Notes is { Count: > 0 } notes)
+    {
+        Console.WriteLine();
+        foreach (var note in notes) Console.WriteLine($"  Note: {note}");
+    }
     if (asWorkspace)
     {
         var manifest = Workspace.Read(export.Directory);
+        var replaceable = manifest.Operations.Select(o => o.Source).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         Console.WriteLine();
-        Console.WriteLine($"  {PackManifest.FileName} lists {manifest.Operations.Count} replaceable files.");
+        Console.WriteLine($"  {PackManifest.FileName} lists {replaceable} replaceable files.");
         Console.WriteLine("  Edit any of them, then run:");
         Console.WriteLine($"    pgassettool pack \"{export.Directory}\"");
     }
