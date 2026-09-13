@@ -251,7 +251,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     : GameInstallation.OpenDetected();
 
                 var game = _installation;
-                _bundles = new BundleSet(game);
+
+                // The game as shipped, not as modded. Browsing an installed weapon showed the mod,
+                // and extracting it wrote the mod's bytes out as the weapon's own — and since a pack
+                // carries only what changed after the extract, an author could build a pack around
+                // somebody else's installed work without either of them seeing it. It also stops a
+                // protected pack being lifted straight back out of the game it went into, which is
+                // the weaker reason. Mods are checked in the game.
+                _bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf);
                 _catalogs = GameCatalogs.Load(_bundles, Language);
                 _resolver = new WeaponResolver(_bundles, _catalogs);
             });
@@ -1274,6 +1281,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// disposes — which it can do, because it is the one pumping the thread the read finishes on.
     public bool Reading => _reading.CurrentCount == 0;
 
+    /// What Browse and extraction read through, for a check that it is the game as shipped.
+    internal BundleSet? Reader => _bundles;
     public void Dispose()
     {
         Editor.Dispose();

@@ -76,7 +76,8 @@ the copy taken before the first write.
 everything the selected one references. Previews live here: a texture, a sound, or a model you can
 turn, dress in any of the item's own skins, and — where the model is on bones — play its own
 animations on. `Ctrl+Shift+R` narrows the tree to the things that can actually be replaced, which is
-usually what you want.
+usually what you want. Everything here is the game as it ships, whatever is installed over it — so
+what you extract is the game's own, and how an installed mod looks is something to see in the game.
 
 **Editor** — the workspaces you have extracted, which files you have edited, and the comparison
 between yours and the game's. The pack's name, author, version, description and picture are set

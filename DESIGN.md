@@ -353,6 +353,12 @@ uninstalling drops the mod before its bundles are put back.
 `apply` refuses a bundle that something else has already modified and has no backup, unless `--force`
 says to accept its contents as the original.
 
+The backups are also what Browse and extraction read. A reader given `ModStore.OriginalOf` opens a
+bundle's original wherever one is kept, so an item is shown as the game ships it whatever is
+installed over it. Reading the live bundles showed the mod, and an extract then wrote the mod's bytes
+out as the weapon's own — and since a pack carries only what changed after the extract, an author
+could build a pack around somebody else's installed work without either of them seeing it. Applying,
+verifying and the manager read the live files, which is what they are about.
 A reconcile is organised by bundle rather than by mod: every enabled mod's operations for one bundle
 are gathered first, and the bundle is opened, edited and written once. Going mod by mod meant
 rebuilding a bundle once per mod on it, and a rebuild is a decompress and a recompress — thirty-one

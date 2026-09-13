@@ -13,10 +13,22 @@ public sealed class BundleSet : IDisposable
 
     public GameInstallation Game { get; }
 
-    public BundleSet(GameInstallation game, AssetsContext? context = null)
+    /// Where a bundle's unmodified copy is kept, for one something has been written into.
+    private readonly Func<CacheKind, string, string, string?>? _originals;
+
+    /// <param name="originals">
+    /// Asked for the copy of a bundle as it was before any mod was written into it — by cache,
+    /// name and hash — answering null for a bundle nothing has touched. Given, this reads the game
+    /// as shipped; left out, it reads the game as it is, mods and all. Anything that writes to the
+    /// game or checks what is there wants the second, and anything that shows or extracts an item
+    /// wants the first.
+    /// </param>
+    public BundleSet(GameInstallation game, AssetsContext? context = null,
+        Func<CacheKind, string, string, string?>? originals = null)
     {
         Game = game;
         _context = context ?? new AssetsContext();
+        _originals = originals;
         _hashes = game.ReadManifest().ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -27,10 +39,21 @@ public sealed class BundleSet : IDisposable
         ? hash
         : throw new KeyNotFoundException($"'{bundle}' is not in the bundle manifest.");
 
-    /// The copy the game would load, which is not always the one shipped with it.
+    /// The copy the game would load, which is not always the one shipped with it — or, for a reader
+    /// asked for originals, that copy as it was before anything was written into it.
+    ///
+    /// Keyed by the hash the manifest names now, so a backup taken before a game update is not
+    /// mistaken for the original of the bundle that replaced it.
     public string PathOf(string bundle)
-        => Game.Resolve(bundle, HashOf(bundle))?.Path
-           ?? throw new FileNotFoundException($"No copy of '{bundle}' is present in any cache.");
+    {
+        var hash = HashOf(bundle);
+        var live = Game.Resolve(bundle, hash)
+            ?? throw new FileNotFoundException($"No copy of '{bundle}' is present in any cache.");
+
+        return _originals?.Invoke(live.Cache, bundle, hash) is { } original && File.Exists(original)
+            ? original
+            : live.Path;
+    }
 
     /// Every bundle opened through here, so each is opened exactly once.
     ///

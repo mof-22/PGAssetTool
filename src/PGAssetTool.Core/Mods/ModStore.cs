@@ -293,6 +293,11 @@ public sealed class ModStore
 
     public bool HasBackup(CacheKind cache, string bundle, string hash) => File.Exists(BackupPathFor(cache, bundle, hash));
 
+    /// The copy of a bundle as it was before anything was written into it, or null for one nothing
+    /// has touched — which is what a reader showing the game as shipped opens. See BundleSet.
+    public string? OriginalOf(CacheKind cache, string bundle, string hash)
+        => HasBackup(cache, bundle, hash) ? BackupPathFor(cache, bundle, hash) : null;
+
     public void Backup(CacheKind cache, string bundle, string hash, string livePath)
     {
         var destination = BackupPathFor(cache, bundle, hash);

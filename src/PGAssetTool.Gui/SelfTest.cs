@@ -1027,6 +1027,8 @@ internal static class SelfTest
 
             Console.WriteLine($"batch    installed: {string.Join(", ", installed.Select(m => m.Id))}");
 
+            if (BrowsingReadsTheGameAsShipped(model) is { } shippedProblem) return Fail(shippedProblem);
+
             if (OneModStandsAsideForAnother(model, written) is { } rivalProblem) return Fail(rivalProblem);
 
             // The same install a pack dropped on the window takes: a file, straight to the applier,
@@ -2843,6 +2845,43 @@ internal static class SelfTest
         PGAssetTool.Core.Pack.Workspace.Save(
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
+    }
+
+    /// Browse and extraction read the game as shipped, not the mods installed over it.
+    ///
+    /// They read the live bundles, so an installed mod was what Browse showed and what an extract
+    /// wrote out as the weapon's own — and a pack takes only what changed after the extract, so it
+    /// could carry somebody else's installed work without anybody seeing it. Checked against the
+    /// bundles this run's own pack has just been written into, which are exactly the ones where the
+    /// two answers differ.
+    private static string? BrowsingReadsTheGameAsShipped(MainViewModel model)
+    {
+        if (model.Reader is not { } reader) return "the game was not read again after installing";
+
+        var game = model.Game!;
+        var store = new PGAssetTool.Core.Mods.ModStore(game);
+        var mine = store.Read().FirstOrDefault(m => m.Id == PackIdentity);
+        if (mine is null || mine.TouchedBundles.Count == 0) return "this run's pack wrote into no bundle to read back";
+
+        var looked = 0;
+        foreach (var (bundle, hash) in mine.TouchedBundles)
+        {
+            if (game.Resolve(bundle, hash) is not { } live) continue;
+            if (store.OriginalOf(live.Cache, bundle, hash) is not { } original)
+                return $"'{bundle}' was written into and no original of it is kept";
+
+            var read = reader.PathOf(bundle);
+            if (!string.Equals(Path.GetFullPath(read), Path.GetFullPath(original), StringComparison.OrdinalIgnoreCase))
+                return $"Browse reads '{bundle}' from {read}, the modded copy, rather than from its original";
+
+            if (Core.Mods.BundleIntegrity.Md5(live.Path) == Core.Mods.BundleIntegrity.Md5(original))
+                return $"'{bundle}' is no different from its original, so reading it proves nothing";
+
+            looked++;
+        }
+
+        Console.WriteLine($"shipped  Browse reads the {looked} bundle(s) this run's pack is in from their originals");
+        return looked == 0 ? "none of the bundles this run's pack is in could be found to check" : null;
     }
 
     /// Protection is picked from a list and saved the moment it is picked, and the re-read that the

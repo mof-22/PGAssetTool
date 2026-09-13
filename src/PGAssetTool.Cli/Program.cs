@@ -142,7 +142,9 @@ catch (Exception ex)
     return 1;
 }
 
-using var bundles = new BundleSet(game);
+// The game as shipped: show, extract and convert are about the item, not about whatever mod is
+// installed over it. Anything that writes or verifies goes to the installation directly.
+using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf);
 
 // Loaded on demand: only the commands that name weapons pay for it.
 var weaponNames = new Lazy<GameCatalogs>(
