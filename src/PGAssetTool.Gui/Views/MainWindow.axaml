@@ -191,7 +191,7 @@
         <MenuItem Header="E_xit" Click="OnExit" InputGesture="Alt+F4" />
       </MenuItem>
       <MenuItem Header="_Edit">
-        <MenuItem Header="_Find weapon" Command="{Binding FocusSearchCommand}"
+        <MenuItem Header="_Find" Command="{Binding FocusSearchCommand}"
                   InputGesture="Ctrl+F" />
         <MenuItem Header="_Reload from disk" Command="{Binding ReloadCommand}"
                   InputGesture="Ctrl+R" />

@@ -1128,6 +1128,11 @@ internal static class SelfTest
 
             if (TilesArrangeTwoWays(model) is { } orderProblem) return Fail(orderProblem);
 
+            // Before the window the tiles are counted in exists. Finding switches tabs and back, and
+            // a tab switched back to is built again from nothing: counted straight afterwards, its
+            // tiles had not been laid out and every picture read as missing.
+            if (FindingStaysInTheWorkspaceItIsAskedIn(model) is { } wandered) return Fail(wandered);
+
             // One first. Turning it off restores its bundles; the confirmation is what stands
             // between a click and the game being rewritten.
             model.Manager.Selected = model.Manager.Mods.FirstOrDefault(m => m.Mod.Id == PackIdentity);
@@ -2766,6 +2771,34 @@ internal static class SelfTest
         PGAssetTool.Core.Pack.Workspace.Save(
             renamed, PGAssetTool.Core.Pack.Workspace.Read(renamed) with { Id = id });
         return renamed;
+    }
+
+    /// Ctrl+F looks in the workspace it was pressed in and never takes you somewhere else.
+    ///
+    /// It switched to Browse first, so pressing it in the manager — which has a search of its own —
+    /// threw away the shelf on screen to search the weapon list instead.
+    private static string? FindingStaysInTheWorkspaceItIsAskedIn(MainViewModel model)
+    {
+        var showing = model.Workspace;
+
+        try
+        {
+            foreach (var tab in new[] { MainViewModel.ManagerTab, MainViewModel.EditorTab, MainViewModel.BrowseTab })
+            {
+                model.Workspace = tab;
+                model.FocusSearchCommand.Execute(null);
+
+                if (model.Workspace != tab)
+                    return $"Ctrl+F pressed in workspace {tab} moved the window to {model.Workspace}";
+            }
+
+            Console.WriteLine("find     Ctrl+F stayed in the manager, the editor and browse");
+            return null;
+        }
+        finally
+        {
+            model.Workspace = showing;
+        }
     }
 
     /// The pack details form keeps its buttons on the page in a window squeezed to its smallest.

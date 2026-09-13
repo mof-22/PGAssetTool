@@ -667,12 +667,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         finally { _reading.Release(); Busy = false; }
     }
 
+    /// Puts the keyboard in the search box of whichever workspace is showing, and does nothing in
+    /// one that has none.
+    ///
+    /// It used to switch to Browse first, so Ctrl+F in the manager — which has a search of its own —
+    /// threw away the shelf you were looking at to search the weapon list instead. A shortcut that
+    /// means "find" is about what is in front of you.
     [RelayCommand]
-    private void FocusSearch()
-    {
-        Workspace = BrowseTab;
-        SearchRequested?.Invoke();
-    }
+    private void FocusSearch() => SearchRequested?.Invoke();
 
     [RelayCommand]
     private Task Reload() => ReloadAsync();
