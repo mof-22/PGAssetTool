@@ -43,6 +43,23 @@ public sealed record Motion(string Name, float Length, float SampleRate, IReadOn
         return new Motion(clip["m_Name"].AsString, length, rate <= 0 ? 30f : rate, curves);
     }
 
+    /// The same clip with the first name taken off every path it drives, and the curves on that
+    /// first object itself left out.
+    ///
+    /// A clip names what it moves from the object under the Animation component down:
+    /// `comet_sniper_rifle/FPS_PLAYER_Arm_Right/Bone_comet_sniper_rifle_root/Bone_sniper_clip`. A
+    /// skin that brings a model and no clips of its own is built on the weapon's rig under a name of
+    /// its own — `Weapon893_deepwater_comet/FPS_PLAYER_Arm_Right/Bone_comet_sniper_rifle_root/...` —
+    /// and it is the weapon's clips that play on it. That first name is the one thing the two do not
+    /// share, and a path is matched by how it ends, so taking it off is all it needs.
+    public Motion WithoutRoot() => this with
+    {
+        Curves = Curves
+            .Where(c => c.Path.Contains('/'))
+            .Select(c => c with { Path = c.Path[(c.Path.IndexOf('/') + 1)..] })
+            .ToList(),
+    };
+
     private static void Gather(
         AssetTypeValueField array, MotionChannel channel, int width, List<MotionCurve> into)
     {

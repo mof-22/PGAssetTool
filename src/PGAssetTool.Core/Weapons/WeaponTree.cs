@@ -128,8 +128,10 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         // there is nothing to look up.
         var skins = record.Kind == ItemKinds.Weapon
             ? catalogs.Skins.ForWeapon(record.Index)
+                .Select(s => (Skin: s, Model: CustomModel(s)))
                 .Select(s => new WeaponSkinView(
-                    s, catalogs.Localization.Translate(s.LocalizationKey), Materials(s), CustomModel(s)))
+                    s.Skin, catalogs.Localization.Translate(s.Skin.LocalizationKey),
+                    Materials(s.Skin, s.Model), s.Model))
                 .ToList()
             : [];
 
@@ -263,59 +265,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         => TexturesForMeshes(bundle, assets);
 
     private IReadOnlyList<MeshTextures> TexturesForMeshes(string prefabBundle, IReadOnlyList<AssetNode> assets)
-    {
-        var found = new List<MeshTextures>();
-        var meshOfGameObject = new Dictionary<long, long>();
-        var renderers = new List<(long GameObject, long Mesh, AssetTypeValueField Field, string Bundle)>();
-
-        foreach (var node in assets)
-        {
-            var bundle = node.Bundle.Length > 0 ? node.Bundle : prefabBundle;
-            AssetsFileInstance file;
-            AssetTypeValueField? field;
-            try
-            {
-                file = bundles.Open(bundle);
-                var info = file.file.GetAssetInfo(node.PathId);
-                field = info is null ? null : bundles.Context.Deserialize(file, info);
-            }
-            catch (Exception e) when (e is IOException or FileNotFoundException) { continue; }
-            if (field is null) continue;
-
-            var owner = field["m_GameObject"];
-            var on = owner.IsDummy ? 0 : owner["m_PathID"].AsLong;
-
-            switch (node.Class)
-            {
-                case AssetClassID.MeshFilter:
-                    meshOfGameObject[on] = field["m_Mesh"]["m_PathID"].AsLong;
-                    break;
-                case AssetClassID.SkinnedMeshRenderer:
-                    renderers.Add((on, field["m_Mesh"]["m_PathID"].AsLong, field, bundle));
-                    break;
-                case AssetClassID.MeshRenderer:
-                    renderers.Add((on, 0, field, bundle));
-                    break;
-            }
-        }
-
-        foreach (var (gameObject, named, renderer, bundle) in renderers)
-        {
-            var mesh = named != 0 ? named : meshOfGameObject.GetValueOrDefault(gameObject);
-            if (mesh == 0 || found.Any(f => f.MeshPathId == mesh)) continue;
-
-            var slots = renderer["m_Materials"]["Array"].Children
-                .Select(m => MainTextureOf(bundle, m["m_FileID"].AsInt, m["m_PathID"].AsLong))
-                .ToList();
-
-            if (slots.Any(s => s is not null)) found.Add(new MeshTextures(mesh, slots));
-        }
-
-        return found;
-    }
-
-    private AssetNode? MainTextureOf(string from, int fileId, long pathId)
-        => _dressing.MainTextureOf(from, fileId, pathId);
+        => _dressing.OfModel(prefabBundle, assets);
 
     private AssetNode? MainTextureIn(AssetsFileInstance file, string bundle, AssetTypeValueField material)
         => _dressing.MainTextureIn(file, bundle, material);
@@ -340,13 +290,27 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 
     public const string CustomModelRoot = "WeaponSkinsV2/CustomModels/";
 
-    private IReadOnlyList<SkinMaterial> Materials(SkinRecord skin)
+    ///
+    /// A skin that brings a model can name materials the lookup table has never heard of, because
+    /// they are the model's own and only the model refers to them. #416's Northern Lights names
+    /// two by their bare names, and both are Materials in the bundle its model is in. So a name
+    /// the table does not know is looked for there before it is given up on — in that bundle and
+    /// nowhere else, since a bare name elsewhere could be anybody's.
+    private IReadOnlyList<SkinMaterial> Materials(SkinRecord skin, SkinModel? model)
     {
         var materials = new List<SkinMaterial>();
 
+        // The model's own materials, walked only if a name is not found any other way — which is six
+        // skins in the game — since walking a model is the cost the tree otherwise defers.
+        IReadOnlyList<AssetNode>? walked = null;
+        IReadOnlyList<AssetNode> OfModel() => walked ??= ModelMaterials(model);
+
         foreach (var path in skin.MaterialPaths)
         {
-            if (catalogs.Lookup.Resolve(path, AssetLookup.SkinAssetRoots) is not var (full, bundle)) continue;
+            string full, bundle;
+            if (catalogs.Lookup.Resolve(path, AssetLookup.SkinAssetRoots) is { } filed) (full, bundle) = filed;
+            else if (model is not null) (full, bundle) = (path, model.Bundle);
+            else continue;
 
             var name = full[(full.LastIndexOf('/') + 1)..];
             AssetsFileInstance file;
@@ -355,6 +319,22 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 
             var info = ReferenceWalker.FindByName(
                 bundles.Context, file, AssetClassID.Material, name, StringComparison.OrdinalIgnoreCase);
+
+            // Not by its own name either. Six skins name a material a little differently from what
+            // their model calls it — `Weapon917_plastic_instigator` for `plastic_instigator_map`,
+            // `Weapon1819_idols_slayer.asset` for `Weapon1819_idols_slayer` — so it is taken from
+            // among the model's own materials, and only when exactly one is the same name once the
+            // prefix, the `_map` and any extension are set aside. Three more name nothing at all.
+            if (info is null && model is not null && Alike(OfModel(), name) is { } alike)
+            {
+                bundle = alike.Bundle.Length > 0 ? alike.Bundle : model.Bundle;
+                try { file = bundles.Open(bundle); }
+                catch (Exception e) when (e is IOException or FileNotFoundException) { continue; }
+
+                info = file.file.GetAssetInfo(alike.PathId);
+                name = alike.Name;
+            }
+
             if (info is null) continue;
 
             // Only the textures, not the whole closure: a material also reaches its shader, and a
@@ -371,6 +351,61 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         }
 
         return materials;
+    }
+
+    /// Every material a skin's own model reaches.
+    private IReadOnlyList<AssetNode> ModelMaterials(SkinModel? model)
+    {
+        if (model is null) return [];
+
+        try
+        {
+            var file = bundles.Open(model.Bundle);
+            var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
+            var root = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.GameObject, name);
+
+            return root is null
+                ? []
+                : ReferenceWalker.Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: Opaque)
+                    .Where(n => n.Class == AssetClassID.Material)
+                    .ToList();
+        }
+        catch (Exception e) when (e is IOException or FileNotFoundException)
+        {
+            return [];
+        }
+    }
+
+    /// A material's name with what a skin and its model disagree about set aside: a `WeaponNNN_`
+    /// prefix, a `_map` suffix, and an extension.
+    public static string Plainly(string name)
+    {
+        var plain = Path.GetFileNameWithoutExtension(name);
+
+        if (plain.StartsWith("Weapon", StringComparison.OrdinalIgnoreCase))
+        {
+            var at = "Weapon".Length;
+            while (at < plain.Length && char.IsAsciiDigit(plain[at])) at++;
+            if (at > "Weapon".Length && at < plain.Length && plain[at] == '_') plain = plain[(at + 1)..];
+        }
+
+        return plain.EndsWith("_map", StringComparison.OrdinalIgnoreCase) ? plain[..^"_map".Length] : plain;
+    }
+
+    /// The one material among these that is plainly the one named, or null for none or several.
+    public static AssetNode? Alike(IEnumerable<AssetNode> materials, string named)
+    {
+        var plain = Plainly(named);
+        if (plain.Length == 0) return null;
+
+        var found = materials
+            .Where(m => m.Class == AssetClassID.Material
+                && string.Equals(Plainly(m.Name), plain, StringComparison.OrdinalIgnoreCase))
+            .DistinctBy(m => (m.Bundle.ToLowerInvariant(), m.PathId))
+            .Take(2)
+            .ToList();
+
+        return found.Count == 1 ? found[0] : null;
     }
 
     private static string NamespaceOf(string path)

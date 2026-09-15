@@ -108,6 +108,65 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
         }
     }
 
+    /// Which textures each mesh in a model is drawn with, asked of the model's own objects.
+    ///
+    /// The question the weapon tree asks of a prefab's closure, where it knows which renderers are
+    /// the model's. A SkinnedMeshRenderer names its own mesh, while a MeshRenderer leaves that to a
+    /// MeshFilter on the same GameObject, so both shapes are followed. Here rather than in the
+    /// resolver because the exporter asks it too, of the model a skin brings: a second copy of how
+    /// Unity pairs a submesh with a material would be a second thing to get wrong.
+    /// <param name="bundle">Where an asset recorded with no bundle of its own lives.</param>
+    public IReadOnlyList<Weapons.MeshTextures> OfModel(string bundle, IReadOnlyList<AssetNode> assets)
+    {
+        var found = new List<Weapons.MeshTextures>();
+        var meshOfGameObject = new Dictionary<long, long>();
+        var renderers = new List<(long GameObject, long Mesh, AssetTypeValueField Field, string Bundle)>();
+
+        foreach (var node in assets)
+        {
+            var from = node.Bundle.Length > 0 ? node.Bundle : bundle;
+            AssetTypeValueField? field;
+            try
+            {
+                var file = bundles.Open(from);
+                var info = file.file.GetAssetInfo(node.PathId);
+                field = info is null ? null : bundles.Context.Deserialize(file, info);
+            }
+            catch (Exception e) when (e is IOException or FileNotFoundException) { continue; }
+            if (field is null) continue;
+
+            var owner = field["m_GameObject"];
+            var on = owner.IsDummy ? 0 : owner["m_PathID"].AsLong;
+
+            switch (node.Class)
+            {
+                case AssetClassID.MeshFilter:
+                    meshOfGameObject[on] = field["m_Mesh"]["m_PathID"].AsLong;
+                    break;
+                case AssetClassID.SkinnedMeshRenderer:
+                    renderers.Add((on, field["m_Mesh"]["m_PathID"].AsLong, field, from));
+                    break;
+                case AssetClassID.MeshRenderer:
+                    renderers.Add((on, 0, field, from));
+                    break;
+            }
+        }
+
+        foreach (var (gameObject, named, renderer, from) in renderers)
+        {
+            var mesh = named != 0 ? named : meshOfGameObject.GetValueOrDefault(gameObject);
+            if (mesh == 0 || found.Any(f => f.MeshPathId == mesh)) continue;
+
+            var slots = renderer["m_Materials"]["Array"].Children
+                .Select(m => MainTextureOf(from, m["m_FileID"].AsInt, m["m_PathID"].AsLong))
+                .ToList();
+
+            if (slots.Any(s => s is not null)) found.Add(new Weapons.MeshTextures(mesh, slots));
+        }
+
+        return found;
+    }
+
     /// Whether a pointer names this exact mesh, following it out of the file if it leaves.
     private bool Names(
         AssetsFileInstance from, string bundle, AssetTypeValueField pointer,

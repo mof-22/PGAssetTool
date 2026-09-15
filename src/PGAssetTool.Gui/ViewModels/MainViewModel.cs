@@ -385,6 +385,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 Preview.Clear();
                 _tree = tree;
                 _clips = null;
+                _modelClips.Clear();
 
                 // What was learned about the last weapon's skins goes with the tree it was learned
                 // into: every row carries its own, and the rows are about to be thrown away.
@@ -966,6 +967,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 node.Body = WeaponResolver.MainMesh(model.Bundle, walked, dressing,
                     node.Skin?.Record.Id ?? "", _tree?.Record.Slug ?? "");
 
+                // Its own clips, read now while what was walked is in hand. They are what move this
+                // model; the weapon's name a hierarchy that only some skins' models copy.
+                _modelClips[model.AssetPath] = await Task.Run(() => ClipsAmong(walked, model.Bundle));
+
                 var found = walked
                     .Where(a => !ReplaceableOnly || Replaceable.Supports(a.Class))
                     .ToList();
@@ -1150,11 +1155,45 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_clips is not null) return _clips;
         if (_tree is not { } tree || _bundles is null) return [];
 
-        var found = new List<Motion>();
+        return _clips = ClipsAmong(tree.PrefabAssets, tree.PrefabBundle);
+    }
 
-        foreach (var node in tree.PrefabAssets.Where(a => a.Class == AssetClassID.AnimationClip))
+    /// Cleared with the tree, because they are the tree's.
+    private IReadOnlyList<Motion>? _clips;
+
+    /// The animations a skin's own model carries, by the model's path, read when its row is opened.
+    ///
+    /// A model a skin brings is a prefab of its own with clips of its own, and they are what move it.
+    /// The weapon's clips name the weapon's hierarchy — `ultimatum 1/FPS_PLAYER_Arm_Right/root` —
+    /// and of #416's four models only one is built under that name. Across the game, 77 of 130 skin
+    /// models are moved by their own clips and not the weapon's, and every one of them stood still.
+    private readonly Dictionary<string, IReadOnlyList<Motion>> _modelClips = new(StringComparer.OrdinalIgnoreCase);
+
+    /// What a mesh row can be made to do: the clips of the model it was reached through, or the
+    /// item's own for a row of the item's own.
+    ///
+    /// A skin's model that none of its own clips move is played the weapon's, with the weapon's own
+    /// first name taken off every path (Motion.WithoutRoot). Eleven of 130 skin models carry no clips
+    /// at all; seven of those are built on the weapon's rig under a name of their own.
+    private IReadOnlyList<Motion> ClipsFor(TreeNode node, Skeleton? skeleton)
+    {
+        if (node.Within is not { } within) return Clips();
+
+        var own = _modelClips.GetValueOrDefault(within.Path) ?? [];
+        if (skeleton is null || own.Any(skeleton.Moves)) return own;
+
+        return [.. Clips().Select(m => m.WithoutRoot())];
+    }
+
+    /// Reads every clip among some walked assets, skipping any that will not read.
+    private IReadOnlyList<Motion> ClipsAmong(IEnumerable<AssetNode> assets, string? fallback)
+    {
+        var found = new List<Motion>();
+        if (_bundles is null) return found;
+
+        foreach (var node in assets.Where(a => a.Class == AssetClassID.AnimationClip))
         {
-            var bundle = node.Bundle.Length > 0 ? node.Bundle : tree.PrefabBundle;
+            var bundle = node.Bundle.Length > 0 ? node.Bundle : fallback;
             if (bundle is null) continue;
 
             try
@@ -1171,11 +1210,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        return _clips = found;
+        return found;
     }
-
-    /// Cleared with the tree, because they are the tree's.
-    private IReadOnlyList<Motion>? _clips;
 
     private async void ShowPreview(TreeNode? node)
     {
@@ -1220,11 +1256,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // What this model can be made to do, read on the same thread and behind the same
                 // lock. Only for a model, and only for one something in the prefab actually skins:
                 // the bones are the renderer's and the clips are the prefab's, and a mesh with
-                // neither is shown standing still as it always was.
+                // neither is shown standing still as it always was. The prefab being the one the row
+                // was reached through: a skin's own model moves by its own clips.
                 var (skeleton, motions) = loaded is UnityMesh
-                    ? await Task.Run(() => (
-                        Skeleton.For(_bundles!, node.Bundle, node.PathId),
-                        Clips()))
+                    ? await Task.Run(() =>
+                    {
+                        var bones = Skeleton.For(_bundles!, node.Bundle, node.PathId);
+                        return (bones, ClipsFor(node, bones));
+                    })
                     : (null, []);
 
                 // Which way round it opens, from the prefab rather than from the bounding box, so

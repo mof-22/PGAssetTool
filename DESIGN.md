@@ -133,6 +133,15 @@ follow. Twelve of twelve weapons sampled animate, along with half the capes, mos
 the pets; hats, masks and boots are rigid and have no bones at all, and avatars are on bones whose
 clips are not in their own prefab.
 
+A skin that brings a model is a prefab of its own, and what moves it is the clips of the model the row
+was reached through, not the weapon's. Of 130 skin models, 77 are moved only by their own clips.
+Eleven carry none: seven of those are built on the weapon's rig under a name of their own
+(`Weapon893_deepwater_comet/FPS_PLAYER_Arm_Right/...` where the weapon's clip says
+`comet_sniper_rifle/FPS_PLAYER_Arm_Right/...`), so they are played the weapon's clips with that first
+name taken off (`Motion.WithoutRoot`); the other four are rigged unlike the weapon and move only as far
+as the arm does. A plain mesh that a clip moves by its object's name — #8's Old Combat Knife skin —
+has one bone, its own transform (`Skeleton.Rigid`).
+
 Four things about it that look arbitrary:
 
 - **The space comes from the model at rest, not from the renderer's transform.** A bind pose is

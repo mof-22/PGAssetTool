@@ -135,6 +135,7 @@ internal static class SelfTest
             if (EveryWeaponHasAModelToShow(model) is { } modelProblem) return Fail(modelProblem);
 
             if (TheModelPlaysItsAnimations(model) is { } movingProblem) return Fail(movingProblem);
+            if (SkinModelsMoveWithoutClipsOrBonesOfTheirOwn(model) is { } stillProblem) return Fail(stillProblem);
 
             model.Search = "beretta";
             Console.WriteLine($"search   'beretta' -> {model.Weapons.Count}");
@@ -678,11 +679,17 @@ internal static class SelfTest
             if (skins.Children.FirstOrDefault(s => s.Unread is not null) is not { } withModel)
                 return Fail("#416 has skins that bring their own model and none is marked unread");
 
-            if (withModel.Children.Count > 0)
+            // Its model, that is. The row can already hold the skin's own materials — Corrupted
+            // Ultimatum's is found now under the name its model gives it — and those cost nothing to
+            // show; it is the walk of the model that waits to be asked for.
+            bool HoldsAModel() => withModel.Children.SelectMany(c => c.Children)
+                .Any(c => c.Class == AssetsTools.NET.Extra.AssetClassID.Mesh);
+
+            if (withModel.ModelRead || HoldsAModel())
                 return Fail($"'{withModel.Label}' was read before anybody opened it");
 
             withModel.IsExpanded = true;
-            WaitWhile(() => withModel.Children.Count == 0, 60_000);
+            WaitWhile(() => !HoldsAModel(), 60_000);
 
             var inside = withModel.Children.SelectMany(c => c.Children).ToList();
             Console.WriteLine($"skins    opening '{withModel.Label}' read "
@@ -724,6 +731,14 @@ internal static class SelfTest
             Console.WriteLine($"skins    '{skinMesh.Label}' came up wearing {dressed} texture(s)");
             if (dressed == 0)
                 return Fail($"'{skinMesh.Label}' came up grey, with nothing worked out to put on it");
+
+            // And it moves, by the clips its own model carries. The weapon's name the weapon's own
+            // hierarchy, which three of #416's four skin models are not built under — those three
+            // stood still, and across the game 77 of 130 skin models did.
+            Console.WriteLine($"skins    '{skinMesh.Label}': {model.Preview.Clips.Count} clip(s) move it"
+                + (model.Preview.Clips.Count == 0 ? "" : $" — {string.Join(", ", model.Preview.Clips.Select(c => c.Name))}"));
+            if (model.Preview.Clips.Count == 0)
+                return Fail($"'{skinMesh.Label}' is a skin's own model and none of its own clips play on it");
 
             // What this mesh is actually drawn with comes first. Everything else stays on the list,
             // because putting another skin's paint on a mesh is what the list is for — but a weapon
@@ -3164,6 +3179,23 @@ internal static class SelfTest
             if (!skin.HasModel && files.Any(f => f.EndsWith(".glb")))
                 return $"'{skin.Name}' only repaints and a mesh was written for it";
 
+            // A skin that brings a model is masked by that model's UVs. It was masked by nothing:
+            // no mesh the weapon has draws its paint, so every texture of its own came out whole.
+            if (skin.HasModel && model.MaskUnusedTextures)
+            {
+                var paint = Core.Pack.Workspace.Read(directory).Operations
+                    .Where(o => o.Op == Core.Pack.PackOperations.ReplaceTexture
+                        && o.Target.Name.StartsWith(skin.Id!, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                Console.WriteLine($"skins    '{skin.Name}': {paint.Count(o => o.AlphaIsMask)} of {paint.Count} "
+                    + "textures named after it masked by its own model");
+
+                if (paint.Count == 0) return $"'{skin.Name}' wrote no texture named after itself";
+                if (!paint.Any(o => o.AlphaIsMask))
+                    return $"'{skin.Name}' brings a model and none of its own textures was masked by it";
+            }
+
             // Nothing of the other skins. Every skin's offer icon, profile and definition is filed
             // against the same weapon, so all of them used to come out whichever one was asked for
             // — seven sets of files an author has no reason to touch to change the eighth.
@@ -3552,6 +3584,71 @@ internal static class SelfTest
             applier.Remove(id);
             applier.SetEnabled(PackIdentity, true);
             try { File.Delete(pack); } catch (IOException) { }
+        }
+
+        return null;
+    }
+
+    /// A skin's own model moves, whether or not it carries clips of its own and whether or not it is
+    /// skinned.
+    ///
+    /// Eleven of 130 skin models carry no clips and stood still. Seven of them are built on the
+    /// weapon's rig under a name of their own, and it is the weapon's clips that play on them —
+    /// #1496's Bonebreaker drives all eight of its bones that way. And one, #8's Old Combat Knife, is
+    /// a plain mesh its own clips swing by name, which could not be posed because it has no bones.
+    private static string? SkinModelsMoveWithoutClipsOrBonesOfTheirOwn(MainViewModel model)
+    {
+        foreach (var (number, id) in new[] { (1496, "Weapon1936_bonebreaker"), (8, "Weapon9_old_combat_knife") })
+        {
+            if (!Select(model, number)) return $"#{number} never resolved";
+
+            var skins = model.Detail?.Roots.FirstOrDefault(r => r.Label == "Skins");
+            if (skins?.Children.FirstOrDefault(s =>
+                    string.Equals(s.Skin?.Record.Id, id, StringComparison.OrdinalIgnoreCase)) is not { } skin)
+                return $"#{number} has no skin '{id}' to open";
+            if (skin.Unread is null) return $"'{id}' should bring a model of its own and does not";
+
+            // Waiting on the row rather than on the model being named: the model is named before its
+            // clips are read, and the rows go in after that.
+            TreeNode? Row() => skin.Body is { } named
+                ? skin.Children.SelectMany(c => c.Children).FirstOrDefault(c =>
+                    c.Class == AssetsTools.NET.Extra.AssetClassID.Mesh && c.PathId == named.PathId)
+                : null;
+
+            skin.IsExpanded = true;
+            WaitWhile(() => Row() is null, 60_000);
+            if (skin.Body is not { } body) return $"opening '{id}' found no model in it";
+
+            var row = Row();
+            if (row is null) return $"'{id}' names '{body.Name}' as its model and no row stands for it";
+
+            model.Preview.Clear();
+            model.Detail!.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never appeared";
+
+            var preview = model.Preview;
+            if (preview.Mesh is null) return $"'{row.Label}' is not a model";
+
+            Console.WriteLine($"skinanim #{number} '{row.Label}': {preview.Clips.Count} clip(s)"
+                + (preview.Clips.Count == 0 ? "" : $" — {string.Join(", ", preview.Clips.Select(c => c.Name))}"));
+            if (preview.Clips.Count == 0) return $"#{number}'s '{id}' stands still: nothing plays on '{row.Label}'";
+
+            var rest = preview.Rest ?? preview.Mesh;
+            var furthest = 0f;
+            foreach (var clip in preview.Clips.ToList())
+            {
+                preview.Clip = clip;
+                preview.Stop();
+                for (var step = 1; step <= 12; step++)
+                {
+                    preview.Time = clip.Motion.Length * step / 12.0;
+                    if (Apart(rest, preview.Mesh) is { } moved) furthest = Math.Max(furthest, moved);
+                }
+            }
+            preview.Clip = null;
+
+            Console.WriteLine($"skinanim #{number} '{row.Label}': furthest a vertex moves is {furthest:0.###}");
+            if (furthest < 0.001f) return $"#{number}'s '{id}' has clips and none of them moves '{row.Label}'";
         }
 
         return null;

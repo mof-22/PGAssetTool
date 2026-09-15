@@ -541,13 +541,23 @@ Console.WriteLine($"  Skins ({tree.Skins.Count})");
 foreach (var skin in tree.Skins)
 {
     Console.WriteLine($"    {skin.Record.Id}  {(skin.DisplayName is null ? "" : $"\"{skin.DisplayName}\"")}");
+    // What the resolver found rather than what the lookup table alone says: a skin's model can hold
+    // materials the table does not list, and the tree already knows where.
+    // By the path the skin wrote, not by name: a material can be found under a name a little
+    // different from the one the skin gives it, and is then shown as what it is really called.
     foreach (var path in skin.Record.MaterialPaths)
     {
-        var hit = catalogs.Lookup.Resolve(path, AssetLookup.SkinAssetRoots);
-        Console.WriteLine(hit is null
+        var leaf = path[(path.LastIndexOf('/') + 1)..];
+        var found = skin.Materials.FirstOrDefault(m =>
+            string.Equals(m.Path, path, StringComparison.OrdinalIgnoreCase)
+            || m.Path.EndsWith("/" + path, StringComparison.OrdinalIgnoreCase));
+        Console.WriteLine(found is null
             ? $"      material  {path} @ ?"
-            : $"      material  {hit.Value.Path} @ {hit.Value.Bundle}");
+            : $"      material  {found.Path} @ {found.Bundle}"
+                + (string.Equals(found.Name, leaf, StringComparison.OrdinalIgnoreCase) ? "" : $"  (as {found.Name})"));
     }
+    if (skin.Model is { } brought)
+        Console.WriteLine($"      model     {brought.AssetPath} @ {brought.Bundle}");
 }
 
 if (tree.Related.Count > 0)

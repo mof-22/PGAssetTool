@@ -73,7 +73,11 @@ public sealed class WeaponExporter(BundleSet bundles)
         var skipped = new List<string>();
         var notes = new List<string>();
 
-        _exporter.Coverage = MaskUnused ? Sampled(tree) : null;
+        // A skin's own model is walked once, here, because the mask needs it as much as the export
+        // does: that model draws the skin's paint on its own UVs, and nothing in the weapon says so.
+        var brought = chosen?.Model is { } model ? Walk(model, skipped) : null;
+
+        _exporter.Coverage = MaskUnused ? Sampled(tree, brought) : null;
 
         // What the weapon itself contributes when a skin was asked for.
         //
@@ -148,7 +152,7 @@ public sealed class WeaponExporter(BundleSet bundles)
                 Path.Combine(directory, "related", AssetExporter.Sanitize(related.Namespace)), assets, skipped);
         }
 
-        if (chosen is not null) ExportSkin(chosen, directory, assets, skipped);
+        if (chosen is not null) ExportSkin(chosen, brought, directory, assets, skipped);
         else if (Skin is { Length: > 0 } asked)
             skipped.Add($"'{asked}': this weapon has no such skin");
 
@@ -328,7 +332,7 @@ public sealed class WeaponExporter(BundleSet bundles)
     /// A texture nothing here draws is left whole, and that is most of them: a shop icon, a gloss
     /// or mask map bound beside the main slot, anything reached through a component. Clearing those
     /// would mean guessing which mesh reads them, and a wrong guess erases work.
-    private Func<TextureShape, bool[]?> Sampled(WeaponTree tree)
+    private Func<TextureShape, bool[]?> Sampled(WeaponTree tree, Brought? brought)
     {
         var uses = new Dictionary<(string Bundle, long PathId), List<(long Mesh, int SubMesh)>>();
 
@@ -355,14 +359,35 @@ public sealed class WeaponExporter(BundleSet bundles)
         // recognises on sight because it is arm-shaped.
         var gun = tree.MeshTextures.FirstOrDefault(m => m.MeshPathId == tree.MainMesh?.PathId);
 
+        //
+        // And only the skins that repaint. One that brings a model draws its paint on that model's
+        // UVs, not the gun's, and holding it against the gun cleared whatever the two did not
+        // share — which for a model of its own is most of the picture.
         if (gun is not null)
-            foreach (var material in tree.Skins.SelectMany(s => s.Materials))
+            foreach (var material in tree.Skins.Where(s => s.Model is null).SelectMany(s => s.Materials))
                 if (material.Main is { } main)
                 {
                     var (bundle, pathId) = material.Locate(main);
                     for (var slot = 0; slot < gun.BySubMesh.Count; slot++)
                         Add(bundle, pathId, (gun.MeshPathId, slot));
                 }
+
+        // The model a skin brings, held against its own meshes. Without this a skin export masked
+        // nothing of the skin: no mesh the weapon has draws its paint, so every one of its textures
+        // was left whole — Ecko's Best Teammate's among them.
+        if (brought is not null)
+            foreach (var dressed in _dressing.OfModel(brought.Model.Bundle, brought.Assets))
+                for (var slot = 0; slot < dressed.BySubMesh.Count; slot++)
+                    if (dressed.BySubMesh[slot] is { } node)
+                        Add(node.Bundle, node.PathId, (dressed.MeshPathId, slot));
+
+        // Every mesh a texture here can be held against: the weapon's own, and the model's.
+        var meshes = tree.PrefabAssets
+            .Select(a => (Node: a, Bundle: a.Bundle.Length > 0 ? a.Bundle : tree.PrefabBundle ?? ""))
+            .Concat((brought?.Assets ?? []).Select(a =>
+                (Node: a, Bundle: a.Bundle.Length > 0 ? a.Bundle : brought!.Model.Bundle)))
+            .Where(m => m.Node.Class == AssetClassID.Mesh)
+            .ToList();
 
         var read = new Dictionary<long, UnityMesh?>();
 
@@ -372,7 +397,7 @@ public sealed class WeaponExporter(BundleSet bundles)
                 return null;
 
             var models = drawn
-                .Select(u => (Mesh: MeshFor(tree, read, u.Mesh), u.SubMesh))
+                .Select(u => (Mesh: MeshFor(meshes, read, u.Mesh), u.SubMesh))
                 .Where(u => u.Mesh is not null)
                 .Select(u => (u.Mesh!, u.SubMesh))
                 .ToList();
@@ -383,15 +408,16 @@ public sealed class WeaponExporter(BundleSet bundles)
         };
     }
 
-    /// One of the weapon's meshes, unpacked, read once however many textures ask about it.
-    private UnityMesh? MeshFor(WeaponTree tree, Dictionary<long, UnityMesh?> read, long pathId)
+    /// One of the meshes a texture is held against, unpacked, read once however many ask about it.
+    private UnityMesh? MeshFor(
+        IReadOnlyList<(AssetNode Node, string Bundle)> meshes, Dictionary<long, UnityMesh?> read, long pathId)
     {
         if (read.TryGetValue(pathId, out var known)) return known;
 
-        if (tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh && a.PathId == pathId)
-            is not { } node) return read[pathId] = null;
+        var found = meshes.FirstOrDefault(m => m.Node.PathId == pathId);
+        if (found.Node is null) return read[pathId] = null;
 
-        var bundle = node.Bundle.Length > 0 ? node.Bundle : tree.PrefabBundle ?? "";
+        var bundle = found.Bundle;
 
         try
         {
@@ -480,13 +506,39 @@ public sealed class WeaponExporter(BundleSet bundles)
             ? skin.Record.Id[(tree.Record.PrefabName.Length + 1)..]
             : skin.Record.Id;
 
+    /// A model a skin brings, and everything it reaches that the tree would show.
+    private sealed record Brought(SkinModel Model, IReadOnlyList<AssetNode> Assets);
+
+    /// Walks a skin's own model, or says in `skipped` why it could not.
+    ///
+    /// The model is a prefab like the weapon's own, so it is walked the same way.
+    private Brought? Walk(SkinModel model, List<string> skipped)
+    {
+        var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
+        AssetsFileInstance file;
+        try { file = bundles.Open(model.Bundle); }
+        catch (Exception ex) when (ex is IOException or FileNotFoundException)
+        {
+            skipped.Add($"{name}: {ex.Message}");
+            return null;
+        }
+
+        var root = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.GameObject, name);
+        if (root is null) { skipped.Add($"{name}: no such model in '{model.Bundle}'"); return null; }
+
+        return new Brought(model, ReferenceWalker
+            .Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: WeaponResolver.Opaque)
+            .Where(n => Pack.Replaceable.CanShow(n.Class))
+            .ToList());
+    }
+
     /// Writes a skin's own materials and textures, and the model it brings if it brings one.
     ///
     /// Kept apart from the weapon's own files. The two overlap — a skin repaints the same geometry
     /// — and mixing them would leave an author unable to tell which texture belonged to the skin
     /// they meant to change.
     private void ExportSkin(
-        WeaponSkinView skin, string directory, List<ExportedAsset> assets, List<string> skipped)
+        WeaponSkinView skin, Brought? brought, string directory, List<ExportedAsset> assets, List<string> skipped)
     {
         var into = Path.Combine(directory, "skin");
 
@@ -501,26 +553,13 @@ public sealed class WeaponExporter(BundleSet bundles)
                     texture.Name, Path.Combine(into, "textures"), assets, skipped, AssetClassID.Texture2D);
         }
 
-        if (skin.Model is not { } model) return;
-
-        // The model is a prefab like the weapon's own, so it is walked the same way: everything it
-        // reaches, written into the folders its types belong in.
+        // Everything the model reaches, written into the folders its types belong in.
+        if (brought is null) return;
+        var model = brought.Model;
         var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
-        AssetsFileInstance file;
-        try { file = bundles.Open(model.Bundle); }
-        catch (Exception ex) when (ex is IOException or FileNotFoundException)
-        {
-            skipped.Add($"{name}: {ex.Message}");
-            return;
-        }
-
-        var root = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.GameObject, name);
-        if (root is null) { skipped.Add($"{name}: no such model in '{model.Bundle}'"); return; }
 
         var closure = new List<AssetTypeValueField>();
-        foreach (var node in ReferenceWalker
-                     .Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: WeaponResolver.Opaque)
-                     .Where(n => Pack.Replaceable.CanShow(n.Class)))
+        foreach (var node in brought.Assets)
         {
             var bundle = node.Bundle.Length > 0 ? node.Bundle : model.Bundle;
             AssetsFileInstance holder;

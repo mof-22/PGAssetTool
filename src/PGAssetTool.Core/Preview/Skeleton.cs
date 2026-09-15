@@ -22,8 +22,12 @@ public sealed record Joint(string Name, string Path, int Parent, float[] Local);
 /// evaluate the clip, walk the hierarchy once, and the vertices follow.
 public sealed class Skeleton
 {
-    private Skeleton(IReadOnlyList<Joint> joints, IReadOnlyList<int> bones, int root)
-        => (Joints, Bones, Root) = (joints, bones, root);
+    private Skeleton(IReadOnlyList<Joint> joints, IReadOnlyList<int> bones, int root, bool rigid = false)
+        => (Joints, Bones, Root, Rigid) = (joints, bones, root, rigid);
+
+    /// Whether this is one object carrying a plain mesh, rather than bones carrying a skinned one.
+    /// See Unskinned.
+    public bool Rigid { get; }
 
     /// Every object between the root of the model and its bones, parents before children.
     public IReadOnlyList<Joint> Joints { get; }
@@ -75,6 +79,30 @@ public sealed class Skeleton
             return Build(bundles, file, bones, mine);
         }
 
+        return Unskinned(bundles, file, meshPathId);
+    }
+
+    /// A mesh nothing skins, moved by moving the object it hangs off.
+    ///
+    /// A MeshFilter names the mesh, and a clip moves the MeshFilter's own transform by name, so that
+    /// transform is the one bone and every vertex rides on it. #8's Old Combat Knife skin is built
+    /// this way: its blade is a plain mesh that five clips of its own swing about.
+    private static Skeleton? Unskinned(BundleSet bundles, AssetsFileInstance file, long meshPathId)
+    {
+        foreach (var info in file.file.AssetInfos)
+        {
+            if (info.TypeId != (int)AssetClassID.MeshFilter) continue;
+
+            var filter = bundles.Context.Deserialize(file, info);
+            if (filter is null || filter["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
+
+            var owner = filter["m_GameObject"];
+            var transform = owner.IsDummy ? 0 : TransformOf(bundles, file, owner["m_PathID"].AsLong);
+            if (transform == 0) return null;
+
+            return Build(bundles, file, [transform], transform, rigid: true);
+        }
+
         return null;
     }
 
@@ -96,7 +124,7 @@ public sealed class Skeleton
     /// Walks up from each bone to the top, so every transform between them is present and a parent
     /// always comes before its children.
     private static Skeleton? Build(
-        BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer)
+        BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer, bool rigid = false)
     {
         var joints = new List<Joint>();
         var at = new Dictionary<long, int>();
@@ -130,7 +158,7 @@ public sealed class Skeleton
         var order = bones.Select(Add).ToList();
         var root = renderer == 0 ? -1 : Add(renderer);
 
-        return order.Any(i => i < 0) ? null : new Skeleton(joints, order, root);
+        return order.Any(i => i < 0) ? null : new Skeleton(joints, order, root, rigid);
     }
 
     private static float[] Trs(AssetTypeValueField transform)
@@ -210,6 +238,13 @@ public sealed class Skeleton
     public UnityMesh Pose(UnityMesh mesh, Motion? motion, float time)
     {
         if (mesh.Get(VertexAttribute.Position) is not { } positions) return mesh;
+
+        // One object, one matrix: where it is now, taken back out of where it sits at rest, so the
+        // model at rest is the model as it was read.
+        if (Rigid)
+            return Carried(mesh, positions,
+                Matrix.Times(Matrix.Inverse(Rest[Bones[0]]), World(motion, time)[Bones[0]]));
+
         if (mesh.Get(VertexAttribute.BlendIndices) is not { } joints) return mesh;
         if (mesh.BindPoses.Count == 0) return mesh;
 
@@ -305,6 +340,42 @@ public sealed class Skeleton
             [VertexAttribute.Position] = moved,
         };
         if (turned is not null) attributes[VertexAttribute.Normal] = turned;
+
+        return mesh with { Attributes = attributes };
+    }
+
+    /// Every vertex and normal moved by the same matrix.
+    private static UnityMesh Carried(UnityMesh mesh, float[] positions, float[] m)
+    {
+        var moved = new float[positions.Length];
+        for (var at = 0; at + 2 < positions.Length; at += 3)
+        {
+            var (px, py, pz) = (positions[at], positions[at + 1], positions[at + 2]);
+            moved[at] = m[0] * px + m[4] * py + m[8] * pz + m[12];
+            moved[at + 1] = m[1] * px + m[5] * py + m[9] * pz + m[13];
+            moved[at + 2] = m[2] * px + m[6] * py + m[10] * pz + m[14];
+        }
+
+        var attributes = new Dictionary<VertexAttribute, float[]>(mesh.Attributes)
+        {
+            [VertexAttribute.Position] = moved,
+        };
+
+        if (mesh.Get(VertexAttribute.Normal) is { } normals)
+        {
+            var turned = new float[normals.Length];
+            for (var at = 0; at + 2 < normals.Length; at += 3)
+            {
+                var (ax, ay, az) = (normals[at], normals[at + 1], normals[at + 2]);
+                var nx = m[0] * ax + m[4] * ay + m[8] * az;
+                var ny = m[1] * ax + m[5] * ay + m[9] * az;
+                var nz = m[2] * ax + m[6] * ay + m[10] * az;
+                var length = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+                if (length > 1e-6f) (nx, ny, nz) = (nx / length, ny / length, nz / length);
+                (turned[at], turned[at + 1], turned[at + 2]) = (nx, ny, nz);
+            }
+            attributes[VertexAttribute.Normal] = turned;
+        }
 
         return mesh with { Attributes = attributes };
     }
