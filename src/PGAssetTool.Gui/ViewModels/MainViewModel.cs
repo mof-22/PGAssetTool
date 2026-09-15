@@ -259,7 +259,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // protected pack being lifted straight back out of the game it went into, which is
                 // the weaker reason. Mods are checked in the game.
                 _bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf);
-                _catalogs = GameCatalogs.Load(_bundles, Language);
+                _catalogs = GameCatalogs.Load(_bundles, string.IsNullOrEmpty(Language) ? _settings.Language : Language);
                 _resolver = new WeaponResolver(_bundles, _catalogs);
             });
 
@@ -761,6 +761,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// rather than the whole game — it used to throw the reader away and start over.
     partial void OnLanguageChanged(string value)
     {
+        // Nothing is not a language. A picker whose list is being refilled or rebuilt can pass on an
+        // empty choice, and taken at its word that was read as the name of a translation table and
+        // failed with "Value cannot be null (Parameter 'key')" in the status bar. Whatever is in use
+        // stays in use, and is what gets saved, until a real one is chosen.
+        if (string.IsNullOrEmpty(value)) return;
+
         Remember();
         if (_loading || _bundles is null || _catalogs is null) return;
 
@@ -815,7 +821,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_loading) return;
         _settings = _settings with
         {
-            Language = Language, ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
+            Language = string.IsNullOrEmpty(Language) ? _settings.Language : Language,
+            ReplaceableOnly = ReplaceableOnly, OpaqueTextures = OpaqueTextures,
             Author = Author.Trim(), GameDirectory = GameDirectory.Trim(),
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,

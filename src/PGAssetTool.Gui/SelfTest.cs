@@ -3019,6 +3019,20 @@ internal static class SelfTest
     {
         const double tall = 420;
 
+        // Every moment the language is emptied or changing it fails, from opening the window to after
+        // it is closed. Watched rather than sampled: a picker that passes on nothing and then picks
+        // again leaves the model looking right a moment later.
+        var emptied = new List<string>();
+        void Watch(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainViewModel.Language) && string.IsNullOrEmpty(model.Language))
+                emptied.Add("the language was set to nothing");
+            if (e.PropertyName == nameof(MainViewModel.Status)
+                && (model.Status ?? "").Contains("changing the language", StringComparison.Ordinal))
+                emptied.Add(model.Status!);
+        }
+        model.PropertyChanged += Watch;
+
         var window = new Views.OptionsWindow { DataContext = model };
         window.Show();
 
@@ -3043,7 +3057,39 @@ internal static class SelfTest
         Console.WriteLine($"options  at 460x{tall} with all {explanations.Count} explanations open, "
             + $"Close ends at {bottom?.Y:0} and Escape {(close?.IsCancel == true ? "closes it" : "does nothing")}");
 
+        // Reloaded with it open, as building and applying a pack does. The language list is filled
+        // again, and the picker bound to it can pass the emptied list on as no language at all —
+        // which read a translation table called nothing and said so in the status bar.
+        var language = model.Language;
+        Settle(model.ReloadAsync(), "reloading under the options window");
+        WaitWhile(() => model.Busy, 120_000);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        var picker = window.GetVisualDescendants().OfType<Avalonia.Controls.ComboBox>()
+            .FirstOrDefault(c => ReferenceEquals(c.ItemsSource, model.Languages));
+        var shows = picker?.SelectedValue as string;
+        var saved = Core.Settings.ToolSettings.Load(model.SettingsHome).Language;
+
+        Console.WriteLine($"options  reloaded under it: language '{model.Language}' (was '{language}'), "
+            + $"the picker shows '{shows}', saved as '{saved}'");
+
         window.Close();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        model.PropertyChanged -= Watch;
+
+        Console.WriteLine($"options  from opening to closing, the language was emptied or failed {emptied.Count} time(s)"
+            + (emptied.Count == 0 ? "" : ": " + string.Join("; ", emptied.Distinct())));
+
+        // Emptied for a moment is what the picker does while its list is refilled, and is let pass:
+        // the model takes no notice of an empty choice. Failing because of it is what must not happen.
+        if (emptied.FirstOrDefault(e => e.Contains("changing the language", StringComparison.Ordinal)) is { } failed)
+            return $"the options window made changing the language fail: {failed}";
+
+        if (model.Language != language)
+            return $"reloading under the options window changed the language from '{language}' to '{model.Language}'";
+        if (saved != language) return $"reloading under the options window saved the language as '{saved}'";
+        if (picker is not null && shows != language)
+            return $"after reloading, the options window's picker shows '{shows}' for '{language}'";
 
         if (close is null) return "the options window has no Close button";
         if (explanations.Count == 0) return "the options window has no explanations to open";
