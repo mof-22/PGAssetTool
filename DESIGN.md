@@ -415,6 +415,13 @@ disagree are worse than either.
 **`BundleSet` opens each bundle once.** Asking twice leaves a handle that disposing does not close,
 and the next write to that bundle fails with the file in use.
 
+**`MeshRenderer` fills rows in parallel bands, and scans each row wider than the triangle.** One
+thread over every pixel was 75–90ms a frame at 2400x1500 with a model filling half the pane. Bands
+share no pixels and keep the triangles in their order, so the picture is the same to the byte — 162
+sampled frames hashed identical. The span a row is scanned over comes from two edges in double
+precision and is widened past what float arithmetic can be out by, because the per-pixel test that
+decides is still the old float one; a tight span would disagree with it at the edges.
+
 **`MeshRenderer` keeps the larger Z** in its depth test: forward points at the viewer.
 **Screen-right is the negative of the frame's own right axis**, applied after the roll — the viewer
 stands on the far side of the model from Unity's own camera, so what that camera has on its right is

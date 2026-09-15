@@ -469,25 +469,34 @@ public class MeshRendererTests
     }
 
     [Fact]
-    public void RedrawingTheSameSizeAllocatesNothing()
+    public void RedrawingTheSameSizeAllocatesNoFrameBuffers()
     {
         // Allocating a depth buffer per frame is what made a large preview pane expensive — eleven
         // megabytes a frame at 2000x1500, all of it immediately garbage.
+        //
+        // Not nothing at all any more: a frame is filled on every core, and handing the bands to the
+        // thread pool costs a closure and some bookkeeping — about two kilobytes a frame, where a
+        // frame's own buffers come to fifteen megabytes at this size. So the bound is that twenty
+        // frames together allocate less than one depth buffer, which is the thing this is here for.
+        const int width = 2000, height = 1500;
         var mesh = Quad();
         var target = new RenderTarget();
-        target.Resize(Size, Size);
+        target.Resize(width, height);
         var angles = Enumerable.Range(0, 20).Select(i => Camera.Facing(i * 0.1f, 0)).ToArray();
         MeshRenderer.Render(mesh, angles[0], target);   // warm anything lazy
 
         // Per-thread, not process-wide: xUnit runs test classes in parallel, so the process-wide
-        // counter would pick up whatever another test happened to be doing.
+        // counter would pick up whatever another test happened to be doing. The buffers are only
+        // ever made on the thread that asks for the frame, so this is the thread that would see one.
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var frame = 0; frame < 20; frame++)
             MeshRenderer.Render(mesh, angles[frame], target);
 
         // A Camera is a record, so allocating one per frame would be the test's own doing, not the
         // renderer's; the angles above are made in advance so only drawing is measured.
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(allocated < width * height * sizeof(float),
+            $"twenty frames allocated {allocated:N0} bytes, as much as a depth buffer");
     }
 
     [Fact]

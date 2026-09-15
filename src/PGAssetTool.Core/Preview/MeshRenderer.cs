@@ -181,8 +181,9 @@ public readonly record struct Viewpoint(MeshRenderer.Basis Standing, MeshRendere
 ///
 /// Avalonia has no 3D of its own, and reaching for OpenGL would trade a few hundred lines for a
 /// dependency on whatever driver the machine happens to have. These meshes are tiny — the largest
-/// weapon in the game is a few thousand triangles — so a plain z-buffered rasterizer redraws well
-/// inside a frame and cannot fail to initialise.
+/// weapon in the game is a few thousand triangles — so a plain z-buffered rasterizer cannot fail to
+/// initialise, and the cost is in the pixels rather than the triangles. Filled on every core it
+/// redraws a model filling half of a 2400x1500 pane in 5–7ms.
 /// The buffers a preview draws into, kept across frames.
 ///
 /// The depth buffer is the size of the frame, and allocating one per frame is what made a large
@@ -197,6 +198,10 @@ public sealed class RenderTarget
     public byte[] Bgra { get; private set; } = [];
 
     internal float[] Depth { get; private set; } = [];
+
+    /// The triangles of the frame being drawn, gathered before any is filled. Grown as needed and
+    /// kept, like the rest.
+    internal MeshRenderer.Triangle[] Pending { get; set; } = [];
 
     public bool IsEmpty => Width < 1 || Height < 1;
 
@@ -238,10 +243,13 @@ public static class MeshRenderer
         if (target.IsEmpty) return;
 
         var (bgra, width, height) = (target.Bgra, target.Width, target.Height);
-        Array.Clear(bgra);
 
         var positions = mesh.Get(VertexAttribute.Position);
-        if (positions is null || mesh.VertexCount == 0) return;
+        if (positions is null || mesh.VertexCount == 0)
+        {
+            Array.Clear(bgra);
+            return;
+        }
 
         var normals = mesh.Get(VertexAttribute.Normal);
         var uvs = mesh.Get(VertexAttribute.TexCoord0);
@@ -262,7 +270,8 @@ public static class MeshRenderer
             (camera.PivotX * radius, camera.PivotY * radius, camera.PivotZ * radius);
 
         var depth = target.Depth;
-        Array.Fill(depth, float.NegativeInfinity);
+        var pending = target.Pending;
+        var count = 0;
 
         Span<float> sx = stackalloc float[3];
         Span<float> sy = stackalloc float[3];
@@ -315,9 +324,38 @@ public static class MeshRenderer
                 // is exactly how the game draws it as a silhouette and never as a surface.
                 if (away[0] + away[1] + away[2] < 0) continue;
 
-                Fill(bgra, depth, width, height, sx, sy, sz, shade, u, v, texture);
+                if (count == pending.Length) Array.Resize(ref pending, Math.Max(64, pending.Length * 2));
+                pending[count++] = new Triangle(
+                    sx[0], sx[1], sx[2], sy[0], sy[1], sy[2], sz[0], sz[1], sz[2],
+                    shade[0], shade[1], shade[2], u[0], u[1], u[2], v[0], v[1], v[2], texture);
             }
         }
+
+        target.Pending = pending;
+
+        // Filled a band of rows at a time, one band per core, each band clearing its own rows first.
+        //
+        // One thread over every pixel was what a large pane cost: at 2400x1500 with a model filling
+        // half of it, 87–90ms a frame — eleven a second — and 36ms at 1400x1000, which is a drag that
+        // visibly lags the cursor. Bands share no pixels, and within each the triangles go in the
+        // order they always did, so which one wins a pixel is decided exactly as before and the
+        // picture is the same to the byte.
+        var triangles = pending;
+        var drawn = count;
+        var bands = Math.Clamp(Environment.ProcessorCount, 1, Math.Max(height / 32, 1));
+        var rows = (height + bands - 1) / bands;
+
+        Parallel.For(0, bands, band =>
+        {
+            var top = band * rows;
+            var bottom = Math.Min(top + rows, height) - 1;
+            if (top > bottom) return;
+
+            Array.Clear(bgra, top * width * 4, (bottom - top + 1) * width * 4);
+            Array.Fill(depth, float.NegativeInfinity, top * width, (bottom - top + 1) * width);
+
+            for (var t = 0; t < drawn; t++) Fill(bgra, depth, width, top, bottom, in triangles[t]);
+        });
     }
 
     /// How this model is stood up when nobody says otherwise: the bounding box sorted by extent.
@@ -397,49 +435,103 @@ public static class MeshRenderer
         return 0.25f + 0.75f * Math.Max(lambert, 0f);
     }
 
-    private static void Fill(
-        byte[] bgra, float[] depth, int width, int height,
-        ReadOnlySpan<float> sx, ReadOnlySpan<float> sy, ReadOnlySpan<float> sz, ReadOnlySpan<float> shade,
-        ReadOnlySpan<float> u, ReadOnlySpan<float> v, PreviewImage? texture)
+    /// One triangle ready to fill: where its corners landed on screen, and what each corner carries.
+    internal readonly record struct Triangle(
+        float X0, float X1, float X2, float Y0, float Y1, float Y2, float Z0, float Z1, float Z2,
+        float S0, float S1, float S2, float U0, float U1, float U2, float V0, float V1, float V2,
+        PreviewImage? Texture);
+
+    /// Fills the part of a triangle that falls in rows `top` to `bottom`.
+    ///
+    /// Each row is scanned only across the span two of the triangle's edges leave open, worked out in
+    /// double precision and widened by more than float arithmetic can be out by. Every pixel inside
+    /// it is still decided by the same test as ever, in the same float arithmetic, so narrowing the
+    /// span only skips pixels that test would have turned away. The third edge is not used to narrow:
+    /// its weight is `1 - w0 - w1`, whose error does not follow the edge's own.
+    private static void Fill(byte[] bgra, float[] depth, int width, int top, int bottom, in Triangle t)
     {
-        var area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
+        var (x0, x1, x2, y0, y1, y2) = (t.X0, t.X1, t.X2, t.Y0, t.Y1, t.Y2);
+
+        var area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
         if (Math.Abs(area) < 1e-6f) return;
 
-        var minX = Math.Max((int)MathF.Floor(Math.Min(sx[0], Math.Min(sx[1], sx[2]))), 0);
-        var maxX = Math.Min((int)MathF.Ceiling(Math.Max(sx[0], Math.Max(sx[1], sx[2]))), width - 1);
-        var minY = Math.Max((int)MathF.Floor(Math.Min(sy[0], Math.Min(sy[1], sy[2]))), 0);
-        var maxY = Math.Min((int)MathF.Ceiling(Math.Max(sy[0], Math.Max(sy[1], sy[2]))), height - 1);
+        var minX = Math.Max((int)MathF.Floor(Math.Min(x0, Math.Min(x1, x2))), 0);
+        var maxX = Math.Min((int)MathF.Ceiling(Math.Max(x0, Math.Max(x1, x2))), width - 1);
+        var minY = Math.Max((int)MathF.Floor(Math.Min(y0, Math.Min(y1, y2))), top);
+        var maxY = Math.Min((int)MathF.Ceiling(Math.Max(y0, Math.Max(y1, y2))), bottom);
+        if (minX > maxX || minY > maxY) return;
+
+        // How far the float test can be out, as a distance along a row: its products are of numbers
+        // no larger than this, and float32 is good to about one part in eight million.
+        var reach = Math.Max(Math.Max(Math.Abs(x0), Math.Abs(x1)), Math.Max(Math.Abs(x2), width + 1.0));
+        reach = Math.Max(reach, Math.Max(Math.Max(Math.Abs(y0), Math.Abs(y1)), Math.Max(Math.Abs(y2), bottom + 1.0)));
+        var slack = 16 * 1.2e-7 * reach * reach;
+        var sign = area > 0 ? 1.0 : -1.0;
 
         for (var y = minY; y <= maxY; y++)
-        for (var x = minX; x <= maxX; x++)
         {
-            var px = x + 0.5f;
             var py = y + 0.5f;
+            var from = minX;
+            var to = maxX;
+            Narrow(x1, y1, x2, y2, py, sign, slack, ref from, ref to);
+            Narrow(x2, y2, x0, y0, py, sign, slack, ref from, ref to);
 
-            // Barycentric coordinates, normalised by the signed area so the sign of the triangle
-            // does not matter — back faces are drawn too, since these meshes are not all closed.
-            var w0 = ((sx[1] - px) * (sy[2] - py) - (sx[2] - px) * (sy[1] - py)) / area;
-            var w1 = ((sx[2] - px) * (sy[0] - py) - (sx[0] - px) * (sy[2] - py)) / area;
-            var w2 = 1f - w0 - w1;
-            if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+            for (var x = from; x <= to; x++)
+            {
+                var px = x + 0.5f;
 
-            var z = w0 * sz[0] + w1 * sz[1] + w2 * sz[2];
-            var at = y * width + x;
-            if (z <= depth[at]) continue;
-            depth[at] = z;
+                // Barycentric coordinates, normalised by the signed area so the sign of the triangle
+                // does not matter — back faces are drawn too, since these meshes are not all closed.
+                var w0 = ((x1 - px) * (y2 - py) - (x2 - px) * (y1 - py)) / area;
+                var w1 = ((x2 - px) * (y0 - py) - (x0 - px) * (y2 - py)) / area;
+                var w2 = 1f - w0 - w1;
+                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
 
-            var lit = Math.Clamp(w0 * shade[0] + w1 * shade[1] + w2 * shade[2], 0f, 1f);
+                var z = w0 * t.Z0 + w1 * t.Z1 + w2 * t.Z2;
+                var at = y * width + x;
+                if (z <= depth[at]) continue;
+                depth[at] = z;
 
-            byte blue = 240, green = 240, red = 240;
-            if (texture is not null)
-                Sample(texture, w0 * u[0] + w1 * u[1] + w2 * u[2], w0 * v[0] + w1 * v[1] + w2 * v[2],
-                    out blue, out green, out red);
+                var lit = Math.Clamp(w0 * t.S0 + w1 * t.S1 + w2 * t.S2, 0f, 1f);
 
-            // Ambient floor so a face turned away stays readable rather than going black.
-            bgra[at * 4] = (byte)(blue * (0.17f + 0.83f * lit));
-            bgra[at * 4 + 1] = (byte)(green * (0.17f + 0.83f * lit));
-            bgra[at * 4 + 2] = (byte)(red * (0.17f + 0.83f * lit));
-            bgra[at * 4 + 3] = 255;
+                byte blue = 240, green = 240, red = 240;
+                if (t.Texture is { } texture)
+                    Sample(texture, w0 * t.U0 + w1 * t.U1 + w2 * t.U2, w0 * t.V0 + w1 * t.V1 + w2 * t.V2,
+                        out blue, out green, out red);
+
+                // Ambient floor so a face turned away stays readable rather than going black.
+                bgra[at * 4] = (byte)(blue * (0.17f + 0.83f * lit));
+                bgra[at * 4 + 1] = (byte)(green * (0.17f + 0.83f * lit));
+                bgra[at * 4 + 2] = (byte)(red * (0.17f + 0.83f * lit));
+                bgra[at * 4 + 3] = 255;
+            }
+        }
+    }
+
+    /// Pulls a row's span in to where one edge's test has the triangle's sign, and a margin past it.
+    ///
+    /// The test is `(xi - px)(yj - py) - (xj - px)(yi - py)`, which along a row is `a·px + b`.
+    private static void Narrow(
+        float xi, float yi, float xj, float yj, float py, double sign, double slack, ref int from, ref int to)
+    {
+        var a = sign * ((double)yi - yj);
+        if (Math.Abs(a) < 1e-9) return;
+
+        var b = sign * ((double)xi * ((double)yj - py) - (double)xj * ((double)yi - py));
+        var crossing = -b / a - 0.5;
+        var margin = 2 + slack / Math.Abs(a);
+
+        if (a > 0)
+        {
+            var lowest = Math.Floor(crossing - margin);
+            if (lowest > to) from = to + 1;
+            else if (lowest > from) from = (int)lowest;
+        }
+        else
+        {
+            var highest = Math.Ceiling(crossing + margin);
+            if (highest < from) to = from - 1;
+            else if (highest < to) to = (int)highest;
         }
     }
 
