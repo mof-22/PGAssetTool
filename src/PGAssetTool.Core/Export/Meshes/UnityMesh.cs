@@ -42,10 +42,11 @@ public sealed record UnityMesh
     /// you. Nothing in the object says so, so it is measured, and two things have to hold.
     ///
     /// **The normals have to mean something.** Compared against the winding of the triangle they
-    /// belong to, which is the other account of which side is out. Every weapon looked at agrees on
-    /// nearly all of them — and #14 Battle Shovel disagrees on half, its normals turned one way and
-    /// its triangles wound the other. A mesh like that cannot be asked which side is out, and
-    /// culling it by facing hollows the shovel's head.
+    /// belong to, which is the other account of which side is out. A mesh whose two accounts disagree
+    /// cannot be asked which side is out, and culling it by facing hollows it. This was first seen on
+    /// #14 Battle Shovel, which disagreed on half its triangles — because its half-float normals were
+    /// being read four wide, not because the shovel is built that way; read right, it agrees on all
+    /// of them. The check stays, as the guard against normals that really are wrong.
     ///
     /// **And the mesh has to lean inwards.** Each triangle's normal is weighed against the
     /// direction out from the middle: a surface facing outwards counts for, one facing inwards
@@ -228,8 +229,26 @@ public sealed record UnityMesh
                 for (int c = 0; c < channel.Dimension; c++)
                     values[v * channel.Dimension + c] = ReadComponent(raw, at + c * SizeOf(channel.Format), channel.Format);
             }
+            // A position or a normal is three components however it is kept. Unity pads a half-float
+            // one out to four, because an attribute has to fill whole four-byte steps, and everything
+            // that reads these takes three a vertex. Left four wide, the preview read every vertex
+            // after the first out of its neighbours' components, and 55 main meshes in the game —
+            // eleven weapons, #14 Battle Shovel among them, and King's Crown — shaded in alternating
+            // light and dark triangles.
+            var keep = channel.Attribute is VertexAttribute.Position or VertexAttribute.Normal
+                ? Math.Min(channel.Dimension, 3)
+                : channel.Dimension;
+
+            if (keep < channel.Dimension)
+            {
+                var narrowed = new float[vertexCount * keep];
+                for (int v = 0; v < vertexCount; v++)
+                    Array.Copy(values, v * channel.Dimension, narrowed, v * keep, keep);
+                values = narrowed;
+            }
+
             attributes[channel.Attribute] = values;
-            dimensions[channel.Attribute] = channel.Dimension;
+            dimensions[channel.Attribute] = keep;
         }
         return (attributes, dimensions);
     }

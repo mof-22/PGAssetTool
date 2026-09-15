@@ -136,6 +136,7 @@ internal static class SelfTest
 
             if (TheModelPlaysItsAnimations(model) is { } movingProblem) return Fail(movingProblem);
             if (SkinModelsMoveWithoutClipsOrBonesOfTheirOwn(model) is { } stillProblem) return Fail(stillProblem);
+            if (HalfFloatNormalsAreReadAsNormals(model) is { } normalProblem) return Fail(normalProblem);
 
             model.Search = "beretta";
             Console.WriteLine($"search   'beretta' -> {model.Weapons.Count}");
@@ -3433,6 +3434,61 @@ internal static class SelfTest
             applier.SetEnabled(PackIdentity, true);
             try { File.Delete(pack); } catch (IOException) { }
         }
+
+        return null;
+    }
+
+    /// Normals kept as half floats come out as normals.
+    ///
+    /// Unity pads a half-float normal to four components. It was kept four wide while the preview
+    /// read three a vertex, so every vertex after the first took its neighbours' components, and #14
+    /// Battle Shovel — with 54 other main meshes kept the same way — shaded in alternating light and
+    /// dark triangles. Nothing about that looks like a decoding fault from the outside: the shovel
+    /// was put down as a model built with its normals one way and its triangles the other.
+    /// A normal read right is unit length and faces the way its triangle is wound.
+    private static string? HalfFloatNormalsAreReadAsNormals(MainViewModel model)
+    {
+        if (!Select(model, 14)) return "#14 never resolved";
+        if (model.Detail?.SelectedNode is not { } row) return "#14 selected nothing to show";
+        if (!Arrived(model, row)) return $"'{row.Label}' never appeared";
+        if (model.Preview.Mesh is not { } mesh) return $"'{row.Label}' is not a model";
+
+        var width = mesh.Dimensions.GetValueOrDefault(Core.Export.Meshes.VertexAttribute.Normal);
+        if (mesh.Get(Core.Export.Meshes.VertexAttribute.Normal) is not { } normals)
+            return $"'{row.Label}' came up with no normals";
+        if (mesh.Get(Core.Export.Meshes.VertexAttribute.Position) is not { } positions)
+            return $"'{row.Label}' came up with no positions";
+        if (width != 3 || normals.Length != mesh.VertexCount * 3)
+            return $"'{row.Label}' has its normals {width} wide, {normals.Length} values for {mesh.VertexCount} vertices";
+
+        var unit = 0;
+        for (var v = 0; v < mesh.VertexCount; v++)
+        {
+            var length = MathF.Sqrt(normals[v * 3] * normals[v * 3] + normals[v * 3 + 1] * normals[v * 3 + 1]
+                + normals[v * 3 + 2] * normals[v * 3 + 2]);
+            if (MathF.Abs(length - 1) < 0.05f) unit++;
+        }
+
+        var (agree, all) = (0, 0);
+        for (var i = 0; i + 2 < mesh.Indices.Length; i += 3)
+        {
+            var (a, b, c) = (mesh.Indices[i], mesh.Indices[i + 1], mesh.Indices[i + 2]);
+            float P(int vertex, int axis) => positions[vertex * 3 + axis];
+            float N(int axis) => normals[a * 3 + axis] + normals[b * 3 + axis] + normals[c * 3 + axis];
+
+            var (ux, uy, uz) = (P(b, 0) - P(a, 0), P(b, 1) - P(a, 1), P(b, 2) - P(a, 2));
+            var (vx, vy, vz) = (P(c, 0) - P(a, 0), P(c, 1) - P(a, 1), P(c, 2) - P(a, 2));
+            var (fx, fy, fz) = (uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+
+            all++;
+            if (fx * N(0) + fy * N(1) + fz * N(2) >= 0) agree++;
+        }
+
+        Console.WriteLine($"normals  '{row.Label}': {unit} of {mesh.VertexCount} unit length, "
+            + $"{agree} of {all} triangles facing the way they are wound");
+
+        if (unit < mesh.VertexCount * 0.95) return $"only {unit} of '{row.Label}'s {mesh.VertexCount} normals are unit length";
+        if (agree < all * 0.9) return $"only {agree} of '{row.Label}'s {all} triangles face the way they are wound";
 
         return null;
     }

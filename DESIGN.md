@@ -422,6 +422,12 @@ sampled frames hashed identical. The span a row is scanned over comes from two e
 precision and is widened past what float arithmetic can be out by, because the per-pixel test that
 decides is still the old float one; a tight span would disagree with it at the edges.
 
+**A mesh's normals are three wide even when the game keeps four.** Unity pads a half-float normal to
+four components so the attribute fills a whole four-byte step, and 55 main meshes are kept that way.
+`UnityMesh` narrows position and normal to three as it reads them, because everything downstream
+takes three a vertex; left at four, #14 Battle Shovel and King's Crown shaded in alternating light and
+dark triangles, and the shovel was wrongly taken for a model whose normals disagree with its winding.
+
 **`MeshRenderer` keeps the larger Z** in its depth test: forward points at the viewer.
 **Screen-right is the negative of the frame's own right axis**, applied after the roll — the viewer
 stands on the far side of the model from Unity's own camera, so what that camera has on its right is
