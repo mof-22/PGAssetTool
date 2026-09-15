@@ -644,9 +644,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ? "  " + string.Join("  ", result.Shared.Select(s => s.ToString()))
             : "";
 
+        var moved = result.Moved.Count > 0
+            ? "  Followed into another bundle: " + string.Join("  ", result.Moved)
+            : "";
+
         Status = $"{result.Applied.Count} applied, {result.Failed.Count} failed"
             + (result.Unchanged.Count > 0 ? $", {result.Unchanged.Count} bundle(s) left alone." : ".")
-            + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + shared + trouble;
+            + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + moved + shared + trouble;
     }
 
     /// Where extraction writes. Beside the tool unless the settings say otherwise, because a

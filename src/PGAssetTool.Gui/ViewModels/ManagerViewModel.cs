@@ -622,6 +622,11 @@ public sealed partial class ManagerViewModel : ObservableObject
 
             Status = $"{what}: {result.Applied.Count} applied, {result.Restored.Count} restored"
                 + (result.Unchanged.Count > 0 ? $", {result.Unchanged.Count} left alone" : "")
+                // Worth saying: the pack named one bundle and the asset was in another, which is
+                // what a game update does, and the author may want to rebuild the pack.
+                + (result.Moved.Count > 0
+                    ? $", {result.Moved.Count} followed into another bundle — {string.Join("; ", result.Moved)}"
+                    : "")
                 + (result.Failed.Count > 0
                     ? $", {result.Failed.Count} failed — {string.Join("; ", result.Failed)}"
                     : "")

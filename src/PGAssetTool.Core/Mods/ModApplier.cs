@@ -2,6 +2,7 @@ using System.IO.Compression;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Assets;
+using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Import.Audio;
 using PGAssetTool.Core.Import.Meshes;
@@ -17,7 +18,11 @@ public sealed record ReconcileResult(
     IReadOnlyList<string> Failed,
     IReadOnlyList<string> PrunedBackups,
     IReadOnlyList<SharedAsset> Shared,
-    IReadOnlyList<string> Unchanged);
+    IReadOnlyList<string> Unchanged,
+    IReadOnlyList<string> Moved);
+
+/// An operation whose asset was not in the bundle it was sent to, with the name the pack knows it by.
+internal sealed record Misplaced(string ModId, PackOperation Operation, string Key);
 
 /// Writes the enabled mods into the game's bundles.
 ///
@@ -200,8 +205,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
         try
         {
+            // Where each asset was last found, which is where the mod actually writes it: a pack made
+            // before an update and one made after it write the same asset under two bundle names.
             return PackBuilder.ReadManifest(mod.PackPath).Operations
-                .Select(o => $"{o.Target.Container}:{o.Target.Class}:{o.Target.Name}:{o.Target.PathId}")
+                .Select(o => Relocation.Follow(o, mod.Moved).Target)
+                .Select(t => $"{t.Container}:{t.Class}:{t.Name}:{t.PathId}")
                 .ToList();
         }
         catch (Exception e) when (e is IOException or InvalidDataException or System.Text.Json.JsonException)
@@ -231,15 +239,44 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// The restoring and reapplying is the same work whether one mod changed or none did, so a
     /// toggle used to rebuild every bundle any mod anywhere had touched: seventeen of them, to
     /// change one.
+    ///
+    /// An operation whose asset is not where the pack says is looked for in the rest of the item's
+    /// bundles, and if it is found there the whole thing runs once more with that written down. See
+    /// Relocation. A second run rather than a patch to the first, because the first has already put
+    /// every bundle in order without it — and the order mods are applied in, what each one touched and
+    /// what each bundle was built from are all worked out in one place, which is here.
     public ReconcileResult Reconcile()
     {
         var hashes = game.ReadManifest().ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase);
+        var (first, lost) = Pass(hashes);
+        if (lost.Count == 0) return first;
+
+        var moved = Relocate(lost, hashes);
+        if (moved.Count == 0) return first with { Failed = [.. first.Failed, .. NotFound(lost)] };
+
+        var (second, still) = Pass(hashes);
+        return second with
+        {
+            Restored = [.. first.Restored.Union(second.Restored, StringComparer.OrdinalIgnoreCase)],
+            PrunedBackups = [.. first.PrunedBackups, .. second.PrunedBackups],
+            Failed = [.. second.Failed, .. NotFound(still)],
+            Moved = moved,
+        };
+    }
+
+    private static IEnumerable<string> NotFound(IEnumerable<Misplaced> lost)
+        => lost.Select(l => $"{l.ModId}: {l.Operation.Target} not found");
+
+    /// Restores and reapplies once, and answers what could not be found where it was sent.
+    private (ReconcileResult Result, List<Misplaced> Lost) Pass(IReadOnlyDictionary<string, string> hashes)
+    {
         var mods = store.Read();
         var restored = new List<string>();
         var applied = new List<AppliedOperation>();
         var failed = new List<string>();
         var shared = new List<SharedAsset>();
         var unchanged = new List<string>();
+        var lost = new List<Misplaced>();
         var touchedByMod = new Dictionary<string, Dictionary<string, string>>();
 
         var archives = new List<ZipArchive>();
@@ -258,7 +295,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             var settled = PutBack(recipes, written, restored);
 
             ApplyAll(byBundle, settled, recipes, written, hashes, touchedByMod,
-                applied, failed, shared, unchanged, staging.FullName);
+                applied, failed, shared, unchanged, lost, staging.FullName);
 
             store.WriteWritten(written);
         }
@@ -274,7 +311,79 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             : m));
 
         var pruned = store.PruneStaleBackups(hashes);
-        return new ReconcileResult(restored, applied, failed, pruned, shared, unchanged);
+        return (new ReconcileResult(restored, applied, failed, pruned, shared, unchanged, []), lost);
+    }
+
+    /// Looks for every asset that was not where it was sent, and writes down where each one is.
+    ///
+    /// Answers what was found somewhere new, as sentences. The reading is done with a reader of its
+    /// own, closed before this returns: the second pass writes to the very bundles it opened.
+    private List<string> Relocate(IReadOnlyList<Misplaced> lost, IReadOnlyDictionary<string, string> hashes)
+    {
+        var mods = store.Read();
+        var said = new List<string>();
+        var changed = false;
+
+        BundleSet? reading = null;
+        GameCatalogs? catalogs = null;
+
+        try
+        {
+            foreach (var group in lost.GroupBy(l => l.ModId))
+            {
+                var at = mods.FindIndex(m => m.Id == group.Key);
+                if (at < 0) continue;
+
+                var mod = mods[at];
+                var moved = new Dictionary<string, Relocated>(mod.Moved ?? [], StringComparer.Ordinal);
+                IReadOnlyList<string>? candidates = null;
+
+                foreach (var missing in group)
+                {
+                    var from = missing.Operation.Target.Container;
+                    var hash = hashes.GetValueOrDefault(from, "");
+
+                    // Already looked for, found nowhere, and nothing about where it was sent has
+                    // changed since. Reapplying everything is the one request that looks again.
+                    if (!Rebuild && moved.TryGetValue(missing.Key, out var before)
+                        && before.Bundle is null && before.Hash == hash) continue;
+
+                    string? found = null;
+                    if (mod.Subject is { IsKnown: true } subject)
+                    {
+                        try
+                        {
+                            reading ??= new BundleSet(game, originals: store.OriginalOf);
+                            catalogs ??= GameCatalogs.Load(reading);
+                            candidates ??= Relocation.Candidates(reading, catalogs, subject);
+                            found = Relocation.Find(reading, candidates, missing.Operation.Target, from);
+                        }
+                        catch (Exception e) when (e is IOException or KeyNotFoundException or InvalidDataException)
+                        {
+                            // Not being able to look is not the same as having looked, so nothing is
+                            // written down and the next reconcile tries again.
+                            continue;
+                        }
+                    }
+
+                    moved[missing.Key] = new Relocated(found, hash);
+                    changed = true;
+
+                    if (found is not null)
+                        said.Add($"{mod.Id}: {missing.Operation.Target.Class} '{missing.Operation.Target.Name}' "
+                            + $"is in {found} now, not {from}");
+                }
+
+                mods[at] = mod with { Moved = moved.Count > 0 ? moved : null };
+            }
+        }
+        finally
+        {
+            reading?.Dispose();
+        }
+
+        if (changed) store.Write(mods);
+        return said;
     }
 
     /// Puts back every bundle that is not already what it should be, and answers which ones are.
@@ -363,6 +472,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 recipe.Append(Guid.NewGuid().ToString("n"));
             }
 
+            // Which of the pack's operations land here. The same for every run of an unchanged pack,
+            // until an asset is followed out of one bundle and into another — and then both of those
+            // bundles are to be built from something new.
+            recipe.Append(' ').Append(string.Join('|', part.Keys));
+
             recipe.Append('\n');
         }
 
@@ -379,7 +493,12 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     };
 
     /// One mod's operations for one bundle, with the pack they came out of held open.
-    private sealed record Contribution(InstalledMod Mod, ZipArchive Archive, List<PackOperation> Operations);
+    ///
+    /// `Keys` runs beside `Operations`, one for one: what the pack itself calls each target. An
+    /// operation here has already been sent wherever its asset was last found, so its own target no
+    /// longer says what the pack named, and that is what a relocation is remembered by.
+    private sealed record Contribution(
+        InstalledMod Mod, ZipArchive Archive, List<PackOperation> Operations, List<string> Keys);
 
     /// Sorts every enabled mod's operations into the bundles they are for, in install order.
     ///
@@ -407,13 +526,17 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             var archive = PackFile.Open(mod.PackPath);
             archives.Add(archive);
 
+            // Each to wherever its asset was last found, which for nearly every operation is where
+            // the pack says.
             foreach (var group in PackBuilder.ReadManifest(mod.PackPath).Operations
-                         .GroupBy(o => o.Target.Container, StringComparer.OrdinalIgnoreCase))
+                         .Select(o => (Key: Relocation.Key(o.Target), Operation: Relocation.Follow(o, mod.Moved)))
+                         .GroupBy(o => o.Operation.Target.Container, StringComparer.OrdinalIgnoreCase))
             {
                 if (!byBundle.TryGetValue(group.Key, out var parts))
                     byBundle[group.Key] = parts = [];
 
-                parts.Add(new Contribution(mod, archive, group.ToList()));
+                parts.Add(new Contribution(mod, archive,
+                    [.. group.Select(o => o.Operation)], [.. group.Select(o => o.Key)]));
             }
         }
 
@@ -429,7 +552,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// one order however the work was shared out.
     private sealed record Outcome(
         Job Job, string Holds, List<string> Wrote,
-        List<AppliedOperation> Applied, List<string> Failed, List<SharedAsset> Shared);
+        List<AppliedOperation> Applied, List<string> Failed, List<SharedAsset> Shared, List<Misplaced> Lost);
 
     /// How many bundles are rebuilt at once.
     ///
@@ -457,7 +580,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         IReadOnlyDictionary<string, string> hashes,
         Dictionary<string, Dictionary<string, string>> touchedByMod,
         List<AppliedOperation> applied, List<string> failed, List<SharedAsset> shared,
-        List<string> unchanged, string staging)
+        List<string> unchanged, List<Misplaced> lost, string staging)
     {
         var jobs = new List<Job>();
 
@@ -465,8 +588,17 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         {
             if (!hashes.TryGetValue(bundle, out var hash))
             {
+                // A bundle an update did away with is the plainest case of an asset having moved,
+                // so what can be looked for elsewhere is; the rest has nowhere else to go.
                 foreach (var part in parts)
-                    failed.Add($"{part.Mod.Id}: no bundle named '{bundle}' in this installation");
+                {
+                    for (var at = 0; at < part.Operations.Count; at++)
+                        if (Relocation.CanMove(part.Operations[at]))
+                            lost.Add(new Misplaced(part.Mod.Id, part.Operations[at], part.Keys[at]));
+
+                    if (!part.Operations.All(Relocation.CanMove))
+                        failed.Add($"{part.Mod.Id}: no bundle named '{bundle}' in this installation");
+                }
                 continue;
             }
 
@@ -518,6 +650,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             applied.AddRange(outcome.Applied);
             failed.AddRange(outcome.Failed);
             shared.AddRange(outcome.Shared);
+            lost.AddRange(outcome.Lost);
 
             var bundle = outcome.Job.Bundle;
             foreach (var id in outcome.Wrote) touchedByMod[id][bundle] = outcome.Job.Hash;
@@ -533,6 +666,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         var applied = new List<AppliedOperation>();
         var failed = new List<string>();
         var shared = new List<SharedAsset>();
+        var lost = new List<Misplaced>();
 
         // Written beside the file it replaces rather than into the temporary directory, because the
         // last step is then a rename instead of a copy. The two are rarely on the same drive — the
@@ -543,19 +677,19 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         // rename leaves it for the next one to clear out. The game is not running while any of this
         // happens; that is checked before an apply starts.
         var rewritten = job.Live + Unfinished;
-        var wrote = EditBundle(job.Live, rewritten, job.Parts, job.Staging, applied, failed, shared);
+        var wrote = EditBundle(job.Live, rewritten, job.Parts, job.Staging, applied, failed, shared, lost);
 
         if (wrote.Count == 0)
         {
             Discard(rewritten);
-            return new Outcome(job, "", wrote, applied, failed, shared);
+            return new Outcome(job, "", wrote, applied, failed, shared, lost);
         }
 
         File.Move(rewritten, job.Live, overwrite: true);
 
         // Hashed as it goes in, so the next reconcile can tell this bundle apart from one somebody
         // has edited since. The file was written a moment ago and is still in the system's cache.
-        return new Outcome(job, BundleIntegrity.Md5(job.Live), wrote, applied, failed, shared);
+        return new Outcome(job, BundleIntegrity.Md5(job.Live), wrote, applied, failed, shared, lost);
     }
 
     /// The texture as the game holds it, decoded, so a replacement that arrives without an alpha
@@ -620,7 +754,8 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// Applies every mod's share of one bundle, in one pass, and answers which of them wrote to it.
     private List<string> EditBundle(
         string live, string output, IReadOnlyList<Contribution> parts,
-        string staging, List<AppliedOperation> applied, List<string> failed, List<SharedAsset> shared)
+        string staging, List<AppliedOperation> applied, List<string> failed, List<SharedAsset> shared,
+        List<Misplaced> lost)
     {
         using var editor = new BundleEditor(live);
         var index = new ContainerIndex(editor.Context);
@@ -642,14 +777,24 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             var ordered = part.Operations;
             var newIds = AddAssets(mod, editor, ordered, archive, staging, applied, failed, ref changed);
 
-            foreach (var operation in ordered.Where(o => o.Op != PackOperations.AddAsset))
+            for (var at = 0; at < ordered.Count; at++)
             {
+                var operation = ordered[at];
+                if (operation.Op == PackOperations.AddAsset) continue;
+
                 // Asked before the asset is read, and asked here rather than only where packs are
                 // built: a pack that arrives from somewhere else has never been past that check.
                 if (Refuses(operation, out var why)) { failed.Add($"{mod.Id}: {why}"); continue; }
 
+                // Not here is not yet a failure: the game may have filed it in another bundle, and
+                // the reconcile looks there once every bundle has had its turn.
                 var info = index.Resolve(operation.Target, editor.File, out var byPathId);
-                if (info is null) { failed.Add($"{mod.Id}: {operation.Target} not found"); continue; }
+                if (info is null)
+                {
+                    if (Relocation.CanMove(operation)) lost.Add(new Misplaced(mod.Id, operation, part.Keys[at]));
+                    else failed.Add($"{mod.Id}: {operation.Target} not found");
+                    continue;
+                }
 
                 var field = editor.Read(info);
                 if (field is null) { failed.Add($"{mod.Id}: {operation.Target} could not be read"); continue; }

@@ -28,6 +28,14 @@ public sealed record InstalledMod
     /// hash has since changed was replaced by a game update, which is what makes reapplying and
     /// backup cleanup possible.
     public required Dictionary<string, string> TouchedBundles { get; init; }
+
+    /// Operations whose asset is not in the bundle the pack names, by the target as the pack names
+    /// it (`Relocation.Key`), and where it was found instead. See Relocation.
+    ///
+    /// Learned at a reconcile and kept, so the one after it goes straight to the right bundle rather
+    /// than failing first and looking again. Null for a mod that has never needed it, which is
+    /// nearly every mod, so the ledger does not grow an empty entry per mod.
+    public Dictionary<string, Relocated>? Moved { get; init; }
 }
 
 /// What this tool last wrote into one bundle: the mods and packs it was built from, and the hash of

@@ -81,8 +81,10 @@ public sealed record PackOperation
 /// weapon is found by a number. Naming the parts generally costs nothing now and saves moving
 /// every installed pack and every folder on disk later.
 ///
-/// What it is for is telling packs apart and putting them somewhere. Nothing about applying a pack
-/// reads it: a mod is its operations, and this is the label on the box.
+/// What it is for is telling packs apart and putting them somewhere. A mod is its operations, and
+/// this is the label on the box. Applying reads it for one thing only: when an operation's asset is
+/// not in the bundle it names, this says which item's bundles to look through for it (Relocation).
+/// Where to look, never what is found — the asset found still has to be the one the operation names.
 /// The sorts of thing a pack can be for. One so far; declared here rather than spelled out at the
 /// one place that writes it, so whatever adds the second finds the first already named.
 public static class PackKind

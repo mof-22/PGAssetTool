@@ -322,8 +322,10 @@ weapon/0416_ultimatum/nuclear_reactor
 hat/league1_hat_hitman/default
 ```
 
-Nothing about applying a pack reads it. A mod is its operations, and this is the label on the box.
-It exists because the operations name assets and bundles, and no amount of reading them back says
+A mod is its operations, and this is the label on the box. Applying reads it for one thing: when an
+operation's asset is not in the bundle it names, it says whose bundles to look through (see
+*Installing*). Where to look, never what is found. It exists because the operations name assets and
+bundles, and no amount of reading them back says
 "the nuclear reactor skin of #416" — so a pack that does not carry it cannot be filed, and filing by
 guessing would file some of them wrong.
 
@@ -385,8 +387,23 @@ bundle it left alone — so a moved hash is an update, and reapplying records th
 The version the game reports is only for saying so. Across the updates on hand, 26.10.1 and 26.10.2
 share 2,164 of their 2,296 bundles with 26.11.0 and replaced 132, and all 44 operations in the 37 packs
 kept here found their targets by path id in every one of them. Against 24.3.7, 1,240 of 1,538 bundles
-were replaced and 19 of those operations name an asset the bundle does not hold there: an address
-follows an asset that moves within its bundle, not one filed in another.
+were replaced and 20 operations name an asset the bundle does not hold there. Nineteen of those assets
+were in another bundle of the same item under the same path id — the game had refiled them, ecw_6's
+textures in ecw_4 and d_w's in bhlw — and seventeen were the same picture to the pixel. The twentieth
+is a skin that did not exist yet.
+
+An address only looks inside the bundle it names, so `Relocation` follows the rest. An operation
+whose asset is not there — or whose bundle is gone — is looked for among the bundles the pack's
+subject has in this version: its prefab and what that reaches, what its meshes are drawn with, its
+skins' materials and models, and what the lookup table files under it. It must be the same asset: a
+bundle holding it under the same path id, class and name, or failing that the one bundle among them
+holding that class and name. Where it was found goes into the ledger (`InstalledMod.Moved`) and the
+reconcile runs once more, so the order mods are applied in and what each bundle is built from are
+still decided in one place; the next reconcile goes straight there. A search that found nothing is
+remembered against the hash of the bundle it was missing from and not repeated until that changes,
+because looking costs the catalogues and a handful of bundles — seconds — and a pack for a skin this
+version does not have would otherwise pay it on every toggle. An addition is never moved, nor anything
+pointing at one, since those handles only mean something in the bundle the addition went into.
 
 A reconcile is organised by bundle rather than by mod: every enabled mod's operations for one bundle
 are gathered first, and the bundle is opened, edited and written once. Going mod by mod meant

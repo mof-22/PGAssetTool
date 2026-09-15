@@ -1036,6 +1036,8 @@ internal static class SelfTest
 
             if (OneModStandsAsideForAnother(model, written) is { } rivalProblem) return Fail(rivalProblem);
 
+            if (AnAssetTheGameMovedIsFollowed(model, written) is { } movedProblem) return Fail(movedProblem);
+
             // The same install a pack dropped on the window takes: a file, straight to the applier,
             // with no workspace behind it. That is how somebody else's mod gets in, and it is the
             // one install path with nothing in front of it to catch a mistake.
@@ -3440,6 +3442,116 @@ internal static class SelfTest
             applier.Remove(PackIdentity + "-rival");
             applier.SetEnabled(PackIdentity, true);
             try { File.Delete(rival); } catch (IOException) { }
+        }
+
+        return null;
+    }
+
+    /// An asset that is not in the bundle a pack names is followed into the one it is in.
+    ///
+    /// What a game update does to a pack: against 24.3.7, nineteen of the twenty operations kept
+    /// here that did not apply named an asset the game had filed in another bundle under the same
+    /// path id. Imitated here by sending the pack's textures somewhere they are not, and asking that
+    /// they land where they are, that the mod is not recorded against the wrong bundle, and that the
+    /// next reconcile goes straight there rather than looking all over again.
+    ///
+    /// The wrong bundle is one the self-test's own mods already write, or failing that one this
+    /// installation does not have: either way nothing of the user's is backed up or written for it.
+    private static string? AnAssetTheGameMovedIsFollowed(MainViewModel model, string workspace)
+    {
+        const string id = PackIdentity + "-moved";
+        var store = new PGAssetTool.Core.Mods.ModStore(model.Game!);
+        var manifest = Core.Pack.Workspace.Read(workspace);
+
+        if (manifest.Subject is not { IsKnown: true })
+            return "the self-test's workspace records no item, so there is nothing to look for a moved asset by";
+
+        var pack = Path.Combine(workspace, "moved.pgmod");
+
+        // Only what packing keeps: a file nobody changed is not an operation, and sending one of
+        // those astray tests nothing. So the pack is built as it is first, to see which survive.
+        Core.Pack.PackBuilder.Build(workspace, pack);
+        var textures = Core.Pack.PackBuilder.ReadManifest(pack).Operations
+            .Where(o => o.Op == Core.Pack.PackOperations.ReplaceTexture && Core.Mods.Relocation.CanMove(o))
+            .Select(o => Core.Mods.Relocation.Key(o.Target))
+            .ToHashSet(StringComparer.Ordinal);
+        if (textures.Count == 0) return "the self-test's pack replaces no texture to send astray";
+
+        var sending = manifest.Operations
+            .Where(o => o.Op == Core.Pack.PackOperations.ReplaceTexture && textures.Contains(Core.Mods.Relocation.Key(o.Target)))
+            .ToList();
+        var homes = sending.Select(o => o.Target.Container).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Somewhere nothing else in this pack goes, so that "nothing of it went there" can be asked:
+        // the pack also adds a shader to bhlw, and a mod rightly counts as having written to that.
+        var named = manifest.Operations.Select(o => o.Target.Container).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var wrong = store.Read()
+            .Where(m => m.Id is PackIdentity or PackIdentityB)
+            .SelectMany(m => m.TouchedBundles.Keys)
+            .FirstOrDefault(b => !named.Contains(b) && !homes.Contains(b))
+            ?? "pgassettool-selftest-no-such-bundle";
+
+        Core.Pack.Workspace.Save(workspace, manifest with
+        {
+            Id = id,
+            Name = "Self test moved",
+            Operations = [.. manifest.Operations.Select(o => sending.Contains(o)
+                ? o with { Target = o.Target with { Container = wrong } }
+                : o)],
+        });
+        try
+        {
+            Core.Pack.PackBuilder.Build(workspace, pack);
+        }
+        finally
+        {
+            Core.Pack.Workspace.Save(workspace, manifest);
+        }
+
+        var astray = Core.Pack.PackBuilder.ReadManifest(pack).Operations
+            .Count(o => o.Op == Core.Pack.PackOperations.ReplaceTexture
+                && string.Equals(o.Target.Container, wrong, StringComparison.OrdinalIgnoreCase));
+        if (astray != sending.Count) return $"{sending.Count} texture(s) sent to '{wrong}' and {astray} arrived in the pack";
+        var home = homes.First();
+
+        var applier = new PGAssetTool.Core.Mods.ModApplier(model.Game!, store);
+
+        try
+        {
+            var result = applier.Install(pack, "self-test");
+            var mine = result.Applied.Where(a => a.Mod == id).ToList();
+
+            Console.WriteLine($"moved    {astray} texture(s) sent to '{wrong}', {result.Moved.Count} followed: "
+                + string.Join("; ", result.Moved));
+
+            var trouble = result.Failed.Where(f => f.StartsWith(id + ":", StringComparison.Ordinal)).ToList();
+            if (trouble.Count > 0) return "a moved asset was not followed: " + string.Join("; ", trouble);
+            if (result.Moved.Count != astray) return $"{astray} sent astray and {result.Moved.Count} said to be followed";
+            if (mine.Count(a => string.Equals(a.Target.Container, home, StringComparison.OrdinalIgnoreCase)) < astray)
+                return $"what was sent astray did not land in '{home}'";
+
+            var ledger = store.Read().First(m => m.Id == id);
+            if (ledger.Moved is not { Count: > 0 } moved || moved.Values.Any(r => r.Bundle is null))
+                return "where the asset was found was not written down";
+            if (ledger.TouchedBundles.ContainsKey(wrong))
+                return $"the mod is recorded as having written to '{wrong}', where nothing of it went";
+
+            // Turned off and on: the second reconcile knows where to go and loses nothing on the way.
+            applier.SetEnabled(id, false);
+            var again = applier.SetEnabled(id, true);
+
+            Console.WriteLine($"moved    turned off and on: {again.Moved.Count} looked for again, "
+                + $"{again.Failed.Count(f => f.StartsWith(id + ":", StringComparison.Ordinal))} failed");
+
+            if (again.Moved.Count > 0) return "the next reconcile looked for the moved asset all over again";
+            if (again.Failed.Any(f => f.StartsWith(id + ":", StringComparison.Ordinal)))
+                return "the next reconcile did not find its way to the moved asset: " + string.Join("; ", again.Failed);
+        }
+        finally
+        {
+            applier.Remove(id);
+            applier.SetEnabled(PackIdentity, true);
+            try { File.Delete(pack); } catch (IOException) { }
         }
 
         return null;

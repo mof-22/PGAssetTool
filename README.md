@@ -168,9 +168,11 @@ rewriting a bundle out from under it leaves a half-written file.
 lists every bundle that differs from what the game recorded and says which differences an installed
 mod accounts for. If another tool wrote it, this one has no original to put back.
 
-**A pack will not apply.** It says why. Usually the asset it names has moved in a game update; a pack
+**A pack will not apply.** It says why. Usually the asset it names has moved in a game update. A pack
 records the item's name and class as well as its id, and looks it up again when the id no longer
-finds it.
+finds it; and when the game has moved the asset into another bundle altogether, it is looked for
+among the bundles of the item the pack is for, and the Manager says where it was found. What it
+cannot find is an asset the game does not have — a skin added after the version you are on.
 
 **The game was updated.** An update replaces the bundles your mods were written into, so they are not
 in the game any more even though the Manager still lists them as on. The tool notices when it opens

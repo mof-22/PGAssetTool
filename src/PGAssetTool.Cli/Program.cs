@@ -371,6 +371,7 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
         foreach (var operation in result.Applied)
             Console.WriteLine($"  {operation.Mod}  {operation.Op}  {operation.Target}  "
                 + $"[{operation.Detail}{(operation.ResolvedByPathId ? "" : ", matched by name")}]");
+        foreach (var moved in result.Moved) Console.WriteLine($"  followed: {moved}");
         if (result.Restored.Count > 0)
             Console.WriteLine($"  restored from backup: {string.Join(", ", result.Restored)}");
         foreach (var also in result.Shared)
