@@ -198,6 +198,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// registry the list is filled from and nothing else.
     public ObservableCollection<ItemKind> Kinds { get; } = [];
 
+    /// Whether there is more than one kind to choose between, which there is not for now — see
+    /// LoadAsync — so the picker stays out of the way until there is.
+    public bool OffersKinds => Kinds.Count > 1;
+
     [ObservableProperty] private ItemKind _kind = ItemKinds.Weapon;
 
     partial void OnKindChanged(ItemKind value)
@@ -271,8 +275,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // back by name: a reload rebuilds these objects, and the one held before it is not the
             // one in the list afterwards.
             var was = Kind.Name;
+            // Weapons only. The other kinds resolve, preview and extract the same way, but the user put
+            // them aside until weapons are finished, and offering them meant answering for them. The
+            // core still reads them and the command line still lists them; showing them again is this
+            // one filter.
             Kinds.Clear();
-            foreach (var kind in _catalogs!.Kinds) Kinds.Add(kind);
+            foreach (var kind in _catalogs!.Kinds.Where(k => k == ItemKinds.Weapon)) Kinds.Add(kind);
+            OnPropertyChanged(nameof(OffersKinds));
 
             // Put back quietly. Changing kinds by hand means "show me these instead", and takes the
             // selection to the top of the new list; a reload is the opposite — it happens under
@@ -300,7 +309,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             Manager.Refresh();
             UpdateNotice = UpdateNoticeFor(_installation!, _bundles!);
-            Status = $"{_catalogs.Items.Count} weapons, {_catalogs.Kinds.Count - 1} other kinds";
+            Status = $"{_catalogs.Items.Count} weapons";
             OnPropertyChanged(nameof(GameDescribed));
         }
         catch (Exception ex)

@@ -7,9 +7,9 @@ finds an item and everything it uses, writes the assets out as files you can edi
 programs, packs your edits into a `.pgmod`, and installs that into the game — with a backup of every
 bundle it touches, so anything it does can be undone.
 
-Weapons and their skins, and the game's other cosmetics beside them: hats, capes, masks, boots,
-pets, gliders, transports and avatars. Every kind is the same arrangement underneath, so the picker
-at the top of the list is the whole of the difference.
+Weapons and their skins. The game's other cosmetics — hats, capes, masks, boots, pets, gliders,
+transports and avatars — are the same arrangement underneath and the command line still lists them,
+but the window offers weapons only until those are finished.
 
 It ships no game content. A pack describes changes and names assets already present in the player's
 own installation.
@@ -76,7 +76,7 @@ the copy taken before the first write.
 
 ## The three tabs
 
-**Browse** — every item of whichever kind the picker at the top is showing, and the tree of
+**Browse** — every weapon, and the tree of
 everything the selected one references. Previews live here: a texture, a sound, or a model you can
 turn, dress in any of the item's own skins, and — where the model is on bones — play its own
 animations on. `Ctrl+Shift+R` narrows the tree to the things that can actually be replaced, which is
