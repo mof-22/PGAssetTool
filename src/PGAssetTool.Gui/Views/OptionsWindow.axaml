@@ -115,7 +115,7 @@
             <CheckBox Content="Rebuild bundles for speed rather than size" IsChecked="{Binding FasterApplies}" />
           </DockPanel>
           <TextBlock Classes="why" IsVisible="{Binding #WhyFaster.IsChecked}"
-                     Text="Every install, and every mod turned on or off, rebuilds the bundles those mods touch. Squeezing them less makes that part about four times quicker and the bundles about a sixth larger — thirty megabytes across a game with thirty mods on it — which comes to about a tenth off a whole apply here, and more on a machine with fewer cores to spread the work across. The game loads both at the same speed. Turning this back off does not undo it: the next change writes the bundles small again." />
+                     Text="Every install, and every mod turned on or off, rebuilds the bundles those mods touch. Squeezing them less makes that part about four times quicker and the bundles about a sixth larger — thirty megabytes across a game with thirty mods on it — which comes to about a tenth off a whole apply here, and more on a machine with fewer cores to spread the work across. The game loads both at the same speed. Turning this back off does not undo it by itself: the next change writes every bundle a mod is in small again." />
         </StackPanel>
 
         <StackPanel Spacing="6">

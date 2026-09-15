@@ -453,9 +453,16 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// out of. The pack rather than its manifest, because an author can rebuild a pack under the
     /// same id with a different picture in it; all of them together are a megabyte, and hashing that
     /// is nothing beside rebuilding a bundle that did not need it.
-    private static string RecipeFor(IReadOnlyList<Contribution> parts)
+    ///
+    /// And how it is to be squeezed. The same mods packed for speed and packed for size are two
+    /// different files, so a bundle written one way is not already what a run asked for the other way
+    /// would write. Left out, a bundle applied from the window with speed on was left alone by the
+    /// next reconcile asked for size, and rebuilding everything then arrived at different bytes —
+    /// which the self-test caught the first time a mod of the author's was enabled while it ran.
+    private string RecipeFor(IReadOnlyList<Contribution> parts)
     {
         var recipe = new System.Text.StringBuilder();
+        recipe.Append("packed for ").Append(Packing).Append('\n');
 
         foreach (var part in parts)
         {

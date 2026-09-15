@@ -411,7 +411,8 @@ rebuilding a bundle once per mod on it, and a rebuild is a decompress and a reco
 mods on seventeen bundles took thirty-eight seconds for forty operations.
 
 Bundles that already hold what this run would put into them are left where they are. `written.json`
-records, per bundle, the mods and packs it was built from and the hash of the file that came out; a
+records, per bundle, the mods and packs it was built from, which of their operations land in it, how
+it was compressed, and the hash of the file that came out; a
 bundle whose recipe is unchanged and whose file still hashes to what was written is neither restored
 nor rebuilt. Both halves have to hold, and anything else — a game update, an edit from outside, a
 record from a run that did not finish — falls through to restoring and reapplying. `ModApplier.Rebuild`
@@ -429,6 +430,10 @@ Writing one back out is `BundlePacker`, not the library's `Pack`. AssetsTools.NE
 through a managed port that manages about 28MB/s, and it was seventeen of those nineteen remaining
 seconds; the blocks are independent, so they are compressed here, on every core. `BundlePacking`
 chooses between the size the game ships and about four times the speed for about a sixth more disk.
+The choice is part of what a bundle is recorded as built from, because the same mods packed the two
+ways are two different files: left out, a bundle applied for speed was left alone by a reconcile
+asked for size, and rebuilding everything then arrived somewhere else. So changing it rewrites every
+bundle a mod is in at the next change, once.
 The layout written is the one AssetsTools.NET wrote — 128KB blocks, the block and directory table
 compressed at the end — which is not the layout the game ships and is the one this tool has always
 written into it. Each bundle is rebuilt beside the file it replaces and renamed over it, so the last
