@@ -67,26 +67,23 @@ finds nothing.
 
 ## What can be written back
 
-Two levels, deliberately kept apart.
-
 | Operation | Source | Applies to |
 | --- | --- | --- |
 | `replaceTexture` | `.png` | `Texture2D` |
 | `replaceMesh` | `.glb` | `Mesh` |
 | `replaceAudio` | `.wav`, `.mp3`, `.ogg` | `AudioClip` |
-| `replaceRaw` | `.dat` | any class |
-| `addAsset` | `.dat` | any class the bundle already describes |
 
-The first three take a file anybody can edit in an ordinary tool. `Replaceable` is the single
-registry of those, and a class earns a place in it only once the import path works end to end —
-listing one earlier produces packs that fail when applied.
+Each takes a file anybody can edit in an ordinary tool. `Replaceable` is the single registry of them,
+and a class earns a place in it only once the import path works end to end — listing one earlier
+produces packs that fail when applied. Nothing else is written back, and nothing else is written out:
+an extract holds the files these operations take, the pictures that stand for the pack, and the
+`pgmod.json` that names them.
 
-`replaceRaw` is a level below: it writes an asset's own serialized bytes back without understanding
-the class. That is how a `Material`, a `Font`, a `Transform` or a `Shader` gets changed at all. It
-is not in `Replaceable`, and the distinction is load-bearing: it stops "a `Material` can be
-replaced" coming to mean "a `Material` can be edited here", which it cannot.
-
-`addAsset` is the same write into a path id nothing is using.
+An asset's raw serialized bytes (`replaceRaw`, from a `.dat`) and assets added to a bundle
+(`addAsset`) used to go back as well, for any class, with `convert` importing the `.dat` files other
+asset editors write. The user retired all of it, to be designed again if it is needed; the commit that
+removed it is the place to start. The JSON field dumps an extract wrote of everything else went at the
+same time — nothing read them, and a folder of files nobody can act on reads as an invitation.
 
 ### Textures come out masked to what the model shows
 
@@ -173,7 +170,7 @@ afterwards by asking the game:
 
 So the answer is written down at the one moment that knows it. Where several accounts are possible,
 the export keeps the one whose textures it actually wrote out. Asking the game is still the fallback
-for a workspace that says nothing, which is what `convert` produces.
+for a workspace that says nothing.
 
 ### A weapon's paint reaches its default skin
 
@@ -200,8 +197,8 @@ They are how the game decides what a thing *does*. This is a tool for how things
 behaviour is a different question with different consequences: it reaches other players, where a
 texture does not.
 
-Not writing them is enforced at converting, at building and at applying. Applying is the one that
-holds — a pack built by something else never went past the other two and arrives anyway.
+Not writing them is enforced at building and at applying. Applying is the one that holds — a pack
+built by something else never went past building and arrives anyway.
 
 Not *showing* them is a separate and weaker decision, made deliberately and worth being honest
 about: anything that opens the bundles shows the same thing, and this makes no claim to prevent
@@ -209,62 +206,6 @@ that. What it buys is that the tool is not where somebody first meets the idea. 
 followed *through* them, so a texture or a sound a component names is found exactly as before.
 
 Nothing else in the tool is hidden, and nothing else should be. This is the exception, not a habit.
-
-### Why the entry point is `.dat` and not source
-
-Building a `Shader` from `.shader` source would mean reimplementing Unity's shader compiler:
-ShaderLab parsing, `UnityCG.cginc`, HLSL to DXBC, the constant-buffer reflection tables, and Unity's
-own blob container. Driving an installed Unity in batch mode would work and was offered.
-
-Importing an asset out of a Unity-built `.assetbundle` needs almost no new code, because `BundleSet`
-already reads one. That is the route to take if authoring in Unity ever becomes the answer.
-
----
-
-## Adding an asset the game has not got
-
-An asset that is not in the game yet has no path id anyone can rely on. The one it was built with is
-recorded and tried first, but nothing reserves that number in the player's bundle and a game update
-can put a real asset there.
-
-So the identity is a handle the pack chooses — `newId` — and anything pointing at the new asset
-records *where* the pointer is rather than what it holds:
-
-```json
-{ "op": "addAsset",
-  "target": { "container": "ecw_34", "class": "Shader", "name": "font_color_fix",
-              "pathId": -2415237287598442480 },
-  "source": "font_color_fix.dat",
-  "newId": "font_color_fix" },
-
-{ "op": "replaceRaw",
-  "target": { "container": "ecw_34", "class": "Material", "name": "debugger_20_26_map_font" },
-  "source": "debugger_20_26_map_font.dat",
-  "pointers": [ { "path": "m_Shader", "newId": "font_color_fix" } ] }
-```
-
-Applying hands out an id and fills in every pointer naming it. `PointerPath` is what makes that
-possible: it records a position inside an asset rather than a value.
-
-A pack that would need something this cannot promise is refused with a reason rather than made to
-fit — no type information for the class in that bundle, a payload left behind in a stream, a
-reference to a file the bundle does not list, or a name another asset of that class already has.
-
----
-
-## Importing a mod made in another tool
-
-`convert` takes the `.dat` files an asset editor writes — named `<asset>-CAB-<hash>-<pathId>.dat` —
-and turns them into a workspace.
-
-A `.dat` carries no type of its own, so the class is recovered from the asset it came from. When the
-game has no asset at that path id, the mod is *adding* one, and the class is worked out from the
-bytes instead: `ClassInference` parses them through each type the bundle describes and keeps the one
-that writes back byte for byte.
-
-The pointers that need repointing are found rather than declared. The author's own files already
-point at the new asset by whatever id their editor gave it, so every pointer holding one of those
-numbers is one that has to be rewritten.
 
 ---
 
@@ -411,8 +352,7 @@ reconcile runs once more, so the order mods are applied in and what each bundle 
 still decided in one place; the next reconcile goes straight there. A search that found nothing is
 remembered against the hash of the bundle it was missing from and not repeated until that changes,
 because looking costs the catalogues and a handful of bundles — seconds — and a pack for a skin this
-version does not have would otherwise pay it on every toggle. An addition is never moved, nor anything
-pointing at one, since those handles only mean something in the bundle the addition went into.
+version does not have would otherwise pay it on every toggle.
 
 A reconcile is organised by bundle rather than by mod: every enabled mod's operations for one bundle
 are gathered first, and the bundle is opened, edited and written once. Going mod by mod meant
@@ -458,7 +398,7 @@ PGAssetTool-data/
   settings.json          preferences
   author.key             the key packs are signed with
   mods/<kind>/<item>/<look>/   packs kept so a mod can be reinstalled without its workspace
-  workspace/             extracted and converted workspaces
+  workspace/             extracted workspaces
   installs/<game>/
     backup/              each bundle as it was before the first write to it
     installed.json       the ledger

@@ -1,5 +1,4 @@
 using AssetsTools.NET.Extra;
-using PGAssetTool.Core.RawAssets;
 
 namespace PGAssetTool.Core.Assets;
 

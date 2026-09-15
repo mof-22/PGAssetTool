@@ -595,17 +595,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         {
             if (!hashes.TryGetValue(bundle, out var hash))
             {
-                // A bundle an update did away with is the plainest case of an asset having moved,
-                // so what can be looked for elsewhere is; the rest has nowhere else to go.
+                // A bundle an update did away with is the plainest case of an asset having moved, so
+                // everything for it is looked for elsewhere.
                 foreach (var part in parts)
-                {
                     for (var at = 0; at < part.Operations.Count; at++)
-                        if (Relocation.CanMove(part.Operations[at]))
-                            lost.Add(new Misplaced(part.Mod.Id, part.Operations[at], part.Keys[at]));
-
-                    if (!part.Operations.All(Relocation.CanMove))
-                        failed.Add($"{part.Mod.Id}: no bundle named '{bundle}' in this installation");
-                }
+                        lost.Add(new Misplaced(part.Mod.Id, part.Operations[at], part.Keys[at]));
                 continue;
             }
 
@@ -731,7 +725,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     {
         why = "";
         if (!Enum.TryParse<AssetClassID>(operation.Target.Class, out var cls)) return false;
-        if (Replaceable.CanWriteBack(cls)) return false;
+        if (Replaceable.Supports(cls)) return false;
 
         // The file it would have been written from, when the asset has no name of its own — which
         // components generally do not, so the target's name would be an empty pair of quotes.
@@ -778,16 +772,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             var archive = part.Archive;
             var changed = false;
 
-            // Additions go in first, and everything else afterwards, because the id an added asset ends
-            // up with is what the pointers naming it are filled in from. Doing it in manifest order
-            // would work for a manifest written in that order and fail quietly for one that was not.
             var ordered = part.Operations;
-            var newIds = AddAssets(mod, editor, ordered, archive, staging, applied, failed, ref changed);
 
             for (var at = 0; at < ordered.Count; at++)
             {
                 var operation = ordered[at];
-                if (operation.Op == PackOperations.AddAsset) continue;
 
                 // Asked before the asset is read, and asked here rather than only where packs are
                 // built: a pack that arrives from somewhere else has never been past that check.
@@ -798,8 +787,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 var info = index.Resolve(operation.Target, editor.File, out var byPathId);
                 if (info is null)
                 {
-                    if (Relocation.CanMove(operation)) lost.Add(new Misplaced(mod.Id, operation, part.Keys[at]));
-                    else failed.Add($"{mod.Id}: {operation.Target} not found");
+                    lost.Add(new Misplaced(mod.Id, operation, part.Keys[at]));
                     continue;
                 }
 
@@ -812,26 +800,15 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
                 try
                 {
-                    object change;
-                    if (operation.Op == PackOperations.ReplaceRaw)
+                    object change = operation.Op switch
                     {
-                        // Staged from the file's own bytes rather than from the asset that was read:
-                        // the point of a raw replacement is that the bytes are the asset, and there is
-                        // nothing of the old one to carry over.
-                        change = RawImporter.Replace(editor, info, source, operation, newIds);
-                    }
-                    else
-                    {
-                        change = operation.Op switch
-                        {
-                            PackOperations.ReplaceTexture =>
-                                TextureImporter.Replace(field, source, OriginalPixels(editor, field), operation.AlphaIsMask),
-                            PackOperations.ReplaceMesh => MeshImporter.Replace(field, GltfMeshReader.Read(source)),
-                            PackOperations.ReplaceAudio => AudioImporter.Replace(field, source, (into, bank) => editor.AppendToStream(into, bank)),
-                            _ => throw new NotSupportedException($"unknown operation '{operation.Op}'"),
-                        };
-                        editor.Stage(info, field);
-                    }
+                        PackOperations.ReplaceTexture =>
+                            TextureImporter.Replace(field, source, OriginalPixels(editor, field), operation.AlphaIsMask),
+                        PackOperations.ReplaceMesh => MeshImporter.Replace(field, GltfMeshReader.Read(source)),
+                        PackOperations.ReplaceAudio => AudioImporter.Replace(field, source, (into, bank) => editor.AppendToStream(into, bank)),
+                        _ => throw new NotSupportedException($"unknown operation '{operation.Op}'"),
+                    };
+                    editor.Stage(info, field);
                     changed = true;
                     if (SharedAssets.Check(usage.Value, operation.Target, info.PathId) is { } also)
                         shared.Add(also);
@@ -854,156 +831,4 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         return wrote;
     }
 
-    /// Puts the pack's added assets into the bundle, and answers what id each one got.
-    ///
-    /// The id recorded in the manifest is the one the author's editor gave the asset, and it is
-    /// tried first: keeping it means the pointers in the rest of the pack are already right, and it
-    /// makes an applied bundle match what the author tested. But it is only a preference. Nothing
-    /// reserved that number in the player's bundle, and a game update can put a real asset there,
-    /// so when it is taken the asset gets another and everything naming it is rewritten instead.
-    private static Dictionary<string, long> AddAssets(
-        InstalledMod mod, BundleEditor editor, List<PackOperation> operations,
-        ZipArchive archive, string staging, List<AppliedOperation> applied, List<string> failed,
-        ref bool changed)
-    {
-        var ids = new Dictionary<string, long>(StringComparer.Ordinal);
-        var additions = operations.Where(o => o.Op == PackOperations.AddAsset).ToList();
-        if (additions.Count == 0) return ids;
-
-        // Two passes over the additions, because one added asset may point at another: every id is
-        // settled before any pointer is filled in.
-        var staged = new List<(PackOperation Operation, AssetFileInfo Info, AssetClassID Class, byte[] Bytes)>();
-
-        foreach (var operation in additions)
-        {
-            // Adding one is writing one. Asked here as well, because additions are handled before
-            // everything else and never reach the loop that asks below.
-            if (Refuses(operation, out var why)) { failed.Add($"{mod.Id}: {why}"); continue; }
-
-            if (operation.NewId is not { Length: > 0 } newId)
-            {
-                failed.Add($"{mod.Id}: {operation.Target} adds an asset without saying what to call it");
-                continue;
-            }
-            if (ids.ContainsKey(newId))
-            {
-                failed.Add($"{mod.Id}: the pack adds two assets both called '{newId}'");
-                continue;
-            }
-            if (!Enum.TryParse<AssetClassID>(operation.Target.Class, out var cls))
-            {
-                failed.Add($"{mod.Id}: {operation.Target} names no class this build knows");
-                continue;
-            }
-            var source = Path.Combine(staging, Path.GetFileName(operation.Source));
-            if (!Stage(archive, operation.Source, source))
-            {
-                failed.Add($"{mod.Id}: pack has no '{operation.Source}'");
-                continue;
-            }
-
-            var bytes = File.ReadAllBytes(source);
-
-            if (!AssetAddition.HasType(editor.File, cls))
-            {
-                failed.Add($"{mod.Id}: '{operation.Target.Container}' carries no type information "
-                    + $"for {cls}, so '{newId}' cannot be added to it");
-                continue;
-            }
-
-            var pathId = FreeId(editor.File, operation.Target.PathId, mod.Id, newId);
-            var info = AssetFileInfo.Create(editor.File.file, pathId, (int)cls, null!, preferEditor: false);
-            info.SetNewData(bytes);
-            editor.File.file.Metadata.AssetInfos.Add(info);
-
-            ids[newId] = pathId;
-            staged.Add((operation, info, cls, bytes));
-        }
-
-        // The lookup the file answers path id questions from is built from the list, so it has to
-        // be rebuilt now that the list has grown. Everything below reads through it.
-        editor.File.file.GenerateQuickLookup();
-
-        foreach (var (operation, info, cls, bytes) in staged)
-        {
-            var newId = operation.NewId!;
-            try
-            {
-                var field = editor.Read(info)
-                    ?? throw new InvalidDataException($"'{newId}' could not be read as a {cls}.");
-
-                if (AssetAddition.Rejects(editor.Context, editor.File, cls, field, "") is { } refusal)
-                    throw new InvalidDataException(refusal);
-
-                var repointed = RawImporter.Repoint(field, operation, ids);
-
-                // The name in the manifest is what the asset should be called here, which is not
-                // always what it was called where it was built: two shaders in one file cannot
-                // share a name, and renaming is the way out of that.
-                var named = Rename(field, cls, operation.Target.Name);
-                if (Named(editor, cls, operation.Target.Name, info.PathId) is { } clash)
-                    throw new InvalidDataException(
-                        $"'{operation.Target.Container}' already has a {cls} called "
-                        + $"'{operation.Target.Name}' (path id {clash}).");
-
-                if (repointed > 0 || named) editor.Stage(info, field);
-                changed = true;
-
-                applied.Add(new AppliedOperation(mod.Id, operation.Op, operation.Target,
-                    $"added as {cls} {info.PathId}"
-                        + (info.PathId == operation.Target.PathId ? "" : " (its own id was taken)")
-                        + (repointed > 0 ? $", {repointed} pointer(s) repointed" : ""),
-                    ResolvedByPathId: info.PathId == operation.Target.PathId));
-            }
-            catch (Exception ex)
-            {
-                failed.Add($"{mod.Id}: {operation.Target} {ex.Message}");
-                editor.File.file.Metadata.AssetInfos.Remove(info);
-                editor.File.file.GenerateQuickLookup();
-                ids.Remove(newId);
-            }
-        }
-
-        return ids;
-    }
-
-    private static bool Rename(AssetTypeValueField field, AssetClassID cls, string name)
-    {
-        if (name.Length == 0 || AssetNaming.NameOf(field, cls) == name) return false;
-        return AssetNaming.TryRename(field, cls, name);
-    }
-
-    /// Another asset of the same class already using the name, if there is one.
-    private static long? Named(BundleEditor editor, AssetClassID cls, string name, long except)
-    {
-        if (name.Length == 0) return null;
-
-        foreach (var info in editor.File.file.AssetInfos)
-        {
-            if (info.TypeId != (int)cls || info.PathId == except) continue;
-            if (AssetNaming.NameOf(editor.Read(info), cls) == name) return info.PathId;
-        }
-        return null;
-    }
-
-    /// The path id an added asset gets: the one it asks for while that is free, and otherwise one
-    /// derived from the pack and the asset's handle, so the same pack applied twice lands on the
-    /// same number and a bundle can be compared against itself.
-    private static long FreeId(AssetsFileInstance file, long? preferred, string modId, string newId)
-    {
-        if (preferred is { } wanted && wanted != 0 && file.file.GetAssetInfo(wanted) is null) return wanted;
-
-        var seed = $"{modId}/{newId}";
-        for (var attempt = 0; ; attempt++)
-        {
-            var candidate = Stable($"{seed}#{attempt}");
-            if (candidate != 0 && file.file.GetAssetInfo(candidate) is null) return candidate;
-        }
-    }
-
-    private static long Stable(string text)
-    {
-        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
-        return BitConverter.ToInt64(hash, 0);
-    }
 }

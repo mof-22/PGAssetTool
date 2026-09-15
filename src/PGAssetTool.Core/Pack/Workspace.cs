@@ -11,12 +11,9 @@ namespace PGAssetTool.Core.Pack;
 /// those two, without having to prune anything by hand.
 public static class Workspace
 {
-    /// `alreadyModified` marks a workspace whose files are the modification rather than a starting
-    /// point — the output of converting someone's existing mod, say. Those carry no baseline, so
-    /// packing takes them as they are instead of waiting for an edit that already happened.
     public static PackManifest Create(
         string directory, string id, string name, string author, string? gameVersion,
-        IEnumerable<ExportedAsset> assets, bool alreadyModified = false, PackSubject? subject = null)
+        IEnumerable<ExportedAsset> assets, PackSubject? subject = null)
     {
         var kept = assets as IReadOnlyCollection<ExportedAsset> ?? assets.ToList();
         var operations = new List<PackOperation>();
@@ -30,7 +27,7 @@ public static class Workspace
                 Op = op,
                 Target = asset.Address,
                 Source = Relative(directory, asset.Path),
-                BaselineSha256 = alreadyModified ? null : HashFile(asset.Path),
+                BaselineSha256 = HashFile(asset.Path),
                 AlphaIsMask = asset.AlphaIsMask,
 
                 // Named by file rather than by address, because that is what the editor has in
@@ -55,11 +52,7 @@ public static class Workspace
             && (asset.Container.Length == 0 || other.Container.Length == 0
                 || string.Equals(asset.Container, other.Container, StringComparison.OrdinalIgnoreCase));
 
-    /// Writes a workspace whose operations the caller has already worked out.
-    ///
-    /// Converting somebody's existing mod is the case that needs this: an added asset and the
-    /// pointers repointed at it are not things an exported file can be read off, so the converter
-    /// builds the list and this only has to write it down.
+    /// Writes a workspace whose operations are already worked out.
     public static PackManifest Create(
         string directory, string id, string name, string author, string? gameVersion,
         IReadOnlyList<PackOperation> operations, string icon, PackSubject? subject = null)

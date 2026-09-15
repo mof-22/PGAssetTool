@@ -201,7 +201,6 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `show <item>` | Show one item and everything it references. A weapon takes the in-game number (`819`), a prefab name (`Weapon1257`) or a slug; anything else takes the id `items` lists. The in-game number and the prefab number are different sequences. |
 | `extract <item>` | Write out everything belonging to an item. With `--workspace`, also writes the `pgmod.json` that makes it packable. |
 | `pack [<directory>]` | Build a `.pgmod` from a workspace. Only files edited since the extract are included. |
-| `convert <path>` | Turn raw `.dat` assets exported by another asset editor into a packable workspace. |
 | `apply <pack>` | Install a `.pgmod` into the game. |
 | `mods` | List installed mods. |
 | `enable <id>` / `disable <id>` | Turn a mod back on, or off without uninstalling it. |
@@ -213,7 +212,7 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | --- | --- |
 | `--game <directory>` | Use this installation instead of the detected one. Any directory with the expected layout works, so a copy of the game data can be used instead of the live one. |
 | `--language <bundle>` | Localization bundle to read names from (default `l_en-gb`). |
-| `--out <directory>` | Where the output goes. `extract` defaults to `./workspace`, `convert` to a `converted` folder beside its input. |
+| `--out <directory>` | Where the output goes. `extract` defaults to `./workspace`. |
 | `--author <name>` | Recorded in the manifest. |
 | `--skin <id or name>` | Write out one of the weapon's skins instead of the weapon as it comes. `show` lists what a weapon has. |
 | `--opaque` | Write textures with no alpha channel. Most of them keep emission rather than transparency there, and an editor opens those as almost invisible. An image brought back without an alpha channel keeps the original one. |
@@ -239,15 +238,11 @@ pgassettool apply workspace/0819_something/something.pgmod
 | Textures | `.png` | edit in anything |
 | Models | `.glb` | edit in anything |
 | Sounds | `.wav`, `.mp3`, `.ogg` | edit in anything |
-| Anything else | `.dat` | the asset's own bytes — materials, fonts, shaders, transforms |
 
-The first three are files any ordinary program opens, which is what a class needs before this tool
-calls it replaceable. The last is a level below: it writes an asset's bytes back without
-understanding them, which is how everything else gets changed at all. Assets the game does not have
-yet can be added the same way, with existing assets repointed at them.
-
-Everything else is written out too — materials, animations, the prefab — as readable JSON, so you can
-see what is there even where you cannot yet change it.
+These are files any ordinary program opens, which is what a class needs before this tool calls it
+replaceable — and they are all an extract writes. Materials, animations and the rest of an item have
+no format you could edit and bring back, so they stay in the game rather than being written out to
+look at.
 
 Components are the exception. This tool neither shows nor writes them: they are how the game decides
 what a thing *does*, and this is a tool for how things look and sound.
@@ -262,10 +257,8 @@ what a thing *does*, and this is a tool for how things look and sound.
   outside the bundles.
 - **Writing to `.assets`** — the files under `*_Data` — and sprite atlases. Everything here writes
   AssetBundles.
-- **An editable format for fonts and shaders.** Their bytes go back through the raw route; what is
-  missing is a format to edit them *in*.
-- **Editing the JSON field dump.** It is written to be read; nothing reads it back. Changing one
-  field of a material still means going through the raw bytes.
+- **Fonts, shaders, materials.** There is no format to edit them in, so nothing of theirs is written
+  back.
 
 ---
 

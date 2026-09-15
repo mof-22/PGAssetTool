@@ -35,18 +35,9 @@ public static class Relocation
     public static string Key(AssetAddress target)
         => $"{target.Container}:{target.Class}:{target.Name}#{target.Ordinal}@{target.PathId}";
 
-    /// Whether an operation can be written into some other bundle than the one it names.
-    ///
-    /// Not an addition, which is put into the bundle named and cannot be missing from it. And not an
-    /// operation carrying pointers, because those name additions by a handle that only means
-    /// anything inside the bundle the additions went into.
-    public static bool CanMove(PackOperation operation)
-        => operation.Op != PackOperations.AddAsset && operation.Pointers.Count == 0;
-
     /// The operation aimed at wherever its asset was last found.
     public static PackOperation Follow(PackOperation operation, IReadOnlyDictionary<string, Relocated>? moved)
-        => CanMove(operation)
-           && moved is not null
+        => moved is not null
            && moved.TryGetValue(Key(operation.Target), out var found)
            && found.Bundle is { Length: > 0 } bundle
             ? operation with { Target = operation.Target with { Container = bundle } }

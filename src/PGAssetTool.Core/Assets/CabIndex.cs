@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using AssetsTools.NET.Extra;
-using PGAssetTool.Core.Assets;
 
-namespace PGAssetTool.Core.RawAssets;
+namespace PGAssetTool.Core.Assets;
 
 /// Maps a serialized file's CAB name to the bundle holding it.
 ///

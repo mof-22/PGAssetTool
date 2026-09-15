@@ -60,28 +60,4 @@ public class RelocationTests
             Relocation.Key(new AssetAddress("ecw_6", "Texture2D", "map", 0, 5)),
             Relocation.Key(new AssetAddress("ecw_6", "Texture2D", "map", 1, 6)));
     }
-
-    [Fact]
-    public void AnAdditionIsNeverMoved()
-    {
-        var addition = Replace("ecw_6", "shader", 9, PackOperations.AddAsset) with { NewId = "shader" };
-        var moved = new Dictionary<string, Relocated> { [Relocation.Key(addition.Target)] = new("ecw_4", "cccc") };
-
-        Assert.False(Relocation.CanMove(addition));
-        Assert.Same(addition, Relocation.Follow(addition, moved));
-    }
-
-    [Fact]
-    public void AnOperationPointingAtAnAdditionStaysWithIt()
-    {
-        // The handle it names only means something in the bundle the addition went into.
-        var pointing = Replace("ecw_6", "mat", 7, PackOperations.ReplaceRaw) with
-        {
-            Pointers = [new PointerFixup { Path = "m_Shader", NewId = "shader" }],
-        };
-        var moved = new Dictionary<string, Relocated> { [Relocation.Key(pointing.Target)] = new("ecw_4", "cccc") };
-
-        Assert.False(Relocation.CanMove(pointing));
-        Assert.Same(pointing, Relocation.Follow(pointing, moved));
-    }
 }

@@ -987,12 +987,6 @@ internal static class SelfTest
             var secondary = SecondWorkspace(model, weapon: 2, PackFolderB, PackIdentityB, PackNameB);
             if (secondary is null) return Fail("the second workspace could not be prepared");
 
-            // Adding an asset is the one operation with nothing on disk to notice, so it is written
-            // into the manifest rather than made by editing a file. It goes in after the second
-            // workspace is prepared and before anything is packed, so it travels the same road as
-            // everything else: built, signed, installed, reconciled and removed.
-            if (AddAnAsset(model, written, out var added) is { } addProblem) return Fail(addProblem);
-
             model.Editor.Rescan(model.WorkspaceRoot);
             foreach (var w in model.Editor.Workspaces) model.Editor.Selection.Add(w);
 
@@ -1006,11 +1000,8 @@ internal static class SelfTest
             // from a working one until it is applied and writes five bundles instead of one.
             foreach (var w in chosen)
             {
-                // One edited file each, and in the first workspace the two operations the addition
-                // put there as well — those carry no baseline, because a file that is the change
-                // has no earlier state to differ from.
-                var packing = string.Equals(Path.GetFullPath(w.Directory), written,
-                    StringComparison.OrdinalIgnoreCase) ? 3 : 1;
+                // One edited file each.
+                const int packing = 1;
 
                 // Counted by file: one picture can be written to two assets, and it is still one
                 // edited file however many operations follow from it.
@@ -1095,8 +1086,6 @@ internal static class SelfTest
             if (new PGAssetTool.Core.Mods.ModStore(model.Game!).Read().All(m => m.Id != PackIdentity))
                 return Fail("a pack installed on its own is not in the ledger");
 
-            // Read out of the bundle the game will load, not out of what the applier said it did.
-            if (AddedAssetIs(model, added!, installed: true) is { } addProblem2) return Fail(addProblem2);
             var missing = mine.Where(id => installed.All(m => m.Id != id)).ToList();
             if (missing.Count > 0)
                 return Fail($"{string.Join(", ", missing)} did not reach the ledger — a batch that installed some");
@@ -1314,10 +1303,6 @@ internal static class SelfTest
             if (model.Manager.Mods.Any(m => mine.Contains(m.Mod.Id)))
                 return Fail("a mod is still installed after both were removed");
 
-            // An added asset is only ever undone by the bundle being put back, so this is also the
-            // check that removal really does restore rather than reverse each operation.
-            if (AddedAssetIs(model, added!, installed: false) is { } addProblem3) return Fail(addProblem3);
-
             model.Manager.ShiftHeld = false;
             if (kept.Where(File.Exists).ToList() is { Count: > 0 } still)
                 return Fail($"shift-removing left {string.Join(", ", still.Select(Path.GetFileName))} behind");
@@ -1490,20 +1475,6 @@ internal static class SelfTest
         }
     }
 
-    /// What the addition check put into the pack, and what it has to find afterwards.
-    private sealed record Added(string Bundle, string ShaderName, long Material, long Shader);
-
-    /// Puts an asset the bundle does not have into the pack, and points one it does have at it.
-    ///
-    /// Built here rather than committed, because a fixture for this would be an asset out of the
-    /// player's own game and those are not this repository's to carry. It is also the only way to
-    /// get one that matches the installation being written to.
-    ///
-    /// The added shader is a copy of the one the material already uses, renamed. That makes the
-    /// whole mod a no-op by construction — the material ends up drawn by the same shader it was
-    /// drawn by — while still exercising every part that is new: an addition, a name that would
-    /// otherwise collide, a path id that is already taken, and an existing asset repointed at
-    /// something that did not exist when the pack was built.
     /// A pack that names a component is refused at both ends: built here, and arriving from
     /// somewhere else.
     ///
@@ -1519,7 +1490,7 @@ internal static class SelfTest
     {
         var manifest = Core.Pack.Workspace.Read(workspace);
         var bundle = manifest.Operations[0].Target.Container;
-        const string source = "selftest-refused.dat";
+        const string source = "selftest-refused.png";
 
         Core.Pack.PackOperation refused;
 
@@ -1532,12 +1503,15 @@ internal static class SelfTest
                     i => i.TypeId == (int)AssetsTools.NET.Extra.AssetClassID.MonoBehaviour) is not { } info)
                 return $"'{bundle}' holds no component to try this with";
 
-            File.WriteAllBytes(Path.Combine(workspace, source),
-                Core.Export.AssetExporter.ReadRaw(file, info));
+            // Any picture will do: what is refused is the class the operation names, and a texture
+            // operation is as good a way as any left to point at a component.
+            File.Copy(Path.Combine(workspace, manifest.Operations
+                    .First(o => o.Op == Core.Pack.PackOperations.ReplaceTexture).Source),
+                Path.Combine(workspace, source), overwrite: true);
 
             refused = new Core.Pack.PackOperation
             {
-                Op = Core.Pack.PackOperations.ReplaceRaw,
+                Op = Core.Pack.PackOperations.ReplaceTexture,
                 Target = new Core.Assets.AssetAddress(
                     bundle, nameof(AssetsTools.NET.Extra.AssetClassID.MonoBehaviour),
                     bundles.Context.Deserialize(file, info)?["m_Name"]?.AsString ?? "", 0, info.PathId),
@@ -1569,7 +1543,24 @@ internal static class SelfTest
 
         // Arriving from somewhere else: a pack this tool did build, with the operation put into its
         // manifest afterwards. Nothing here writes the container; it is opened as what it is.
-        Core.Pack.PackBuilder.Build(workspace, output);
+        //
+        // It carries one of the workspace's own pictures, unchanged but counted as edited: by the
+        // time this runs the workspace's edits have been put back, and a pack with nothing in it is
+        // not built at all. The picture is the game's own, so applying it changes nothing.
+        var carried = manifest.Operations.First(o => o.Op == Core.Pack.PackOperations.ReplaceTexture);
+        Core.Pack.Workspace.Save(workspace, manifest with
+        {
+            Operations = [.. manifest.Operations.Select(o =>
+                ReferenceEquals(o, carried) ? o with { BaselineSha256 = null } : o)],
+        });
+        try
+        {
+            Core.Pack.PackBuilder.Build(workspace, output);
+        }
+        finally
+        {
+            Core.Pack.Workspace.Save(workspace, manifest);
+        }
         using (var pack = System.IO.Compression.ZipFile.Open(
                    output, System.IO.Compression.ZipArchiveMode.Update))
         {
@@ -1614,121 +1605,6 @@ internal static class SelfTest
             return $"a component operation was not turned away on its way in: {said}";
         if (said.Contains("0 applied", StringComparison.Ordinal))
             return $"one refused operation took the rest of the pack down with it: {said}";
-
-        return null;
-    }
-
-    private static string? AddAnAsset(MainViewModel model, string workspace, out Added? added)
-    {
-        added = null;
-        var manifest = Core.Pack.Workspace.Read(workspace);
-        if (manifest.Operations.Count == 0) return "the workspace names nothing to work from";
-
-        using var bundles = new Core.Assets.BundleSet(model.Game!);
-        var bundle = manifest.Operations[0].Target.Container;
-        var file = bundles.Open(bundle);
-
-        // A material pointing at a shader in its own file. Everything else about which one is
-        // arbitrary, so the first is as good as any.
-        foreach (var info in file.file.AssetInfos)
-        {
-            if (info.TypeId != (int)AssetsTools.NET.Extra.AssetClassID.Material) continue;
-
-            var material = bundles.Context.Deserialize(file, info);
-            if (material?["m_Shader"] is not { IsDummy: false } pointer) continue;
-            if (pointer["m_FileID"].AsInt != 0) continue;
-
-            var shaderId = pointer["m_PathID"].AsLong;
-            if (file.file.GetAssetInfo(shaderId) is not { } shaderInfo) continue;
-            if (shaderInfo.TypeId != (int)AssetsTools.NET.Extra.AssetClassID.Shader) continue;
-
-            var name = PackIdentity + "-shader";
-            var shaderFile = Path.Combine(workspace, "selftest-added-shader.dat");
-            var materialFile = Path.Combine(workspace, "selftest-material.dat");
-            File.WriteAllBytes(shaderFile, Core.Export.AssetExporter.ReadRaw(file, shaderInfo));
-            File.WriteAllBytes(materialFile, Core.Export.AssetExporter.ReadRaw(file, info));
-
-            var index = new Core.Assets.ContainerIndex(bundles.Context);
-            var target = index.AddressOf(bundle, file, info, material["m_Name"].AsString);
-
-            Core.Pack.Workspace.Save(workspace, manifest with
-            {
-                Operations =
-                [
-                    .. manifest.Operations,
-                    new Core.Pack.PackOperation
-                    {
-                        Op = Core.Pack.PackOperations.AddAsset,
-                        // Deliberately the id the copied shader already occupies, so the applier has
-                        // to notice it is taken and hand out another.
-                        Target = new Core.Assets.AssetAddress(
-                            bundle, nameof(AssetsTools.NET.Extra.AssetClassID.Shader), name,
-                            PathId: shaderId),
-                        Source = Path.GetFileName(shaderFile),
-                        NewId = name,
-                    },
-                    new Core.Pack.PackOperation
-                    {
-                        Op = Core.Pack.PackOperations.ReplaceRaw,
-                        Target = target,
-                        Source = Path.GetFileName(materialFile),
-                        Pointers = [new Core.Pack.PointerFixup { Path = "m_Shader", NewId = name }],
-                    },
-                ],
-            });
-
-            added = new Added(bundle, name, info.PathId, shaderId);
-            Console.WriteLine($"add      '{name}' into {bundle}, and "
-                + $"{target} repointed at it (its own id {shaderId} is taken)");
-            return null;
-        }
-
-        return $"no material in '{bundle}' points at a shader beside it";
-    }
-
-    /// What the added asset has to look like in the game once the pack is applied, and once it is
-    /// removed again. `installed` says which of the two is being checked.
-    private static string? AddedAssetIs(MainViewModel model, Added added, bool installed)
-    {
-        using var bundles = new Core.Assets.BundleSet(model.Game!);
-        var file = bundles.Open(added.Bundle);
-
-        var found = file.file.AssetInfos
-            .Where(a => a.TypeId == (int)AssetsTools.NET.Extra.AssetClassID.Shader)
-            .Where(a => Core.Assets.AssetNaming.NameOf(
-                bundles.Context.Deserialize(file, a), AssetsTools.NET.Extra.AssetClassID.Shader)
-                    == added.ShaderName)
-            .ToList();
-
-        if (!installed)
-        {
-            if (found.Count > 0)
-                return $"'{added.ShaderName}' is still in {added.Bundle} after the mod was removed";
-            Console.WriteLine($"add      removed: '{added.ShaderName}' is gone from {added.Bundle}");
-        }
-        else
-        {
-            if (found.Count != 1)
-                return $"{found.Count} shaders in {added.Bundle} are called '{added.ShaderName}', not one";
-        }
-
-        var material = bundles.Context.Deserialize(file, file.file.GetAssetInfo(added.Material)!)!;
-        var points = material["m_Shader"]["m_PathID"].AsLong;
-
-        if (installed)
-        {
-            if (points != found[0].PathId)
-                return $"the material points at {points}, not at the added shader {found[0].PathId}";
-            if (points == added.Shader)
-                return "the added shader got the id it asked for, which was already taken";
-
-            Console.WriteLine($"add      installed: '{added.ShaderName}' is {found[0].PathId} "
-                + $"(asked for {added.Shader}), and the material points at it");
-        }
-        else if (points != added.Shader)
-        {
-            return $"the material points at {points} rather than back at {added.Shader}";
-        }
 
         return null;
     }
@@ -3550,7 +3426,7 @@ internal static class SelfTest
         // those astray tests nothing. So the pack is built as it is first, to see which survive.
         Core.Pack.PackBuilder.Build(workspace, pack);
         var textures = Core.Pack.PackBuilder.ReadManifest(pack).Operations
-            .Where(o => o.Op == Core.Pack.PackOperations.ReplaceTexture && Core.Mods.Relocation.CanMove(o))
+            .Where(o => o.Op == Core.Pack.PackOperations.ReplaceTexture)
             .Select(o => Core.Mods.Relocation.Key(o.Target))
             .ToHashSet(StringComparer.Ordinal);
         if (textures.Count == 0) return "the self-test's pack replaces no texture to send astray";
@@ -3561,7 +3437,7 @@ internal static class SelfTest
         var homes = sending.Select(o => o.Target.Container).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Somewhere nothing else in this pack goes, so that "nothing of it went there" can be asked:
-        // the pack also adds a shader to bhlw, and a mod rightly counts as having written to that.
+        // a bundle the pack's other operations do write to is rightly counted as written to.
         var named = manifest.Operations.Select(o => o.Target.Container).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var wrong = store.Read()
             .Where(m => m.Id is PackIdentity or PackIdentityB)

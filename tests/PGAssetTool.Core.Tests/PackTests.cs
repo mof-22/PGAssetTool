@@ -244,7 +244,7 @@ public class PackTests : IDisposable
     {
         // Dropping it quietly would be worse than refusing: the author would believe the change
         // shipped and find out from the game.
-        var path = Path.Combine(_workspace, "behaviour.dat");
+        var path = Path.Combine(_workspace, "behaviour.png");
         File.WriteAllText(path, "original");
 
         var manifest = new PackManifest
@@ -254,9 +254,9 @@ public class PackTests : IDisposable
             [
                 new PackOperation
                 {
-                    Op = PackOperations.ReplaceRaw,
+                    Op = PackOperations.ReplaceTexture,
                     Target = new AssetAddress("ecw_6", "MonoBehaviour", "something", 0, 7),
-                    Source = "behaviour.dat",
+                    Source = "behaviour.png",
                     BaselineSha256 = Workspace.HashFile(path),
                 },
             ],
@@ -267,7 +267,7 @@ public class PackTests : IDisposable
         var refused = Assert.Throws<InvalidOperationException>(
             () => PackBuilder.Build(_workspace, Path.Combine(_workspace, "out.pgmod")));
 
-        Assert.Contains("behaviour.dat", refused.Message);
+        Assert.Contains("behaviour.png", refused.Message);
         Assert.False(File.Exists(Path.Combine(_workspace, "out.pgmod")));
     }
 

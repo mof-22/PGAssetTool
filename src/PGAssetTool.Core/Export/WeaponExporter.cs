@@ -40,15 +40,13 @@ public sealed class WeaponExporter(BundleSet bundles)
 
     private AssetExporter _exporter => _writer ??= new AssetExporter(bundles) { Opaque = Opaque };
 
-    /// Types worth a file of their own. Everything else is scene plumbing that reads better as part
-    /// of the prefab document.
+    /// Where each class that can come back is written. Nothing else is written at all — see
+    /// AssetExporter.Export.
     private static readonly Dictionary<AssetClassID, string> Folders = new()
     {
         [AssetClassID.Texture2D] = "textures",
         [AssetClassID.AudioClip] = "audio",
         [AssetClassID.Mesh] = "meshes",
-        [AssetClassID.Material] = "materials",
-        [AssetClassID.AnimationClip] = "animations",
     };
 
     /// One of the weapon's skins to write out as well as the default look, by id or display name.
@@ -92,8 +90,6 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         if (tree.PrefabBundle is not null && wanted.Count > 0)
         {
-            var closure = new List<AssetTypeValueField>();
-
             // A weapon spans bundles: the prefab in one, its materials and textures in another. Each
             // object is read and addressed in the bundle it actually lives in, or a pack built from
             // this workspace would name the wrong container and fail to apply.
@@ -118,18 +114,7 @@ public sealed class WeaponExporter(BundleSet bundles)
                     if (wanted.TryGetValue(node.Class, out var folder))
                         Once(assets, _exporter.Export(
                             group.Key, file, info, Path.Combine(directory, folder)));
-                    else if (chosen is null && bundles.Context.Deserialize(file, info) is { } field)
-                        closure.Add(field);
                 }
-            }
-
-            if (closure.Count > 0)
-            {
-                var path = Path.Combine(directory, "prefab.json");
-                File.WriteAllText(path, FieldDump.ToJson(closure));
-                // The document covers the whole closure, so it has no single asset to address.
-                assets.Add(new ExportedAsset(path, AssetClassID.GameObject, tree.Record.PrefabName,
-                    "json", new FileInfo(path).Length, new AssetAddress("", "", "")));
             }
         }
 
@@ -544,9 +529,6 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         foreach (var material in skin.Materials)
         {
-            ExportByName(material.Bundle, material.Name, Path.Combine(into, "materials"),
-                assets, skipped, AssetClassID.Material);
-
             foreach (var texture in material.Textures)
                 ExportByName(
                     texture.Bundle.Length > 0 ? texture.Bundle : material.Bundle,
@@ -556,9 +538,7 @@ public sealed class WeaponExporter(BundleSet bundles)
         // Everything the model reaches, written into the folders its types belong in.
         if (brought is null) return;
         var model = brought.Model;
-        var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
 
-        var closure = new List<AssetTypeValueField>();
         foreach (var node in brought.Assets)
         {
             var bundle = node.Bundle.Length > 0 ? node.Bundle : model.Bundle;
@@ -571,16 +551,7 @@ public sealed class WeaponExporter(BundleSet bundles)
 
             if (Folders.TryGetValue(node.Class, out var folder))
                 Once(assets, _exporter.Export(bundle, holder, info, Path.Combine(into, folder)));
-            else if (bundles.Context.Deserialize(holder, info) is { } field)
-                closure.Add(field);
         }
-
-        if (closure.Count == 0) return;
-
-        var path = Path.Combine(into, "model.json");
-        File.WriteAllText(path, FieldDump.ToJson(closure));
-        assets.Add(new ExportedAsset(path, AssetClassID.GameObject, name,
-            "json", new FileInfo(path).Length, new AssetAddress("", "", "")));
     }
 
     /// Draws the weapon and leaves the picture in the workspace, for the pack to show itself with.

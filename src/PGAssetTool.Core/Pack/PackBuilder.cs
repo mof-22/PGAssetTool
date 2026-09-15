@@ -145,7 +145,7 @@ public static class PackBuilder
     /// Whether an operation names a class this tool will not write back.
     private static bool Refused(PackOperation operation)
         => Enum.TryParse<AssetsTools.NET.Extra.AssetClassID>(operation.Target.Class, out var cls)
-            && !Replaceable.CanWriteBack(cls);
+            && !Replaceable.Supports(cls);
 
     private static string Sanitise(string name)
     {
@@ -183,9 +183,6 @@ public static class PackBuilder
         // The baseline hash is a working-directory concern; it says nothing to whoever applies the pack.
         var kept = changed.Select(o => o with { BaselineSha256 = null }).ToList();
 
-        // Claimed from what was actually packed, not from what the workspace could have held: a
-        // workspace that offers an addition an author left alone builds a pack that does not need
-        // the newer format, and should not ask for it.
         var packed = manifest with
         {
             Operations = kept,

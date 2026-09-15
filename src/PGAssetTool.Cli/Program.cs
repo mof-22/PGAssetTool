@@ -4,7 +4,6 @@ using AssetsTools.NET.Extra;
 using PGAssetTool.Cli;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
-using PGAssetTool.Core.RawAssets;
 using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Game;
@@ -33,15 +32,11 @@ if (command is "-h" or "--help" or "help")
                                else takes the id `items` lists. Note that a weapon's in-game number
                                and its prefab number are different sequences.
 
-          extract <item>       Write out everything belonging to an item: images as PNG, audio as
-                               WAV, meshes as glTF, the object graph as JSON. With --workspace, also writes a
+          extract <item>       Write out what can be changed of an item: images as PNG, audio as
+                               WAV or Ogg, meshes as glTF. With --workspace, also writes a
                                pgmod.json naming every replaceable file.
           pack [<directory>]   Build a .pgmod from a workspace. Only files edited since the
                                extract are included.
-
-          convert <path>       Turn raw .dat assets exported by an asset editor into editable
-                               formats, recovering each one's type from the game. The result
-                               is a packable workspace.
 
           apply <pack>         Install a .pgmod into the game.
           verify               Check every bundle against the hash the game recorded for it.
@@ -142,7 +137,7 @@ catch (Exception ex)
     return 1;
 }
 
-// The game as shipped: show, extract and convert are about the item, not about whatever mod is
+// The game as shipped: show and extract are about the item, not about whatever mod is
 // installed over it. Anything that writes or verifies goes to the installation directly.
 using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf);
 
@@ -170,69 +165,6 @@ if (command == "info")
         ? GameVersion.Read(bundles.Context, game)
         : $"unavailable ({ClassPackage.FileName} not found)")}");
     return 0;
-}
-
-if (command == "convert")
-{
-    var input = positional.FirstOrDefault();
-    if (input is null)
-    {
-        Console.Error.WriteLine("convert requires a .dat file or a directory of them.");
-        return 2;
-    }
-
-    var sources = RawAssetFile.Discover(input).ToList();
-    if (sources.Count == 0)
-    {
-        Console.Error.WriteLine(
-            $"No files in '{input}' are named '<asset>-CAB-<hash>-<pathId>.dat', which is what "
-            + "carries the information needed to recover an asset's type.");
-        return 1;
-    }
-
-    var destination = Option("out") ?? Path.Combine(Path.GetFullPath(input), "converted");
-    var converter = new RawAssetConverter(bundles, CabIndex.Build(bundles));
-    var id = Path.GetFileName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(input)));
-
-    var manifest = converter.ConvertToWorkspace(
-        sources, destination, id,
-        author: Option("author") ?? "",
-        gameVersion: bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null,
-        onError: (source, ex) => Console.Error.WriteLine($"  {TextColumn.Pad(source.Name, 34)} {ex.Message}"),
-        results: out var results);
-
-    foreach (var result in results)
-        foreach (var asset in result.Written)
-            Console.WriteLine($"  {TextColumn.Pad(result.Source.Name, 34)} {result.Class,-12} "
-                + $"@ {TextColumn.Pad(result.Bundle, 12)} -> {Path.GetFileName(asset.Path)}"
-                + (result.IsAddition && asset.Path == result.RawPath ? "   (added, not replaced)" : ""));
-
-    Console.WriteLine($"\n{results.Count} of {sources.Count} converted into {destination}");
-    Console.WriteLine($"{PackManifest.FileName} has {manifest.Operations.Count} operation(s), "
-        + $"{manifest.Operations.Count(o => o.Op == PackOperations.AddAsset)} of them additions.");
-
-    foreach (var operation in manifest.Operations.Where(o => o.Pointers.Count > 0))
-        foreach (var pointer in operation.Pointers)
-            Console.WriteLine($"  {operation.Target} {pointer.Path} -> '{pointer.NewId}'");
-
-    // An addition whose class had to be guessed, and the guess was not the only one that fits.
-    foreach (var result in results.Where(r => r.AlsoFits.Count > 0))
-        Console.WriteLine($"\n  '{result.Source.Name}' reads as {result.Class}, but also as "
-            + $"{string.Join(" and ", result.AlsoFits)}. Check pgmod.json before packing.");
-
-    var unusable = results.SelectMany(r => r.Written)
-        .Where(a => !manifest.Operations.Any(o => o.Source == Path.GetFileName(a.Path)))
-        .Select(a => $"{Path.GetFileName(a.Path)} ({a.Class})")
-        .ToList();
-    if (unusable.Count > 0)
-    {
-        Console.WriteLine($"\nKept for reading, but not packed — the .dat beside each is what gets "
-            + "written back:");
-        foreach (var name in unusable.Take(8)) Console.WriteLine($"  {name}");
-        if (unusable.Count > 8) Console.WriteLine($"  and {unusable.Count - 8} more");
-    }
-    Console.WriteLine($"\n  pgassettool pack \"{destination}\"");
-    return results.Count == sources.Count ? 0 : 1;
 }
 
 if (command == "consolidate")
