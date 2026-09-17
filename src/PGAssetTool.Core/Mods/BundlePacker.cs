@@ -41,18 +41,15 @@ internal static class BundlePacker
     /// out costs more than the work: a bundle of a few hundred kilobytes is two or three blocks.
     private const int WorthSharing = 4 * 1024 * 1024;
 
-    public static void Write(AssetBundleFile bundle, string outputPath, BundlePacking packing)
+    /// <param name="header">The bundle's own header; its stream flags and sizes are rewritten here.</param>
+    /// <param name="original">The table the bundle was read with, for the hash it carries.</param>
+    /// <param name="entries">Where each entry sits in <paramref name="payload"/>, in order.</param>
+    /// <param name="payload">Every entry's bytes, end to end — what the blocks are cut from.</param>
+    public static void Write(
+        AssetBundleHeader header, AssetBundleBlockAndDirInfo original, AssetBundleDirectoryInfo[] entries,
+        byte[] payload, string outputPath, BundlePacking packing)
     {
-        var header = bundle.Header;
-        var directory = bundle.BlockAndDirInfo;
-
-        // Everything the bundle holds, which is what the blocks are cut from. The data reader is
-        // already the data and nothing else — the header and the table it was read past are not in
-        // it — so this starts at nothing, not at the offset the header quotes.
-        var total = directory.BlockInfos.Sum(b => (long)b.DecompressedSize);
-        var payload = new byte[total];
-        bundle.DataReader.Position = 0;
-        bundle.DataReader.Read(payload, 0, payload.Length);
+        long total = payload.Length;
 
         var level = packing == BundlePacking.Faster ? LZ4Level.L00_FAST : LZ4Level.L09_HC;
         var count = (int)((total + BlockSize - 1) / BlockSize);
@@ -89,9 +86,9 @@ internal static class BundlePacker
         // thoroughly whatever the blocks got.
         var table = Serialize(w => new AssetBundleBlockAndDirInfo
         {
-            Hash = directory.Hash,
+            Hash = original.Hash,
             BlockInfos = blocks,
-            DirectoryInfos = directory.DirectoryInfos,
+            DirectoryInfos = [.. entries],
         }.Write(w));
 
         var packedTable = Squeeze(table, LZ4Level.L09_HC);
@@ -123,7 +120,7 @@ internal static class BundlePacker
             writer.Write(packedTable);
         }
 
-        Verify(outputPath, directory);
+        Verify(outputPath, entries);
     }
 
     /// One block, compressed, or the block itself if compressing it did not help.
@@ -159,7 +156,7 @@ internal static class BundlePacker
     /// that knows the format. Reading the header and the table back costs a millisecond and turns
     /// any mistake in that assembly into a failure at the moment it was made, rather than into a
     /// game that will not start.
-    private static void Verify(string outputPath, AssetBundleBlockAndDirInfo expected)
+    private static void Verify(string outputPath, AssetBundleDirectoryInfo[] expected)
     {
         var written = new AssetBundleFile();
         try
@@ -167,10 +164,10 @@ internal static class BundlePacker
             written.Read(new AssetsFileReader(File.OpenRead(outputPath)));
 
             var names = written.BlockAndDirInfo.DirectoryInfos.Select(d => d.Name).ToList();
-            if (!names.SequenceEqual(expected.DirectoryInfos.Select(d => d.Name)))
+            if (!names.SequenceEqual(expected.Select(d => d.Name)))
                 throw new InvalidDataException(
                     $"The bundle written to '{outputPath}' holds {string.Join(", ", names)} "
-                    + $"rather than {string.Join(", ", expected.DirectoryInfos.Select(d => d.Name))}.");
+                    + $"rather than {string.Join(", ", expected.Select(d => d.Name))}.");
 
             if (written.Header.FileStreamHeader.TotalFileSize != new FileInfo(outputPath).Length)
                 throw new InvalidDataException(

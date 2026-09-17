@@ -81,27 +81,58 @@ public sealed class BundleEditor : IDisposable
     ///
     /// The compressing itself is BundlePacker's, not the library's, because the library's is the
     /// single slowest thing this tool does.
+    ///
+    /// The entries are laid end to end straight into the buffer the blocks are cut from. This used
+    /// to write the whole bundle out uncompressed into memory and read that back to pack it, which
+    /// held the largest bundle in the game — 216MB — five or six times over while it did.
     public void Save(string outputPath, BundlePacking packing = BundlePacking.Smaller)
     {
-        var directory = _bundle.file.BlockAndDirInfo.DirectoryInfos;
-        directory[_entryIndex].SetNewData(Serialize(w => File.file.Write(w, 0)));
-        foreach (var (index, payload) in _streams) directory[index].SetNewData(payload);
-        var uncompressed = new MemoryStream(Serialize(w => _bundle.file.Write(w, -1)));
+        var original = _bundle.file.BlockAndDirInfo;
+        var directory = original.DirectoryInfos;
+        var assets = Serialize(w => File.file.Write(w, 0), directory[_entryIndex].DecompressedSize);
 
-        // Packing reads from the rebuilt file as it writes, so the source stream outlives this call
-        // rather than being disposed with the reader.
-        var rebuilt = new AssetBundleFile();
-        rebuilt.Read(new AssetsFileReader(uncompressed));
+        long Length(int index) => index == _entryIndex ? assets.Length
+            : _streams.TryGetValue(index, out var grown) ? grown.Length
+            : directory[index].DecompressedSize;
 
-        BundlePacker.Write(rebuilt, outputPath, packing);
+        var payload = new byte[Enumerable.Range(0, directory.Count).Sum(Length)];
+        var entries = new AssetBundleDirectoryInfo[directory.Count];
+        var reader = _bundle.file.DataReader;
+        long at = 0;
 
-        rebuilt.Close();
-        uncompressed.Dispose();
+        for (var index = 0; index < directory.Count; index++)
+        {
+            var length = Length(index);
+            if (index == _entryIndex) assets.CopyTo(payload, at);
+            else if (_streams.TryGetValue(index, out var grown)) grown.CopyTo(payload, at);
+            else
+            {
+                reader.Position = directory[index].Offset;
+                for (long read = 0; read < length;)
+                {
+                    var got = reader.Read(payload, (int)(at + read), (int)Math.Min(int.MaxValue, length - read));
+                    if (got <= 0) throw new EndOfStreamException($"'{directory[index].Name}' ended early.");
+                    read += got;
+                }
+            }
+
+            entries[index] = new AssetBundleDirectoryInfo
+            {
+                Offset = at,
+                DecompressedSize = length,
+                Flags = directory[index].Flags,
+                Name = directory[index].Name,
+            };
+            at += length;
+        }
+
+        BundlePacker.Write(_bundle.file.Header, original, entries, payload, outputPath, packing);
     }
 
-    private static byte[] Serialize(Action<AssetsFileWriter> write)
+    /// Sized to what it is expected to come to, so the stream does not double its way up to it.
+    private static byte[] Serialize(Action<AssetsFileWriter> write, long expected)
     {
-        using var stream = new MemoryStream();
+        using var stream = new MemoryStream((int)Math.Min(int.MaxValue, expected + 64 * 1024));
         var writer = new AssetsFileWriter(stream);
         write(writer);
         writer.Flush();
