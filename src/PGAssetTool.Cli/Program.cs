@@ -52,7 +52,8 @@ if (command is "-h" or "--help" or "help")
           --language <bundle>  Localization bundle to read names from (default l_en-gb).
           --out <directory>    Where extract writes (default ./workspace).
           --author <name>      Recorded in the manifest by extract --workspace.
-          --force              Let apply back up a bundle that is already modified.
+          --force              Let apply go ahead anyway: back up a bundle already modified, or
+                               install a signed pack altered after it was built.
           --fast               Squeeze rebuilt bundles less: that part is about four times quicker
                                and the bundles come out about a sixth larger. The game reads both
                                at the same speed.

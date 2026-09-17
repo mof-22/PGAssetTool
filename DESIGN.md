@@ -42,7 +42,9 @@ in it has a concept of a weapon.
 holding them, `IconResolver` finds the one picture that stands for an item. This layer answers
 "what exists, and where".
 
-**The shell** — the GUI and the CLI — puts the two together.
+**The shell** — the GUI and the CLI — puts the two together. The window offers weapons only, by one
+filter where it loads the catalogues; the other kinds are still read underneath, and the CLI lists
+them.
 
 Adding another kind of item is work in the middle layer. The layers below and above it already do
 what they would need to do.
@@ -79,11 +81,10 @@ produces packs that fail when applied. Nothing else is written back, and nothing
 an extract holds the files these operations take, the pictures that stand for the pack, and the
 `pgmod.json` that names them.
 
-An asset's raw serialized bytes (`replaceRaw`, from a `.dat`) and assets added to a bundle
-(`addAsset`) used to go back as well, for any class, with `convert` importing the `.dat` files other
-asset editors write. The user retired all of it, to be designed again if it is needed; the commit that
-removed it is the place to start. The JSON field dumps an extract wrote of everything else went at the
-same time — nothing read them, and a folder of files nobody can act on reads as an invitation.
+Raw serialized bytes from a `.dat`, assets added to a bundle, and JSON dumps of everything else were
+once written back or out as well. They were retired — nothing read the dumps, and a folder of files
+nobody can act on reads as an invitation — and the commit that removed them is where to start if any
+of it returns.
 
 ### Textures come out masked to what the model shows
 
@@ -288,8 +289,7 @@ pack and every folder on disk later.
 The names are recorded *and* their translation keys are. The two answer different questions: the
 name is what it was called when the pack was made, which a pack handed to somebody has to be able to
 say for itself; the key is what it is called now, in whatever language the tool is set to. The
-manager prefers to look the thing up by number or by skin id, which also reaches packs built before
-any of this existed.
+manager prefers to look the thing up by number or by skin id.
 
 ### Identity
 
@@ -383,6 +383,7 @@ The choice is part of what a bundle is recorded as built from, because the same 
 ways are two different files: left out, a bundle applied for speed was left alone by a reconcile
 asked for size, and rebuilding everything then arrived somewhere else. So changing it rewrites every
 bundle a mod is in at the next change, once.
+
 The layout written is the one AssetsTools.NET wrote — 128KB blocks, the block and directory table
 compressed at the end — which is not the layout the game ships and is the one this tool has always
 written into it. Each bundle is rebuilt beside the file it replaces and renamed over it, so the last
@@ -422,17 +423,17 @@ sampled frames hashed identical. The span a row is scanned over comes from two e
 precision and is widened past what float arithmetic can be out by, because the per-pixel test that
 decides is still the old float one; a tight span would disagree with it at the edges.
 
-**A mesh's normals are three wide even when the game keeps four.** Unity pads a half-float normal to
-four components so the attribute fills a whole four-byte step, and 55 main meshes are kept that way.
-`UnityMesh` narrows position and normal to three as it reads them, because everything downstream
-takes three a vertex; left at four, #14 Battle Shovel and King's Crown shaded in alternating light and
-dark triangles, and the shovel was wrongly taken for a model whose normals disagree with its winding.
-
 **`MeshRenderer` keeps the larger Z** in its depth test: forward points at the viewer.
 **Screen-right is the negative of the frame's own right axis**, applied after the roll — the viewer
 stands on the far side of the model from Unity's own camera, so what that camera has on its right is
 on their left. Getting this wrong draws every model mirrored, which is invisible on a gun and
 obvious the moment a texture has writing on it.
+
+**A mesh's normals are three wide even when the game keeps four.** Unity pads a half-float normal to
+four components so the attribute fills a whole four-byte step, and 55 main meshes are kept that way.
+`UnityMesh` narrows position and normal to three as it reads them, because everything downstream
+takes three a vertex; left at four, #14 Battle Shovel and King's Crown shaded in alternating light and
+dark triangles, and the shovel was wrongly taken for a model whose normals disagree with its winding.
 
 **The camera holds one rotation, not a yaw, a pitch and a roll.** It held three angles for a long
 time and that made it a turntable: sideways turned the model about one axis of its own whatever the
@@ -503,13 +504,16 @@ it, then extracts, edits, packs, installs, toggles and removes for real. Most of
 codebase were found by it, or by a check added to it. Prefer adding a check there over reasoning
 about whether something works.
 
-Two things about it that must stay true:
+Three things about it that must stay true:
 
 - **It writes to the game.** It refuses to start if the game is running, records what was installed
   before it began, and removes only its own packs.
 - **It leaves the author's things alone** — their installed mods, their workspaces, their
   `settings.json`. It uses its own temp workspace and its own settings home, and asserts at the end
   that the real settings file is byte-identical.
+- **It tidies up on the way out, a failed run included** — its own mods leave the ledger, its kept
+  packs are swept by the id in their manifest, and any of the author's mods it stood down are put
+  back. A green run leaves `pgassettool mods` as it found it.
 
 Two traps when adding to it:
 

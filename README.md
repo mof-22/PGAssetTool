@@ -176,8 +176,7 @@ cannot find is an asset the game does not have — a skin added after the versio
 
 **The game was updated.** An update replaces the bundles your mods were written into, so they are not
 in the game any more even though the Manager still lists them as on. The tool notices when it opens
-and says so across the top; **Reapply everything** writes them into the new bundles. Every asset the
-packs kept here name sits at the same place in 26.10 and 26.11, so those would apply unchanged.
+and says so across the top; **Reapply everything** writes them into the new bundles.
 
 **Undo everything.** Remove every mod in the Manager. Every bundle goes back to the copy taken before
 the first write.
@@ -218,7 +217,7 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `--opaque` | Write textures with no alpha channel. Most of them keep emission rather than transparency there, and an editor opens those as almost invisible. An image brought back without an alpha channel keeps the original one. |
 | `--whole` | Write the whole of every texture. By default the part no model samples is made transparent, so what is left is what you can actually see on the item. |
 | `--protect` | Sign the built pack, and keep it from opening as a zip. |
-| `--force` | Let `apply` back up a bundle that is already modified. |
+| `--force` | Let `apply` go ahead anyway: back up a bundle that is already modified, or install a signed pack that was altered after it was built. |
 | `--fast` | Squeeze rebuilt bundles less: that part is about four times quicker and the bundles come out about a sixth larger. The game reads both at the same speed. |
 | `--rebuild` | Rebuild every bundle, including the ones already holding what they should. Those are normally left where they are. |
 
@@ -265,7 +264,7 @@ what a thing *does*, and this is a tool for how things look and sound.
 ## For anyone changing the tool
 
 [DESIGN.md](DESIGN.md) is why it is built the way it is: how an item's parts are found, what a pack
-is, how adding an asset works, and which pieces look arbitrary but are load-bearing.
+is, how it follows the game's updates, and which pieces look arbitrary but are load-bearing.
 
 ```
 dotnet test -c Release
