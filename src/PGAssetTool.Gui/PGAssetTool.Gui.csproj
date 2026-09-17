@@ -19,6 +19,10 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 
+    <!-- Compiled ahead of time as well as to IL, so starting does not wait on the JIT: the window
+         came up in 0.55s rather than 1.0s, for an executable of 59MB rather than 47MB. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+
   </PropertyGroup>
 
   <ItemGroup>
