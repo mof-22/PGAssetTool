@@ -567,7 +567,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// in this game is 216MB unpacked, so this is a limit on memory rather than on cores — four of
     /// them at once is about a gigabyte at the worst moment, and the work is nearly all compression,
     /// which is already spread across every core inside each bundle.
-    private const int AtOnce = 4;
+    ///
+    /// One at a time is offered for a machine short of memory. Measured on the eight largest bundles
+    /// in the game rebuilt together: 2.9 seconds and a 1.25GB peak four at a time, 3.9 seconds and
+    /// 800MB one at a time.
+    public int AtOnce { get; init; } = 4;
 
     /// Writes every enabled mod into the game, a bundle at a time, several bundles at once.
     ///

@@ -92,6 +92,10 @@ public sealed record ToolSettings
     /// that surprises nobody, and somebody with thirty mods and room to spare can say otherwise.
     public bool FasterApplies { get; init; }
 
+    /// Whether bundles are rebuilt one at a time rather than four, for a machine short of memory.
+    /// About a third slower and about a third less at the peak; see ModApplier.AtOnce.
+    public bool LighterApplies { get; init; }
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

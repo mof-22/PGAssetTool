@@ -89,7 +89,7 @@ public sealed class BundleEditor : IDisposable
     {
         var original = _bundle.file.BlockAndDirInfo;
         var directory = original.DirectoryInfos;
-        var assets = Serialize(w => File.file.Write(w, 0), directory[_entryIndex].DecompressedSize);
+        using var assets = Serialize(w => File.file.Write(w, 0), directory[_entryIndex].DecompressedSize);
 
         long Length(int index) => index == _entryIndex ? assets.Length
             : _streams.TryGetValue(index, out var grown) ? grown.Length
@@ -103,7 +103,7 @@ public sealed class BundleEditor : IDisposable
         for (var index = 0; index < directory.Count; index++)
         {
             var length = Length(index);
-            if (index == _entryIndex) assets.CopyTo(payload, at);
+            if (index == _entryIndex) assets.GetBuffer().AsSpan(0, (int)assets.Length).CopyTo(payload.AsSpan((int)at));
             else if (_streams.TryGetValue(index, out var grown)) grown.CopyTo(payload, at);
             else
             {
@@ -129,14 +129,15 @@ public sealed class BundleEditor : IDisposable
         BundlePacker.Write(_bundle.file.Header, original, entries, payload, outputPath, packing);
     }
 
-    /// Sized to what it is expected to come to, so the stream does not double its way up to it.
-    private static byte[] Serialize(Action<AssetsFileWriter> write, long expected)
+    /// Sized to what it is expected to come to, so the stream does not double its way up to it, and
+    /// handed back as the stream rather than copied out: it is read once, into the payload.
+    private static MemoryStream Serialize(Action<AssetsFileWriter> write, long expected)
     {
-        using var stream = new MemoryStream((int)Math.Min(int.MaxValue, expected + 64 * 1024));
+        var stream = new MemoryStream((int)Math.Min(int.MaxValue, expected + 64 * 1024));
         var writer = new AssetsFileWriter(stream);
         write(writer);
         writer.Flush();
-        return stream.ToArray();
+        return stream;
     }
 
     public void Dispose() => _context.Dispose();

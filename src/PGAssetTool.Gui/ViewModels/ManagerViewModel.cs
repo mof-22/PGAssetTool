@@ -156,6 +156,9 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// choice is made; the manager itself only passes it on.
     public BundlePacking Packing { get; set; }
 
+    /// How many bundles are rebuilt at once. See ModApplier.AtOnce.
+    public int AtOnce { get; set; } = 4;
+
     /// Everything installed, whatever folder it is filed in.
     public ObservableCollection<InstalledRow> Mods { get; } = [];
 
@@ -536,10 +539,10 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// there was nothing to do would be no answer at all.
     [RelayCommand]
     private void Reapply() => Ask("Reapply everything",
-        _ => new ModApplier(_game()!, new ModStore(_game()!)) { Packing = Packing, Rebuild = true }.Reconcile(),
+        _ => new ModApplier(_game()!, new ModStore(_game()!)) { Packing = Packing, AtOnce = AtOnce, Rebuild = true }.Reconcile(),
         needsSelection: false);
 
-    private ModApplier Applier() => new(_game()!, new ModStore(_game()!)) { Packing = Packing };
+    private ModApplier Applier() => new(_game()!, new ModStore(_game()!)) { Packing = Packing, AtOnce = AtOnce };
 
     /// The rows a command acts on: everything highlighted, or the one current row.
     ///

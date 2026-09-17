@@ -120,6 +120,15 @@
 
         <StackPanel Spacing="6">
           <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyLighter" Classes="why" Content="?" />
+            <CheckBox Content="Rebuild one bundle at a time, to use less memory" IsChecked="{Binding LighterApplies}" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyLighter.IsChecked}"
+                     Text="Bundles are normally rebuilt four at a time, and each holds its whole unpacked self in memory while it is. One at a time is for a machine short of memory: rebuilding the eight largest bundles in the game took 3.9 seconds and peaked at 800MB this way, against 2.9 seconds and 1.25GB four at a time. What is written is the same either way." />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+          <DockPanel>
             <ToggleButton DockPanel.Dock="Right" Name="WhyReplaceable" Classes="why" Content="?" />
             <CheckBox Content="Show only what can be replaced" IsChecked="{Binding ReplaceableOnly}" />
           </DockPanel>

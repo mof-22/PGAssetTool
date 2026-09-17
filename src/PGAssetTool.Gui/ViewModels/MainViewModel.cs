@@ -144,6 +144,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public BundlePacking Packing => FasterApplies ? BundlePacking.Faster : BundlePacking.Smaller;
 
+    /// Whether bundles are rebuilt one at a time, to use less memory. See ModApplier.AtOnce.
+    [ObservableProperty] private bool _lighterApplies;
+
+    partial void OnLighterAppliesChanged(bool value)
+    {
+        Manager.AtOnce = AtOnce;
+        Remember();
+    }
+
+    public int AtOnce => LighterApplies ? 1 : 4;
+
     /// The key packs are signed with, shown so an author can publish it: somebody who knows this
     /// can tell a pack you built from one re-signed by whoever altered it.
     public string AuthorFingerprint
@@ -240,6 +251,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Manager.Order = (ModOrder)_settings.ModOrder;
         ProtectPacks = _settings.ProtectPacks;
         FasterApplies = _settings.FasterApplies;
+        LighterApplies = _settings.LighterApplies;
         MaskUnusedTextures = _settings.MaskUnusedTextures;
         Manager.Packing = Packing;
         _loading = false;
@@ -641,7 +653,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             using (var reading = new BundleSet(game))
                 if (reading.Context.HasClassDatabase) version = GameVersion.Read(reading.Context, game);
 
-            result = await Task.Run(() => new ModApplier(game, store) { Packing = Packing }.Install(paths, version));
+            result = await Task.Run(() => new ModApplier(game, store) { Packing = Packing, AtOnce = AtOnce }.Install(paths, version));
         }
         finally
         {
@@ -836,7 +848,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
-            FasterApplies = FasterApplies, MaskUnusedTextures = MaskUnusedTextures,
+            FasterApplies = FasterApplies, LighterApplies = LighterApplies, MaskUnusedTextures = MaskUnusedTextures,
         };
         try { _settings.Save(SettingsHome); }
         catch (IOException) { }

@@ -59,6 +59,8 @@ if (command is "-h" or "--help" or "help")
                                at the same speed.
           --rebuild            Rebuild every bundle, including the ones already holding what they
                                should. Those are normally left where they are.
+          --low-memory         Rebuild one bundle at a time rather than four: about a third slower,
+                               about a third less memory at the peak.
           --opaque             Write textures with no alpha channel. Most of them keep emission
                                rather than transparency there, and an editor opens those as almost
                                invisible. An image brought back without an alpha channel keeps the
@@ -253,6 +255,7 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
         Force = args.Contains("--force"),
         Rebuild = args.Contains("--rebuild"),
         Packing = args.Contains("--fast") ? BundlePacking.Faster : BundlePacking.Smaller,
+        AtOnce = args.Contains("--low-memory") ? 1 : 4,
     };
 
     if (command == "mods")
