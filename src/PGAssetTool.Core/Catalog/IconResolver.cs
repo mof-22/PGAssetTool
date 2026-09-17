@@ -51,7 +51,7 @@ public sealed class IconResolver(BundleSet bundles, AssetLookup lookup)
             foreach (var info in instance.file.AssetInfos)
             {
                 if (info.TypeId != (int)AssetClassID.Texture2D) continue;
-                var name = bundles.Context.Deserialize(instance, info)?["m_Name"].AsString;
+                var name = bundles.Context.NameOf(instance, info);
                 if (!string.IsNullOrEmpty(name) && name.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase))
                     _dataFileTextures.TryAdd(name, Path.GetFileName(file));
             }

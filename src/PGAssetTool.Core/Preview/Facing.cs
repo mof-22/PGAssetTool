@@ -118,9 +118,22 @@ public static class Facing
         var root = RootOf(bundles, file, meshPathId, out var chain);
         if (root == 0) return found;
 
+        // Every GameObject carrying a landmark's name, in one pass over the bundle rather than one
+        // pass per landmark: a prefab bundle holds thousands of GameObjects.
+        var wanted = Landmarks.Select(l => l.Name).ToHashSet(StringComparer.Ordinal);
+        var named = new Dictionary<string, List<AssetFileInfo>>(StringComparer.Ordinal);
+        foreach (var info in file.file.AssetInfos)
+        {
+            if (info.TypeId != (int)AssetClassID.GameObject) continue;
+            var name = bundles.Context.NameOf(file, info);
+            if (!wanted.Contains(name)) continue;
+            if (!named.TryGetValue(name, out var holders)) named[name] = holders = [];
+            holders.Add(info);
+        }
+
         foreach (var (name, _) in Landmarks)
         {
-            if (Find(bundles, file, name, root, chain) is not { } transform) continue;
+            if (Find(bundles, file, named.GetValueOrDefault(name) ?? [], root, chain) is not { } transform) continue;
             if (WorldOf(bundles, file, transform) is not { } world) continue;
 
             found[name] = (
@@ -179,16 +192,14 @@ public static class Facing
         return 0;
     }
 
-    /// The transform of a GameObject with this name whose ancestors reach the given root.
+    /// The transform of the first of these GameObjects whose ancestors reach the given root.
     private static long? Find(
-        BundleSet bundles, AssetsFileInstance file, string name, long root, HashSet<long> chain)
+        BundleSet bundles, AssetsFileInstance file, IEnumerable<AssetFileInfo> holders, long root, HashSet<long> chain)
     {
-        foreach (var info in file.file.AssetInfos)
+        foreach (var info in holders)
         {
-            if (info.TypeId != (int)AssetClassID.GameObject) continue;
-
             var field = bundles.Context.Deserialize(file, info);
-            if (field is null || field["m_Name"].AsString != name) continue;
+            if (field is null) continue;
 
             var transform = TransformIn(file, field);
             if (transform != 0 && Reaches(bundles, file, transform, root, chain)) return transform;

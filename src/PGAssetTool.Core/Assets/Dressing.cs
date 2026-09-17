@@ -67,6 +67,43 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
                 yield return found;
     }
 
+    /// One drawing object as a scan of its bundle found it: whose it is, the mesh it names if it
+    /// names one, and the materials it paints with.
+    private sealed record Drawer(int TypeId, long GameObject, (int FileId, long PathId)? Mesh,
+        IReadOnlyList<(int FileId, long PathId)> Materials);
+
+    /// Every bundle's drawing objects, read once. A workspace's meshes are dressed one at a time and
+    /// each asked the same bundles, so the scan was repeated for every mesh — a prefab bundle's every
+    /// renderer, deserialized again for the arms, again for the muzzle flash.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<Drawer>> _drawers =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private IReadOnlyList<Drawer> DrawersIn(string bundle, AssetsFileInstance file)
+        => _drawers.GetOrAdd(bundle, _ =>
+        {
+            var found = new List<Drawer>();
+            foreach (var info in file.file.AssetInfos)
+            {
+                if (!Drawing.Contains(info.TypeId)) continue;
+
+                var field = bundles.Context.Deserialize(file, info);
+                if (field is null) continue;
+
+                var owner = field["m_GameObject"];
+                var mesh = field["m_Mesh"];
+                found.Add(new Drawer(
+                    info.TypeId,
+                    owner.IsDummy ? 0 : owner["m_PathID"].AsLong,
+                    mesh.IsDummy ? null : (mesh["m_FileID"].AsInt, mesh["m_PathID"].AsLong),
+                    info.TypeId == (int)AssetClassID.MeshFilter
+                        ? []
+                        : field["m_Materials"]["Array"].Children
+                            .Select(m => (m["m_FileID"].AsInt, m["m_PathID"].AsLong))
+                            .ToList()));
+            }
+            return found;
+        });
+
     private IEnumerable<IReadOnlyList<AssetNode?>> In(string bundle, string meshBundle, long meshPathId)
     {
         AssetsFileInstance file;
@@ -74,34 +111,26 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
         catch (Exception e) when (e is IOException or FileNotFoundException) { yield break; }
 
         var meshOfGameObject = new Dictionary<long, bool>();
-        var renderers = new List<(long GameObject, bool Mesh, AssetTypeValueField Field)>();
+        var renderers = new List<(long GameObject, bool Mesh, Drawer Drawer)>();
 
-        foreach (var info in file.file.AssetInfos)
+        foreach (var drawer in DrawersIn(bundle, file))
         {
-            if (!Drawing.Contains(info.TypeId)) continue;
-
-            var field = bundles.Context.Deserialize(file, info);
-            if (field is null) continue;
-
-            var owner = field["m_GameObject"];
-            var on = owner.IsDummy ? 0 : owner["m_PathID"].AsLong;
-
             // A MeshFilter says which mesh its GameObject holds; the MeshRenderer beside it says
             // what to paint it with and never names the mesh itself. A SkinnedMeshRenderer is both
             // at once.
-            if (info.TypeId == (int)AssetClassID.MeshFilter)
-                meshOfGameObject[on] = Names(file, bundle, field["m_Mesh"], meshBundle, meshPathId);
+            if (drawer.TypeId == (int)AssetClassID.MeshFilter)
+                meshOfGameObject[drawer.GameObject] = Names(file, bundle, drawer.Mesh, meshBundle, meshPathId);
             else
-                renderers.Add((on, info.TypeId == (int)AssetClassID.SkinnedMeshRenderer
-                    && Names(file, bundle, field["m_Mesh"], meshBundle, meshPathId), field));
+                renderers.Add((drawer.GameObject, drawer.TypeId == (int)AssetClassID.SkinnedMeshRenderer
+                    && Names(file, bundle, drawer.Mesh, meshBundle, meshPathId), drawer));
         }
 
         foreach (var (gameObject, named, renderer) in renderers)
         {
             if (!named && !meshOfGameObject.GetValueOrDefault(gameObject)) continue;
 
-            var slots = renderer["m_Materials"]["Array"].Children
-                .Select(m => MainTextureOf(bundle, m["m_FileID"].AsInt, m["m_PathID"].AsLong))
+            var slots = renderer.Materials
+                .Select(m => MainTextureOf(bundle, m.FileId, m.PathId))
                 .ToList();
 
             if (slots.Any(s => s is not null)) yield return slots;
@@ -169,12 +198,12 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
 
     /// Whether a pointer names this exact mesh, following it out of the file if it leaves.
     private bool Names(
-        AssetsFileInstance from, string bundle, AssetTypeValueField pointer,
+        AssetsFileInstance from, string bundle, (int FileId, long PathId)? pointer,
         string meshBundle, long meshPathId)
     {
-        if (pointer.IsDummy || pointer["m_PathID"].AsLong != meshPathId) return false;
+        if (pointer is not { } named || named.PathId != meshPathId) return false;
 
-        var fileId = pointer["m_FileID"].AsInt;
+        var fileId = named.FileId;
         var lives = fileId == 0
             ? bundle
             : _graph.Resolve(from, fileId) is { } other ? other.Bundle : "";
@@ -221,7 +250,7 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
         var textureInfo = textureFile.file.GetAssetInfo(textureId);
         if (textureInfo is null || textureInfo.TypeId != (int)AssetClassID.Texture2D) return null;
 
-        var name = bundles.Context.Deserialize(textureFile, textureInfo)?["m_Name"].AsString ?? "";
+        var name = bundles.Context.NameOf(textureFile, textureInfo);
         return new AssetNode(textureId, AssetClassID.Texture2D, name, textureBundle);
     }
 

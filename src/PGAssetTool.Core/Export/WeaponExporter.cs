@@ -694,18 +694,32 @@ public sealed class WeaponExporter(BundleSet bundles)
         try { file = bundles.Open(bundle); }
         catch (Exception ex) { skipped.Add($"{name}: {ex.Message}"); return; }
 
-        var matches = file.file.AssetInfos
+        bool Named(AssetFileInfo i) => string.Equals(NameOf(file, i), name, StringComparison.OrdinalIgnoreCase);
+
+        // Only the classes an export writes are worth asking the name of: a sprite or a material of
+        // the same name writes nothing, and asking every object in a bundle was most of what
+        // following a weapon's related assets cost. The rest are asked only to tell "not found"
+        // apart from "found, and nothing to write".
+        var candidates = file.file.AssetInfos
             .Where(i => only is null || i.TypeId == (int)only)
-            .Where(i => NameOf(file, i) is { } n && string.Equals(n, name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var matches = candidates
+            .Where(i => Pack.Replaceable.Supports((AssetClassID)i.TypeId) && Named(i))
             .ToList();
 
-        if (matches.Count == 0) { skipped.Add($"{name}: not found in '{bundle}'"); return; }
+        if (matches.Count == 0)
+        {
+            if (!candidates.Any(i => !Pack.Replaceable.Supports((AssetClassID)i.TypeId) && Named(i)))
+                skipped.Add($"{name}: not found in '{bundle}'");
+            return;
+        }
         foreach (var info in matches) Once(into, _exporter.Export(bundle, file, info, directory));
     }
 
-    private string? NameOf(AssetsFileInstance file, AssetFileInfo info)
-    {
-        var name = bundles.Context.Deserialize(file, info)?["m_Name"];
-        return name is null || name.IsDummy ? null : name.AsString;
-    }
+    /// The top-level name, as it always was here: a Shader answers with its empty `m_Name`, not the
+    /// one `AssetNaming` finds inside it.
+    private string NameOf(AssetsFileInstance file, AssetFileInfo info)
+        => info.TypeId == (int)AssetClassID.Shader
+            ? bundles.Context.Deserialize(file, info)?["m_Name"] is { IsDummy: false } name ? name.AsString : ""
+            : bundles.Context.NameOf(file, info);
 }

@@ -88,8 +88,8 @@ public sealed class BundleSet : IDisposable
         foreach (var info in file.file.AssetInfos)
         {
             if (info.TypeId != (int)AssetClassID.MonoBehaviour) continue;
-            var field = _context.Deserialize(file, info);
-            if (field is not null && (name == "*" || field["m_Name"].AsString == name)) return field;
+            if (name != "*" && _context.NameOf(file, info) != name) continue;
+            if (_context.Deserialize(file, info) is { } field) return field;
         }
         return null;
     }

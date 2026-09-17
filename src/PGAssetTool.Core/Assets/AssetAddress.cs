@@ -20,28 +20,33 @@ public sealed record AssetAddress(
 }
 
 /// Resolves between path ids and the name-based address, per serialized file.
+///
+/// Indexed one class at a time, because an address only ever looks among its own class. Indexing
+/// the whole container read the name of every GameObject and MonoBehaviour in a prefab bundle to
+/// address one texture, and that was a large part of what extracting a weapon cost.
 public sealed class ContainerIndex(AssetsContext context)
 {
-    private readonly Dictionary<string, Dictionary<(int Class, string Name), List<long>>> _byContainer = new();
+    private readonly Dictionary<(string Container, int Class), Dictionary<string, List<long>>> _byContainer = new();
 
-    private Dictionary<(int, string), List<long>> IndexOf(string container, AssetsFileInstance file)
+    private Dictionary<string, List<long>> IndexOf(string container, AssetsFileInstance file, int cls)
     {
-        if (_byContainer.TryGetValue(container, out var cached)) return cached;
+        if (_byContainer.TryGetValue((container, cls), out var cached)) return cached;
 
-        var index = new Dictionary<(int, string), List<long>>();
+        var index = new Dictionary<string, List<long>>(StringComparer.Ordinal);
         foreach (var info in file.file.AssetInfos)
         {
-            var key = (info.TypeId, NameOf(file, info));
-            if (!index.TryGetValue(key, out var ids)) index[key] = ids = [];
+            if (info.TypeId != cls) continue;
+            var name = NameOf(file, info);
+            if (!index.TryGetValue(name, out var ids)) index[name] = ids = [];
             ids.Add(info.PathId);
         }
         foreach (var ids in index.Values) ids.Sort();
-        return _byContainer[container] = index;
+        return _byContainer[(container, cls)] = index;
     }
 
     public AssetAddress AddressOf(string container, AssetsFileInstance file, AssetFileInfo info, string name)
     {
-        var ids = IndexOf(container, file).GetValueOrDefault((info.TypeId, name)) ?? [];
+        var ids = IndexOf(container, file, info.TypeId).GetValueOrDefault(name) ?? [];
         var ordinal = ids.IndexOf(info.PathId);
         return new AssetAddress(container, ((AssetClassID)info.TypeId).ToString(), name,
             ordinal < 0 ? 0 : ordinal, info.PathId);
@@ -61,11 +66,11 @@ public sealed class ContainerIndex(AssetsContext context)
             return candidate;
         }
 
-        var ids = IndexOf(address.Container, file).GetValueOrDefault(((int)cls, address.Name));
+        var ids = IndexOf(address.Container, file, (int)cls).GetValueOrDefault(address.Name);
         if (ids is null || address.Ordinal >= ids.Count) return null;
         return file.file.GetAssetInfo(ids[address.Ordinal]);
     }
 
     private string NameOf(AssetsFileInstance file, AssetFileInfo info)
-        => AssetNaming.NameOf(context.Deserialize(file, info), (AssetClassID)info.TypeId);
+        => context.NameOf(file, info);
 }

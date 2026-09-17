@@ -105,9 +105,10 @@ public static class ReferenceWalker
         foreach (var info in file.file.AssetInfos)
         {
             if (info.TypeId != (int)cls) continue;
-            var field = context.Deserialize(file, info);
-            if (field is not null && string.Equals(field["m_Name"].AsString, name, comparison))
-                return info;
+            var named = cls == AssetClassID.Shader
+                ? context.Deserialize(file, info)?["m_Name"].AsString
+                : context.NameOf(file, info);
+            if (string.Equals(named, name, comparison)) return info;
         }
         return null;
     }
