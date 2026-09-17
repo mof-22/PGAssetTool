@@ -310,6 +310,28 @@ public partial class MainWindow : Window
         model.Editor.CaptureIcon(picture);
     }
 
+    /// Here rather than in the model because the clipboard belongs to the window.
+    private async void OnCopyForumPost(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel model) return;
+        var editor = model.Editor;
+
+        try
+        {
+            if (await editor.ForumPostAsync() is not { } post) { editor.Status = "Nothing selected."; return; }
+            if (Clipboard is not { } clipboard) { editor.Status = "There is no clipboard to copy to."; return; }
+
+            await clipboard.SetTextAsync(post);
+            editor.Status = post.Length > ForumPost.Limit
+                ? $"Copied — but it is {post.Length} characters, and Discord takes {ForumPost.Limit}. Shorten the description."
+                : "Copied the Discord post.";
+        }
+        catch (Exception ex)
+        {
+            editor.Status = $"{ex.Message}  (while copying the Discord post)";
+        }
+    }
+
     private void OnOptions(object? sender, RoutedEventArgs e)
         => new OptionsWindow { DataContext = DataContext }.ShowDialog(this);
 

@@ -361,6 +361,33 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// The selected workspace's post for the Discord forum, from the form as it reads now — typed and
+    /// not yet saved included, because what is on screen is what the author means to post.
+    ///
+    /// The game version is the installation open now, which is the one the author has just tried the
+    /// mod in; the one the workspace was extracted from is the fallback.
+    public async Task<string?> ForumPostAsync()
+    {
+        if (SelectedWorkspace is not { } workspace || WorkspaceView.Open(workspace.Directory) is not { } view)
+            return null;
+
+        string? version = null;
+        if (_bundles() is { Context.HasClassDatabase: true } bundles)
+        {
+            await _reading.WaitAsync();
+            try { version = await Task.Run(() => GameVersion.Read(bundles.Context, bundles.Game)); }
+            catch (Exception e) when (e is IOException or InvalidDataException) { }
+            finally { _reading.Release(); }
+        }
+
+        var manifest = view.Manifest with
+        {
+            Name = PackName, Author = PackAuthor, Version = PackVersion, Description = PackDescription,
+        };
+        return ForumPost.For(manifest, view.Files.Where(f => f.Edited).Select(f => f.Operation),
+            version, ForumPost.ToolVersion);
+    }
+
     /// Puts the form back to what is on disk, for after a change nobody wants to keep.
     [RelayCommand]
     private void RevertDetails() => ShowDetails(SelectedWorkspace, keepTyping: false);

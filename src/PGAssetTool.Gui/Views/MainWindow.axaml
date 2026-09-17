@@ -354,6 +354,8 @@
                             Margin="0,8,0,0">
                   <Button Content="Save" Command="{Binding ApplyDetailsCommand}" />
                   <Button Content="Revert" Command="{Binding RevertDetailsCommand}" />
+                  <Button Content="Copy Discord post" Click="OnCopyForumPost"
+                          ToolTip.Tip="Copies a post for the mod forum: name, author, version, description, skin, what it changes, and the game and tool versions. Add your own previews." />
                 </StackPanel>
 
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled">

@@ -956,6 +956,8 @@ internal static class SelfTest
                 return Fail("an edited file is listed below an untouched one");
             if (!marked) return Fail("an edit made outside the tool was not noticed");
 
+            if (TheForumPostSaysWhatChanged(model) is { } postProblem) return Fail(postProblem);
+
             // Alpha in these textures is usually emission rather than coverage, so an author can
             // ask for the colours alone. What comes back without an alpha channel has to be given
             // the original one, or turning that option on would flatten every mask in the game.
@@ -2413,6 +2415,41 @@ internal static class SelfTest
         return showing > 0
             ? $"the mask cleared {showing} pixels' worth of texture the model actually shows"
             : null;
+    }
+
+    /// The Discord post counts what is edited, names the game open now, and follows the form rather
+    /// than the manifest — what is on screen is what the author means to post.
+    private static string? TheForumPostSaysWhatChanged(MainViewModel model)
+    {
+        var editor = model.Editor;
+        var typed = editor.PackDescription;
+        editor.PackDescription = "Typed and not saved.";
+        try
+        {
+            var task = editor.ForumPostAsync();
+            if (!WaitWhile(() => !task.IsCompleted, 30_000)) return "the Discord post never came";
+            if (task.Result is not { } post) return "there was no Discord post for the selected workspace";
+
+            Console.WriteLine("editor   discord post:\n  " + post.Replace("\n", "\n  "));
+
+            var edited = editor.Files.Count(f => f.Edited && f.Operation == Core.Pack.PackOperations.ReplaceTexture);
+            var lines = post.Split('\n');
+            using var context = new AssetsContext();
+            var live = GameVersion.Read(context, model.Game!);
+
+            if (!lines[0].StartsWith(editor.PackName + " / ")) return $"the post opens '{lines[0]}'";
+            if (!lines.Contains("Typed and not saved.")) return "the post did not take the description as typed";
+            if (!lines.Any(l => l.StartsWith("Changes: ") && l.Contains($"{edited} texture")))
+                return $"the post does not count {edited} edited texture(s)";
+            if (!lines.Contains("GameVersion: " + live)) return $"the post does not name the game open now, {live}";
+            if (!lines.Contains("ToolVersion: " + Core.Pack.ForumPost.ToolVersion))
+                return "the post does not name the tool's version";
+            return null;
+        }
+        finally
+        {
+            editor.PackDescription = typed;
+        }
     }
 
     /// A model opened in the editor comes up wearing its own paint, and says which of the pictures

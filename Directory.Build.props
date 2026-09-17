@@ -4,6 +4,9 @@
     <!-- Debug symbols go inside each assembly rather than into a .pdb beside it, so a published
          build really is the single file it claims to be and a crash still names lines. -->
     <DebugType>embedded</DebugType>
+
+    <!-- The tool's own version, which a pack's forum post quotes. One number for every project. -->
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
 </Project>

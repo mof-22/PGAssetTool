@@ -152,6 +152,10 @@ fingerprint, which is the part worth checking: the name is what somebody typed, 
 what they hold. Publish yours and people can tell a genuine pack from a re-signed one. Yours is in
 **File → Options**.
 
+**Copy Discord post**, under the pack details, puts a post for the mod forum on the clipboard — the
+name, author and version, the description, which skin it is for, what it changes, and the game and
+tool versions — taken from the form as it reads, saved or not. Add your own previews.
+
 ---
 
 ## When something is wrong
