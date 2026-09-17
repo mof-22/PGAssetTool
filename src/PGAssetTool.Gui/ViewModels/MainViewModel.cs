@@ -163,7 +163,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<MemoryChoice> ReadMemoryChoices { get; } =
     [
-        new(0, "None — read from disk"), new(512, "512 MB"), new(1024, "1 GB"), new(2048, "2 GB"),
+        new(0, "None — read from disk"), new(1024, "1 GB"), new(2048, "2 GB"), new(4096, "4 GB"),
     ];
 
     /// The key packs are signed with, shown so an author can publish it: somebody who knows this
