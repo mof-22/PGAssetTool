@@ -3,7 +3,7 @@
         xmlns:vm="using:PGAssetTool.Gui.ViewModels"
         x:Class="PGAssetTool.Gui.Views.OptionsWindow"
         x:DataType="vm:MainViewModel"
-        Title="Options" Width="460" SizeToContent="Height"
+        Title="Options" Icon="/Assets/pgat.ico" Width="460" SizeToContent="Height"
         WindowStartupLocation="CenterOwner" CanResize="False">
 
   <!-- The way out is docked and the settings scroll, so a screen too short for the whole of it

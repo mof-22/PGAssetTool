@@ -7,6 +7,7 @@
         x:Class="PGAssetTool.Gui.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="{Binding Title}"
+        Icon="/Assets/pgat.ico"
         Width="1360" Height="820" MinWidth="900" MinHeight="560">
 
   <Window.Styles>
