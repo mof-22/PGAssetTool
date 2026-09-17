@@ -182,6 +182,11 @@ cannot find is an asset the game does not have — a skin added after the versio
 in the game any more even though the Manager still lists them as on. The tool notices when it opens
 and says so across the top; **Reapply everything** writes them into the new bundles.
 
+**The tool uses too much memory.** Two settings in **File → Options** trade speed for it. *Memory for
+reading the game faster* keeps the bundles you browse unpacked, up to 1GB by default; less makes
+selecting and extracting slower. *Rebuild one bundle at a time* makes installing and toggling about a
+third slower for about a third less memory.
+
 **Undo everything.** Remove every mod in the Manager. Every bundle goes back to the copy taken before
 the first write.
 
@@ -224,6 +229,8 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `--force` | Let `apply` go ahead anyway: back up a bundle that is already modified, or install a signed pack that was altered after it was built. |
 | `--fast` | Squeeze rebuilt bundles less: that part is about four times quicker and the bundles come out about a sixth larger. The game reads both at the same speed. |
 | `--rebuild` | Rebuild every bundle, including the ones already holding what they should. Those are normally left where they are. |
+| `--low-memory` | Rebuild one bundle at a time rather than four: about a third slower, about a third less memory at the peak. |
+| `--read-memory <MB>` | How much of the game `show` and `extract` may keep unpacked in memory (default 1024). Reading is several times quicker for it; `0` reads everything from disk. |
 
 ```
 pgassettool weapons crystal

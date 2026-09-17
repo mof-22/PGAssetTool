@@ -61,6 +61,9 @@ if (command is "-h" or "--help" or "help")
                                should. Those are normally left where they are.
           --low-memory         Rebuild one bundle at a time rather than four: about a third slower,
                                about a third less memory at the peak.
+          --read-memory <MB>   How much of the game show and extract may keep unpacked in memory
+                               (default 1024). Reading is several times quicker for it; 0 reads
+                               everything from disk.
           --opaque             Write textures with no alpha channel. Most of them keep emission
                                rather than transparency there, and an editor opens those as almost
                                invisible. An image brought back without an alpha channel keeps the
@@ -142,7 +145,12 @@ catch (Exception ex)
 
 // The game as shipped: show and extract are about the item, not about whatever mod is
 // installed over it. Anything that writes or verifies goes to the installation directly.
-using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf);
+// Unpacked into memory up to a limit, because reading them from disk a block at a time was most of
+// what resolving and extracting cost. See BundleUnpacker.
+using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
+{
+    UnpackBudget = (int.TryParse(Option("read-memory"), out var megabytes) ? megabytes : 1024) * 1024L * 1024,
+};
 
 // Loaded on demand: only the commands that name weapons pay for it.
 var weaponNames = new Lazy<GameCatalogs>(

@@ -372,8 +372,20 @@ The ones that are rebuilt are rebuilt side by side, four at a time, largest firs
 nothing: different files, different backups, their own corner of the staging directory. The limit is
 memory rather than cores — a bundle holds its whole decompressed self while it is worked on, and the
 largest in this game is 216MB — and each one already spreads its compression across every core.
+One at a time is offered for a machine short of memory (`ModApplier.AtOnce`): rebuilding the eight
+largest bundles in the game took 2.9 seconds with a 1.25GB peak four at a time, and 3.9 seconds with
+800MB one at a time. What is written is the same either way.
 A pack is opened once for the whole run and read under a lock, because several bundles may be drawing
 from it at the same time.
+
+The edited bundle's entries are laid end to end straight into the buffer its blocks are cut from.
+Writing the whole bundle out uncompressed into memory and reading that back to pack it held the
+bundle five or six times over; dropping it took a five-pack install's peak from 950MB to 510MB.
+
+Two things were tried here and left out. Decompressing a bundle whole before editing it, rather than
+letting the library decode blocks as they are read, saved about a fifth of the time on d_c_f and
+doubled the peak, before four are rebuilt at once. And writing bundles uncompressed was no quicker than
+`Faster` for bundles two to three times the size.
 
 Writing one back out is `BundlePacker`, not the library's `Pack`. AssetsTools.NET's LZ4 is LZ4HC
 through a managed port that manages about 28MB/s, and it was seventeen of those nineteen remaining
@@ -415,6 +427,26 @@ disagree are worse than either.
 
 **`BundleSet` opens each bundle once.** Asking twice leaves a handle that disposing does not close,
 and the next write to that bundle fails with the file in use.
+
+**Names are read off the file, not off the object.** `AssetsContext.NameOf` steps over whatever
+sits ahead of `m_Name` — nothing for most classes, two pointers and a flag for a MonoBehaviour, a
+count of component pointers for a GameObject — and reads the string. Finding a texture by name had
+meant deserializing every object in its bundle, pixels and all: extracting #16 allocated 17GB to write
+fifteen files, and took 7.4 seconds where it now takes about one. Checked against the whole read for
+all 1,627,889 objects in the game's bundles, none differ. A Shader keeps its name elsewhere and is read
+whole, as is anything whose name sits behind a field only reading it would size.
+
+**AssetsTools' quick lookup and template cache are turned on.** Both are off unless asked for:
+without the first, finding an object by path id walks the file's whole table.
+
+**Bundles are unpacked into memory, up to a limit.** The library reads an LZ4 bundle a block at a time
+as bytes are asked for, and a reader jumps about — a name, a parent transform, a material — so the
+same 128KB blocks were decoded again and again. `BundleUnpacker` decodes a bundle whole, on every
+core, and hands the library an uncompressed copy: resolving #16 went from 110ms to 13ms, finding
+which way it faces from 270ms to 13ms, extracting it from 1.0s to 0.4s. What it costs is memory, so
+`BundleSet.UnpackBudget` caps it — 1GB unless Options says otherwise — and bundles beyond it are read
+from disk as before. An unpacked bundle holds no file open, which also means browsing it never
+stands in the way of a write. Applying keeps reading from disk (see *Installing*).
 
 **`MeshRenderer` fills rows in parallel bands, and scans each row wider than the triangle.** One
 thread over every pixel was 75–90ms a frame at 2400x1500 with a model filling half the pane. Bands

@@ -33,6 +33,9 @@ public sealed class AssetsContext : IDisposable
 
     public BundleFileInstance OpenBundle(string path) => _manager.LoadBundleFile(path, true);
 
+    /// A bundle already in memory, filed under the path it came from.
+    public BundleFileInstance OpenBundle(Stream stream, string path) => _manager.LoadBundleFile(stream, path, false);
+
     public AssetsFileInstance OpenBundleEntry(BundleFileInstance bundle, int index)
         => _manager.LoadAssetsFileFromBundle(bundle, index, false);
 

@@ -155,6 +155,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public int AtOnce => LighterApplies ? 1 : 4;
 
+    /// How many megabytes of bundles browsing may keep unpacked. Takes effect when the game is next
+    /// read. See BundleUnpacker.
+    [ObservableProperty] private int _readMemory = 1024;
+
+    partial void OnReadMemoryChanged(int value) => Remember();
+
+    public IReadOnlyList<MemoryChoice> ReadMemoryChoices { get; } =
+    [
+        new(0, "None — read from disk"), new(512, "512 MB"), new(1024, "1 GB"), new(2048, "2 GB"),
+    ];
+
     /// The key packs are signed with, shown so an author can publish it: somebody who knows this
     /// can tell a pack you built from one re-signed by whoever altered it.
     public string AuthorFingerprint
@@ -252,6 +263,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ProtectPacks = _settings.ProtectPacks;
         FasterApplies = _settings.FasterApplies;
         LighterApplies = _settings.LighterApplies;
+        ReadMemory = _settings.ReadMemory;
         MaskUnusedTextures = _settings.MaskUnusedTextures;
         Manager.Packing = Packing;
         _loading = false;
@@ -274,7 +286,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // somebody else's installed work without either of them seeing it. It also stops a
                 // protected pack being lifted straight back out of the game it went into, which is
                 // the weaker reason. Mods are checked in the game.
-                _bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf);
+                _bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
+                {
+                    UnpackBudget = ReadMemory * 1024L * 1024,
+                };
                 _catalogs = GameCatalogs.Load(_bundles, string.IsNullOrEmpty(Language) ? _settings.Language : Language);
                 _resolver = new WeaponResolver(_bundles, _catalogs);
             });
@@ -848,7 +863,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
-            FasterApplies = FasterApplies, LighterApplies = LighterApplies, MaskUnusedTextures = MaskUnusedTextures,
+            FasterApplies = FasterApplies, LighterApplies = LighterApplies, ReadMemory = ReadMemory,
+            MaskUnusedTextures = MaskUnusedTextures,
         };
         try { _settings.Save(SettingsHome); }
         catch (IOException) { }
@@ -1419,6 +1435,11 @@ public sealed record WeaponListItem(WeaponRecord Record, string? Translated)
 }
 
 /// One of the game's own translation tables, named in its own script.
+public sealed record MemoryChoice(int Megabytes, string Label)
+{
+    public override string ToString() => Label;
+}
+
 public sealed record LanguageOption(string Bundle, string Name)
 {
     public override string ToString() => Name;

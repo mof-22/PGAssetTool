@@ -120,6 +120,17 @@
 
         <StackPanel Spacing="6">
           <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyReadMemory" Classes="why" Content="?" />
+            <TextBlock Text="Memory for reading the game faster" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <ComboBox ItemsSource="{Binding ReadMemoryChoices}" SelectedValue="{Binding ReadMemory}"
+                    SelectedValueBinding="{Binding Megabytes}" HorizontalAlignment="Stretch" />
+          <TextBlock Classes="why" IsVisible="{Binding #WhyReadMemory.IsChecked}"
+                     Text="Bundles are compressed, and read from disk a piece at a time they are decompressed again at every jump from one part of the file to another. Kept unpacked in memory instead, selecting a weapon took about a tenth of the time — resolving #16 went from 110ms to 13ms, and working out which way it faces from 270ms to 13ms — and extracting one took under half. The cost is memory: the bundles a weapon lives in are 10 to 50MB unpacked, and one shared by many weapons is 216MB. Bundles beyond the limit are read from disk as before. Takes effect the next time the game is read (Ctrl+R)." />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+          <DockPanel>
             <ToggleButton DockPanel.Dock="Right" Name="WhyLighter" Classes="why" Content="?" />
             <CheckBox Content="Rebuild one bundle at a time, to use less memory" IsChecked="{Binding LighterApplies}" />
           </DockPanel>

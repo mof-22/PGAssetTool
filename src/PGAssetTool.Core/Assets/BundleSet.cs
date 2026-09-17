@@ -66,9 +66,28 @@ public sealed class BundleSet : IDisposable
     private readonly Dictionary<string, BundleFileInstance> _opened = new(StringComparer.OrdinalIgnoreCase);
 
     private BundleFileInstance Bundle(string bundle)
-        => _opened.TryGetValue(bundle, out var already)
-            ? already
-            : _opened[bundle] = _context.OpenBundle(PathOf(bundle));
+    {
+        if (_opened.TryGetValue(bundle, out var already)) return already;
+
+        var path = PathOf(bundle);
+        if (UnpackBudget > _unpacked && BundleUnpacker.Unpack(path, UnpackBudget - _unpacked) is { } unpacked)
+        {
+            _unpacked += unpacked.Length;
+            return _opened[bundle] = _context.OpenBundle(unpacked, path);
+        }
+
+        return _opened[bundle] = _context.OpenBundle(path);
+    }
+
+    /// How many bytes of bundles this reader may hold unpacked in memory; see BundleUnpacker. What
+    /// does not fit is read from disk a block at a time, as everything was before. Zero unpacks
+    /// nothing.
+    public long UnpackBudget { get; init; }
+
+    private long _unpacked;
+
+    /// How much of the budget is in use.
+    public long Unpacked => _unpacked;
 
     /// The first serialized file in a bundle. Every content bundle here holds exactly one.
     public AssetsFileInstance Open(string bundle)
