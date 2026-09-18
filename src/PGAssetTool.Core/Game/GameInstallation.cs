@@ -71,7 +71,9 @@ public sealed class GameInstallation
             ?? throw new DirectoryNotFoundException(
                 "Could not locate the game through Steam. Pass the install directory explicitly."));
 
-    public string ManifestPath => Path.Combine(BundlesDirectory, "embedded_asset_bundles.json");
+    public const string ManifestFileName = "embedded_asset_bundles.json";
+
+    public string ManifestPath => Path.Combine(BundlesDirectory, ManifestFileName);
 
     /// The name→hash manifest the game ships. Its contents change whenever any bundle is updated,
     /// which is what drives incremental re-indexing.

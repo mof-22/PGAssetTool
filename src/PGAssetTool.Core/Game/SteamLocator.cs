@@ -5,8 +5,6 @@ namespace PGAssetTool.Core.Game;
 /// Locates Steam libraries and the installed game directory on Windows.
 public static class SteamLocator
 {
-    public const string DefaultGameFolderName = "<the game's folder>";
-
     public static string? FindSteamRoot()
     {
         foreach (var (hive, key) in new[]
@@ -45,16 +43,37 @@ public static class SteamLocator
         }
     }
 
-    public static string? FindGameDirectory(string folderName = DefaultGameFolderName)
+    /// The first installed Steam game laid out the way this tool reads: a `*_Data` directory whose
+    /// bundle cache carries the manifest the game keeps of its bundles.
+    ///
+    /// Recognised by that shape rather than by its folder name, so the tool does not have to carry
+    /// the name — and the shape is what GameInstallation.Open would refuse anything without anyway.
+    public static string? FindGameDirectory()
     {
         var root = FindSteamRoot();
         if (root is null) return null;
 
         foreach (var apps in EnumerateLibraryFolders(root).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var candidate = Path.Combine(apps, "common", folderName);
-            if (Directory.Exists(candidate)) return candidate;
+            var common = Path.Combine(apps, "common");
+            if (!Directory.Exists(common)) continue;
+
+            foreach (var game in Directory.EnumerateDirectories(common).Order(StringComparer.OrdinalIgnoreCase))
+                if (IsLaidOutForThis(game)) return game;
         }
         return null;
+    }
+
+    public static bool IsLaidOutForThis(string directory)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(directory, "*_Data").Any(data => File.Exists(Path.Combine(
+                data, "StreamingAssets", "Cache", "bundles", GameInstallation.ManifestFileName)));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }

@@ -196,8 +196,8 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     ///
     /// Every weapon's prefab holds the player's arms as well as the gun. They are the same class in
     /// the same bundle, and the name is no help: the early weapons' meshes are not named after the
-    /// weapon at all — #1 is 'pixlgun_mesh', #5 Heavy Machine Gun is 'Machinegun_Mesh',
-    /// #30 Guerilla Rifle is 'SVD_2_mesh' — while the arms are named the same in all of them, which
+    /// weapon at all — #1's is 'pixlgun_mesh', #5 Heavy Machine Gun's is 'Machinegun_Mesh',
+    /// #30 Guerilla Rifle's is 'SVD_2_mesh' — while the arms are named the same in all of them, which
     /// is a rule about the arms rather than about the weapon and would break the moment it moved.
     ///
     /// So it is decided by what each mesh is drawn with: the one wearing a texture that belongs to

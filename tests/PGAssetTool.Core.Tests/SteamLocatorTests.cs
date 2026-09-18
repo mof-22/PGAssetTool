@@ -9,6 +9,22 @@ public class SteamLocatorTests : IDisposable
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
     [Fact]
+    public void TheGameIsKnownByItsBundleManifestNotItsName()
+    {
+        var game = Path.Combine(_root, "Anything At All");
+        var bundles = Path.Combine(game, "Whatever_Data", "StreamingAssets", "Cache", "bundles");
+        Directory.CreateDirectory(bundles);
+        Assert.False(SteamLocator.IsLaidOutForThis(game));
+
+        File.WriteAllText(Path.Combine(bundles, GameInstallation.ManifestFileName), "[]");
+        Assert.True(SteamLocator.IsLaidOutForThis(game));
+
+        var other = Path.Combine(_root, "Some Other Unity Game");
+        Directory.CreateDirectory(Path.Combine(other, "Other_Data", "StreamingAssets"));
+        Assert.False(SteamLocator.IsLaidOutForThis(other));
+    }
+
+    [Fact]
     public void EnumerateLibraryFolders_ReadsPathsFromVdf()
     {
         var extra = Path.Combine(_root, "Library2");
