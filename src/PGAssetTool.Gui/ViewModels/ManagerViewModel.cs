@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using PGAssetTool.Core.Settings;
 using PGAssetTool.Core.Game;
 using Avalonia.Media.Imaging;
 using PGAssetTool.Core.Mods;
@@ -643,7 +644,7 @@ public sealed partial class ManagerViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            Status = $"{ex.Message}  (while changing the game)";
+            Status = ErrorLog.Said(ex, "changing the game");
         }
         finally
         {

@@ -107,6 +107,8 @@
                      Text="Signs a built pack with a key kept beside this tool, and keeps it from opening as a zip. Anyone who alters one afterwards shows up as having done so. It stops a casual look inside and nothing more — this tool's own source says how the scrambling works — and each pack can override this in the editor." />
           <TextBlock Text="{Binding AuthorFingerprint}" Opacity="0.55" FontSize="11"
                      FontFamily="Consolas, Menlo, monospace" TextWrapping="Wrap" />
+          <TextBlock Classes="why" Opacity="0.8"
+                     Text="Keep a copy of author.key, beside settings.json, somewhere safe. It is what your fingerprint is: lose it and packs you build afterwards are signed by a new key, and nothing can show they are the same author's." />
         </StackPanel>
 
         <StackPanel Spacing="6">

@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using PGAssetTool.Core.Settings;
 using PGAssetTool.Gui.ViewModels;
 
 namespace PGAssetTool.Gui.Views;
@@ -45,7 +46,7 @@ public partial class OptionsWindow : Window
         }
         catch (Exception ex)
         {
-            model.Status = $"{ex.Message}  (while choosing the game's folder)";
+            model.Status = ErrorLog.Said(ex, "choosing the game's folder");
         }
     }
 }

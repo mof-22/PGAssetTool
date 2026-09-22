@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using AssetsTools.NET.Extra;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using PGAssetTool.Core.Settings;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Pack;
@@ -246,7 +247,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = $"{ex.Message}  (while saving the pack details)";
+            Status = ErrorLog.Said(ex, "saving the pack details");
         }
     }
 
@@ -357,7 +358,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = $"{ex.Message}  (while saving the pack details)";
+            Status = ErrorLog.Said(ex, "saving the pack details");
         }
     }
 
@@ -519,7 +520,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = $"{ex.Message}  (while saving the icon)";
+            Status = ErrorLog.Said(ex, "saving the icon");
         }
     }
 
@@ -629,7 +630,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Edited.Clear($"{ex.Message}  (while comparing against the game)");
+            Edited.Clear(ErrorLog.Said(ex, "comparing against the game"));
         }
     }
 
@@ -791,7 +792,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            Status = $"{ex.Message}  (while putting a texture on the model)";
+            Status = ErrorLog.Said(ex, "putting a texture on the model");
         }
     }
 

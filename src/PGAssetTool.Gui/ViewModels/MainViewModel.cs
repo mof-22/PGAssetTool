@@ -248,6 +248,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         // Preferences are read before the game, so the first catalog load is already in the right
         // language rather than being read once in English and then again. Nothing is resolved yet,
         // so the change handlers below find nothing to rebuild.
+        ErrorLog.Home = SettingsHome;
         _settings = ToolSettings.Load(SettingsHome);
         _loading = true;
         Language = _settings.Language;
@@ -336,6 +337,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             Manager.Refresh();
             UpdateNotice = UpdateNoticeFor(_installation!, _bundles!);
+            if (ErrorLog.UntoldCrash() is { } crash)
+            {
+                CrashReport = crash;
+                CrashNotice = $"The last session closed unexpectedly. What happened is written in {Path.GetFileName(crash)} — sending that file with a report is what makes it fixable.";
+            }
             Status = $"{_catalogs.Items.Count} weapons";
             OnPropertyChanged(nameof(GameDescribed));
         }
@@ -711,7 +717,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Names what was being done, because a bare exception message says nothing about which of the
     /// several things that can fail here did — "Value cannot be null" on its own is unactionable.
     private static string Describe(Exception ex, string what)
-        => $"{ex.Message}  (while {what})";
+        => ErrorLog.Said(ex, what);
 
     /// Long jobs share the one reader and say so while they run.
     private async Task RunExclusively(string what, Func<Task> work)
@@ -1389,6 +1395,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private void DismissUpdate() => UpdateNotice = null;
+
+    /// Said across the top when the last session ended in a crash, once, naming the report it left.
+    /// Nobody reads a log folder unprompted, and the moment after a crash is when somebody is
+    /// willing to send one.
+    [ObservableProperty] private string? _crashNotice;
+
+    /// The report the notice is about, for the button that shows it.
+    public string? CrashReport { get; private set; }
+
+    [RelayCommand]
+    private void DismissCrash() => CrashNotice = null;
+
+    [RelayCommand]
+    private void OpenLogs()
+    {
+        var folder = ErrorLog.Folder;
+        Directory.CreateDirectory(folder);
+        var target = CrashNotice is not null && CrashReport is { } report && File.Exists(report)
+            ? $"/select,\"{report}\""
+            : $"\"{folder}\"";
+        System.Diagnostics.Process.Start("explorer.exe", target);
+    }
 
     /// Worked out on opening the game, not on being asked: after an update nothing else about the
     /// tool looks wrong. See GameUpdate.

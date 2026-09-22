@@ -188,6 +188,8 @@
         <MenuItem Header="Open _output folder" Click="OnOpenOutput" />
         <Separator />
         <MenuItem Header="_Options…" Click="OnOptions" InputGesture="Ctrl+OemComma" />
+        <MenuItem Header="Open the _log folder" Command="{Binding OpenLogsCommand}"
+                  ToolTip.Tip="Where errors and crash reports are written. Send these with a bug report." />
         <Separator />
         <MenuItem Header="E_xit" Click="OnExit" InputGesture="Alt+F4" />
       </MenuItem>
@@ -232,6 +234,18 @@
           <Button Content="Not now" Command="{Binding DismissUpdateCommand}" />
         </StackPanel>
         <TextBlock Text="{Binding UpdateNotice}" TextWrapping="Wrap" VerticalAlignment="Center" />
+      </DockPanel>
+    </Border>
+
+    <!-- Once, after a session that ended in a crash: the report it left is what to send. -->
+    <Border DockPanel.Dock="Top" Background="#3b1616" Padding="12,8"
+            IsVisible="{Binding CrashNotice, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0">
+          <Button Content="Show the report" Command="{Binding OpenLogsCommand}" />
+          <Button Content="Dismiss" Command="{Binding DismissCrashCommand}" />
+        </StackPanel>
+        <TextBlock Text="{Binding CrashNotice}" TextWrapping="Wrap" VerticalAlignment="Center" />
       </DockPanel>
     </Border>
 

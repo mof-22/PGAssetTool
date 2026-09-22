@@ -14,6 +14,21 @@ internal static class Program
         // startup path works without a person sitting in front of it.
         if (args.Contains("--self-test")) return SelfTest.Run();
 
+        // Whatever gets this far takes the window down, and until now took with it everything that
+        // said why. The report is what somebody can be asked to send; the next start points at it.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            Core.Settings.ErrorLog.Crash(
+                e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString()),
+                "an error nothing caught");
+
+        // A task nobody awaited fails without a word. It does not take the window down, so it is
+        // only written down.
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Core.Settings.ErrorLog.Record(e.Exception, "a background task nobody waited for");
+            e.SetObserved();
+        };
+
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

@@ -4,6 +4,7 @@ using Avalonia.Platform;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using PGAssetTool.Core.Settings;
 using PGAssetTool.Core.Export.Meshes;
 using PGAssetTool.Core.Preview;
 
@@ -222,7 +223,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     {
         if (Sound is not { } sound) return;
         try { Audio.Speaker.Play(sound.ToWave(), TimeSpan.FromSeconds(sound.Seconds), sound); }
-        catch (Exception ex) { Caption = $"{ex.Message}  (while playing the clip)"; }
+        catch (Exception ex) { Caption = ErrorLog.Said(ex, "playing the clip"); }
     }
 
     [RelayCommand]

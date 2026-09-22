@@ -100,10 +100,30 @@ internal static class SelfTest
         HashSet<string>? wasInstalled = null;
         HashSet<string>? wasEnabled = null;
 
+        // The author's log folder as it stands. This run reports errors on purpose — a refused pack,
+        // a missing file — and every one of them is written to a log; they belong in its own.
+        var theirLogs = Path.Combine(ModStore.DefaultHome(), PGAssetTool.Core.Settings.ErrorLog.FolderName);
+        string LogsNow() => Directory.Exists(theirLogs)
+            ? string.Join("\n", Directory.EnumerateFiles(theirLogs).Order().Select(f => $"{f} {new FileInfo(f).Length}"))
+            : "";
+        var theirLogsBefore = LogsNow();
+
+        // A crash report waiting from a session that never came back, as a crash leaves it. Opening
+        // must say so, once, and name it.
+        Directory.CreateDirectory(Path.Combine(scratch, PGAssetTool.Core.Settings.ErrorLog.FolderName));
+        var planted = Path.Combine(scratch, PGAssetTool.Core.Settings.ErrorLog.FolderName, "crash-20260101-000000.txt");
+        File.WriteAllText(planted, "a crash that happened before this run");
+
         try
         {
             Settle(model.LoadAsync(), "opening the game");
             Console.WriteLine($"status   {model.Status}");
+
+            Console.WriteLine($"crash    notice: {model.CrashNotice ?? "(none)"}");
+            if (model.CrashNotice is not { } notice || !notice.Contains(Path.GetFileName(planted)))
+                return Fail("a crash report left by the last session was not announced");
+            if (PGAssetTool.Core.Settings.ErrorLog.UntoldCrash() is not null)
+                return Fail("the same crash report would be announced again at the next start");
 
             // Before anything, not after. This test writes to the game for real, and it used to ask
             // this question only once it reached the manager — by which point it had already
@@ -1357,6 +1377,11 @@ internal static class SelfTest
             Console.WriteLine("status   the author's settings file: "
                 + (theirPreferences == nowPreferences ? "untouched" : "REWRITTEN"));
             if (theirPreferences != nowPreferences) return Fail($"this run rewrote {theirSettings}");
+
+            var ownErrors = Path.Combine(scratch, PGAssetTool.Core.Settings.ErrorLog.FolderName,
+                PGAssetTool.Core.Settings.ErrorLog.ErrorsFileName);
+            Console.WriteLine($"status   errors this run logged: {(File.Exists(ownErrors) ? File.ReadAllLines(ownErrors).Count(l => l.Contains("  while ")) : 0)}, in its own folder");
+            if (LogsNow() != theirLogsBefore) return Fail($"this run wrote into {theirLogs}");
 
             return 0;
         }

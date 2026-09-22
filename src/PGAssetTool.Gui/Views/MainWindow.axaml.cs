@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
+using PGAssetTool.Core.Settings;
 using PGAssetTool.Core.Pack;
 using PGAssetTool.Core.Preview;
 using PGAssetTool.Gui.ViewModels;
@@ -328,7 +329,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            editor.Status = $"{ex.Message}  (while copying the Discord post)";
+            editor.Status = ErrorLog.Said(ex, "copying the Discord post");
         }
     }
 
