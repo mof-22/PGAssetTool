@@ -411,11 +411,22 @@ if (command == "extract")
         MaskUnused = !args.Contains("--whole"),
     };
     var asWorkspace = args.Contains("--workspace");
-    var export = asWorkspace
-        ? exporter.ExportAsWorkspace(tree, outputRoot,
-            Option("author") ?? "",
-            bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null)
-        : exporter.Export(tree, outputRoot);
+    WeaponExport export;
+    try
+    {
+        export = asWorkspace
+            ? exporter.ExportAsWorkspace(tree, outputRoot,
+                Option("author") ?? "",
+                bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null)
+            : exporter.Export(tree, outputRoot);
+    }
+    catch (InvalidOperationException refused)
+    {
+        // A bundle something else modded, which this installation has no original of. See
+        // WeaponExporter.Refuse.
+        Console.Error.WriteLine(refused.Message);
+        return 1;
+    }
 
     Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
     Console.WriteLine($"  -> {export.Directory}");

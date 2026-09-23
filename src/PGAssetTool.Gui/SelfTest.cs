@@ -1122,6 +1122,8 @@ internal static class SelfTest
 
             if (model.Manager.Mods.Count == 0) return Fail("the manager saw nothing installed");
 
+            if (AnotherCopysModsCannotBeExtracted(model, installed) is { } borrowed) return Fail(borrowed);
+
             // The pack's picture has to survive the whole way: chosen at extraction, written into
             // the pack even though it is not one of the files being replaced, and read back out
             // where the mod is listed. Every step of that is somewhere it could quietly go missing.
@@ -2474,6 +2476,54 @@ internal static class SelfTest
         finally
         {
             editor.PackDescription = typed;
+        }
+    }
+
+    /// A bundle modded by another copy of the tool cannot be extracted through this one.
+    ///
+    /// Two copies in two folders keep two sets of backups. From the second, a bundle the first
+    /// modded is simply what the game holds now — so an extract there would write somebody else's
+    /// work out as the game's own, and a pack built from it would carry it under another name. A
+    /// reader with no backups of its own is exactly that second copy, and this run has just
+    /// installed a mod to give it something to find.
+    private static string? AnotherCopysModsCannotBeExtracted(
+        MainViewModel model, IReadOnlyList<Core.Mods.InstalledMod> installed)
+    {
+        var touched = installed.SelectMany(m => m.TouchedBundles.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (touched.Count == 0) return "nothing installed by this run names a bundle";
+
+        // This copy kept the originals, so it answers for every one of them.
+        if (model.Reader is not { } reader) return "there is no reader to ask";
+        if (reader.Altered(touched) is { Count: > 0 } mine)
+            return $"this copy cannot read the game as shipped: {string.Join(", ", mine)}";
+
+        using var elsewhere = new BundleSet(model.Game!);
+        var altered = elsewhere.Altered(touched);
+        Console.WriteLine($"shipped  {touched.Count} bundle(s) written to; a copy without the backups "
+            + $"calls {altered.Count} of them altered");
+        if (altered.Count == 0) return "a reader with no backups saw nothing altered in a modded game";
+
+        var weapon = model.Weapons.FirstOrDefault(w =>
+            installed.Any(m => m.Subject?.Number == w.Record.GameNumber));
+        if (weapon is null) return "no installed mod's weapon is in the list";
+
+        var temp = Directory.CreateTempSubdirectory("pgassettool-selftest-shipped").FullName;
+        try
+        {
+            var catalogs = Core.Catalog.GameCatalogs.Load(elsewhere);
+            var tree = new Core.Weapons.WeaponResolver(elsewhere, catalogs).Resolve(weapon.Record);
+            new Core.Export.WeaponExporter(elsewhere) { MaskUnused = true }.Export(tree, temp);
+            return $"#{weapon.Record.GameNumber} extracted through a reader that cannot tell the game's own bytes";
+        }
+        catch (InvalidOperationException refused)
+        {
+            Console.WriteLine($"shipped  #{weapon.Record.GameNumber} refused: {refused.Message[..Math.Min(90, refused.Message.Length)]}…");
+            return null;
+        }
+        finally
+        {
+            Directory.Delete(temp, recursive: true);
         }
     }
 

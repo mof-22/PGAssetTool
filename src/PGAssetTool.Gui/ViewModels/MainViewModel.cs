@@ -512,6 +512,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var directory = Path.Combine(WorkspaceRoot, "assets");
             var written = await Task.Run(() =>
             {
+                // The same refusal a whole weapon gets: a bundle another copy of the tool modded is,
+                // from here, just what the game holds now. See BundleSet.ReadsAsShipped.
+                if (_bundles!.Altered([node.Bundle]) is { Count: > 0 })
+                    throw new InvalidOperationException(
+                        $"'{node.Bundle}' has been changed by something other than this copy of the tool, which has "
+                        + "no original to read instead. Extracting would write that change out as the game's own.");
+
                 if (AssetPreview.Locate(_bundles!, node.Bundle, node.Class.Value, node.PathId, node.Label)
                     is not var (file, info)) return null;
 

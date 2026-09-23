@@ -1,6 +1,7 @@
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Game;
+using PGAssetTool.Core.Mods;
 
 namespace PGAssetTool.Core.Assets;
 
@@ -54,6 +55,36 @@ public sealed class BundleSet : IDisposable
             ? original
             : live.Path;
     }
+
+    /// Whether what this reader hands back for a bundle is the game as it shipped: either the file
+    /// still hashes to what the game's own manifest records for it, or something wrote to it and
+    /// this copy of the tool kept the original.
+    ///
+    /// The answer is no when another copy of the tool — another folder, another `PGAssetTool-data` —
+    /// installed a mod into this game. Its backups are in its own data folder, so from here the
+    /// modded bytes are all there is, and nothing about them says they are not the game's own. That
+    /// is what stops an extract: see `Altered`.
+    ///
+    /// Asked once per bundle and kept, because the answer costs an MD5 over the whole file.
+    public bool ReadsAsShipped(string bundle)
+    {
+        if (_shipped.TryGetValue(bundle, out var already)) return already;
+
+        var hash = HashOf(bundle);
+        if (Game.Resolve(bundle, hash) is not { } live) return _shipped[bundle] = false;
+
+        var kept = _originals?.Invoke(live.Cache, bundle, hash);
+        return _shipped[bundle] = (kept is not null && File.Exists(kept))
+            || BundleIntegrity.IsPristine(live.Path, hash);
+    }
+
+    private readonly Dictionary<string, bool> _shipped = new(StringComparer.OrdinalIgnoreCase);
+
+    /// Which of these bundles this reader cannot answer for, in the order given.
+    public IReadOnlyList<string> Altered(IEnumerable<string> bundles)
+        => bundles.Where(b => b.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(b => _hashes.ContainsKey(b) && !ReadsAsShipped(b))
+            .ToList();
 
     /// Every bundle opened through here, so each is opened exactly once.
     ///

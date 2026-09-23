@@ -59,6 +59,7 @@ public sealed class WeaponExporter(BundleSet bundles)
     public WeaponExport Export(WeaponTree tree, string outputRoot)
     {
         var chosen = Chosen(tree);
+        Refuse(Altered(tree, chosen));
         var directory = Pack.Workspace.Free(Path.Combine(outputRoot,
             // Numbered where the kind is numbered, which is weapons and nothing else: the number is
             // what a player calls a weapon by, and a hat has only its id.
@@ -147,6 +148,50 @@ public sealed class WeaponExporter(BundleSet bundles)
         Dress(assets, tree, chosen);
 
         return new WeaponExport(directory, assets, skipped, notes);
+    }
+
+    /// Every bundle this export would read an asset out of.
+    private static IEnumerable<string> Reads(WeaponTree tree, WeaponSkinView? chosen)
+    {
+        if (tree.PrefabBundle is { } prefab) yield return prefab;
+        foreach (var node in tree.PrefabAssets) yield return node.Bundle;
+        foreach (var related in tree.Related) yield return related.Bundle ?? "";
+        if (tree.Icon?.Container is { } icon) yield return icon;
+
+        // A skin's own bundles only when it is the skin being written out; the rest are listed in
+        // the tree and never read.
+        foreach (var skin in chosen is null ? [] : new[] { chosen })
+        {
+            if (skin.Model is { } model) yield return model.Bundle;
+            foreach (var material in skin.Materials)
+            {
+                yield return material.Bundle;
+                foreach (var texture in material.Textures) yield return material.Locate(texture).Bundle;
+            }
+        }
+    }
+
+    private IReadOnlyList<string> Altered(WeaponTree tree, WeaponSkinView? chosen)
+        => bundles.Altered(Reads(tree, chosen));
+
+    /// Refuses to write out a bundle this copy of the tool cannot show as the game's own.
+    ///
+    /// A second copy of the tool, in another folder, keeps its backups in its own data folder. From
+    /// here a bundle it modded is simply what the game holds now, and an extract would write
+    /// somebody else's work out as the game's own — which a pack built from it would then carry, to
+    /// whoever installed it, under this author's name. The bundle's real bytes are still recorded by
+    /// the game itself, so this is caught rather than guessed at.
+    private static void Refuse(IReadOnlyList<string> altered)
+    {
+        if (altered.Count == 0) return;
+
+        throw new InvalidOperationException(
+            $"{(altered.Count == 1 ? "A bundle this item is in has" : $"{altered.Count} bundles this item is in have")} "
+            + "been changed by something other than this copy of the tool, which has no original to read instead: "
+            + string.Join(", ", altered.Take(4)) + (altered.Count > 4 ? ", …" : "")
+            + ". Extracting would write that change out as the game's own. Take the mods out with "
+            + "whichever copy of the tool installed them, or restore the game's files (Steam's integrity check), "
+            + "and try again.");
     }
 
     /// The skin the game shows once a player has ever changed skins on this weapon.
