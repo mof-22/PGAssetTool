@@ -737,6 +737,26 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// The last directory written to, so the view can offer to open it.
     [ObservableProperty] private string? _lastExport;
 
+    /// Opens the workspace being worked on, in Explorer.
+    ///
+    /// The selected one first: the reason to open a folder is almost always to put a file into the
+    /// one on the screen, and after a session of editing, the last extraction is whichever happened
+    /// to be made most recently rather than the one anybody is looking at.
+    [RelayCommand]
+    private void OpenWorkspace()
+    {
+        var path = Editor.SelectedWorkspace?.Directory ?? LastExport ?? WorkspaceRoot;
+        try
+        {
+            Directory.CreateDirectory(path);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Status = ErrorLog.Said(ex, "opening the workspace folder");
+        }
+    }
+
     /// Names what was being done, because a bare exception message says nothing about which of the
     /// several things that can fail here did — "Value cannot be null" on its own is unactionable.
     private static string Describe(Exception ex, string what)

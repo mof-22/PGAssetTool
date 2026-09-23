@@ -484,7 +484,7 @@ internal static class SelfTest
                 + $" (on a window nobody has opened)");
 
             foreach (var gesture in new[]
-                     { "Ctrl+E", "Ctrl+Shift+E", "Ctrl+F", "Ctrl+R", "F5", "Ctrl+Shift+R",
+                     { "Ctrl+E", "Ctrl+Shift+E", "Ctrl+F", "Ctrl+O", "Ctrl+R", "F5", "Ctrl+Shift+R",
                        "Ctrl+D1", "Ctrl+D2", "Ctrl+D3" })
             {
                 var binding = registered.FirstOrDefault(b => b.Gesture?.ToString() == gesture);

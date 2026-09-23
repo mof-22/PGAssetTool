@@ -166,6 +166,7 @@
     <KeyBinding Gesture="Ctrl+E" Command="{Binding ExtractWeaponCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+E" Command="{Binding ExtractSelectedCommand}" />
     <KeyBinding Gesture="Ctrl+F" Command="{Binding FocusSearchCommand}" />
+    <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenWorkspaceCommand}" />
     <KeyBinding Gesture="Ctrl+R" Command="{Binding ReloadCommand}" />
     <KeyBinding Gesture="F5" Command="{Binding RescanWorkspacesCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding ToggleReplaceableOnlyCommand}" />
@@ -185,7 +186,8 @@
                   InputGesture="Ctrl+E" />
         <MenuItem Header="Extract _selected asset" Command="{Binding ExtractSelectedCommand}"
                   InputGesture="Ctrl+Shift+E" />
-        <MenuItem Header="Open _output folder" Click="OnOpenOutput" />
+        <MenuItem Header="Open _output folder" Command="{Binding OpenWorkspaceCommand}"
+                  InputGesture="Ctrl+O" />
         <Separator />
         <MenuItem Header="_Options…" Click="OnOptions" InputGesture="Ctrl+OemComma" />
         <MenuItem Header="Open the _log folder" Command="{Binding OpenLogsCommand}"

@@ -286,20 +286,6 @@ public partial class MainWindow : Window
         box?.Focus();
     }
 
-    /// Opens the workspace being worked on, falling back to the last one written and then the root.
-    ///
-    /// The selected one first: the reason to open a folder is almost always to put a file into the
-    /// one on the screen, and after a session of editing, the last extraction is whichever
-    /// happened to be made most recently rather than the one anybody is looking at.
-    private void OnOpenOutput(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainViewModel model) return;
-
-        var path = model.Editor.SelectedWorkspace?.Directory ?? model.LastExport ?? model.WorkspaceRoot;
-        System.IO.Directory.CreateDirectory(path);
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
-    }
-
     /// Turns whichever model pane the editor is showing into the pack's icon.
     ///
     /// The camera lives in the control, because a view angle is a property of looking rather than
