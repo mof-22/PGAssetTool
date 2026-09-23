@@ -37,7 +37,9 @@ public sealed class BundleEditor : IDisposable
         var wanted = Path.GetFileName(sourcePath);
         var entry = _bundle.file.BlockAndDirInfo.DirectoryInfos
             .FirstOrDefault(e => string.Equals(e.Name, wanted, StringComparison.OrdinalIgnoreCase));
-        if (entry is null || size <= 0) return null;
+        // Nothing there to read, or an object pointing outside the entry it names — which is data
+        // like any other and is not always data this tool wrote. See BundleSet.ReadResource.
+        if (entry is null || size <= 0 || offset < 0 || offset + size > entry.DecompressedSize) return null;
 
         var reader = _bundle.file.DataReader;
         reader.Position = entry.Offset + offset;

@@ -472,9 +472,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var tree = _tree;
         await RunExclusively("extracting the weapon", async () =>
         {
-            var version = _bundles.Context.HasClassDatabase
-                ? GameVersion.Read(_bundles.Context, _bundles.Game)
-                : null;
+            var version = GameVersion.Of(_bundles.Context, _bundles.Game);
 
             var skin = ChosenSkin?.Id;
             var export = await Task.Run(() =>
@@ -675,9 +673,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             var store = new ModStore(game);
-            var version = "unknown";
+            string version;
             using (var reading = new BundleSet(game))
-                if (reading.Context.HasClassDatabase) version = GameVersion.Read(reading.Context, game);
+                version = GameVersion.Of(reading.Context, game) ?? GameVersion.Unknown;
 
             result = await Task.Run(() => new ModApplier(game, store) { Packing = Packing, AtOnce = AtOnce }.Install(paths, version));
         }
@@ -1441,8 +1439,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var stale = GameUpdate.Stale(new ModStore(game).Read(), game.ReadManifest());
             if (stale.Count == 0) return null;
 
-            var version = bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null;
-            return GameUpdate.Notice(stale, version);
+            return GameUpdate.Notice(stale, GameVersion.Of(bundles.Context, game));
         }
         catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidOperationException)
         {

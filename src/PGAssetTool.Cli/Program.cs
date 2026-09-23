@@ -172,9 +172,8 @@ if (command == "info")
     }
     else Console.WriteLine("Downloaded none yet; everything loads from the shipped cache");
     Console.WriteLine($"Data files {game.EnumerateSerializedFiles().Count()}");
-    Console.WriteLine($"Version    {(bundles.Context.HasClassDatabase
-        ? GameVersion.Read(bundles.Context, game)
-        : $"unavailable ({ClassPackage.FileName} not found)")}");
+    Console.WriteLine($"Version    {GameVersion.Of(bundles.Context, game)
+        ?? $"unavailable ({ClassPackage.FileName} not found)"}");
     return 0;
 }
 
@@ -313,7 +312,7 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
 
     try
     {
-        var version = bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : "unknown";
+        var version = GameVersion.Of(bundles.Context, game) ?? GameVersion.Unknown;
         var result = command switch
         {
             "apply" => applier.Install(target, version),
@@ -428,7 +427,7 @@ if (command == "extract")
         export = asWorkspace
             ? exporter.ExportAsWorkspace(tree, outputRoot,
                 Option("author") ?? "",
-                bundles.Context.HasClassDatabase ? GameVersion.Read(bundles.Context, game) : null)
+                GameVersion.Of(bundles.Context, game))
             : exporter.Export(tree, outputRoot);
     }
     catch (InvalidOperationException refused)

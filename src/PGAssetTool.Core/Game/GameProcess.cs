@@ -79,29 +79,50 @@ public static class GameProcess
         return running;
     }
 
-    /// The game's executable, without its extension, read once per installation.
-    private static readonly Dictionary<string, string?> Named = new(StringComparer.OrdinalIgnoreCase);
+    /// The game's executable, found once per installation.
+    private static readonly Dictionary<string, string?> Executables = new(StringComparer.OrdinalIgnoreCase);
 
-    private static string? ExecutableName(GameInstallation game)
+    /// Which of the executables in the game's folder is the game.
+    ///
+    /// Unity names the two together: `Foo.exe` beside `Foo_Data`, and this installation already
+    /// knows which folder that is. Asked that way round rather than by taking the first executable
+    /// that is not Unity's own crash handler, which is what both callers used to do separately: a
+    /// folder somebody has been modding holds whatever tools they have put there, and one of those
+    /// sorting first would have this looking for a process that is never running — which reads as
+    /// "the game is closed", the one answer here that must not be wrong — and would have the
+    /// launcher starting the tool instead of the game.
+    ///
+    /// The old rule stays as the fallback, so an installation laid out some other way is no worse
+    /// off than it was.
+    public static string? ExecutablePath(GameInstallation game)
     {
-        lock (Named)
+        lock (Executables)
         {
             var root = Path.GetFullPath(game.RootDirectory);
-            if (Named.TryGetValue(root, out var known)) return known;
+            if (Executables.TryGetValue(root, out var known)) return known;
 
-            string? name = null;
+            string? exe = null;
             try
             {
-                name = Directory.EnumerateFiles(root, "*.exe")
-                    .Select(Path.GetFileNameWithoutExtension)
-                    .FirstOrDefault(f => f is not null
-                        && !f.StartsWith("Unity", StringComparison.OrdinalIgnoreCase));
+                var beside = Path.GetFileName(game.DataDirectory);
+                if (beside.EndsWith("_Data", StringComparison.OrdinalIgnoreCase))
+                {
+                    var named = Path.Combine(root, beside[..^"_Data".Length] + ".exe");
+                    if (File.Exists(named)) exe = named;
+                }
+
+                exe ??= Directory.EnumerateFiles(root, "*.exe")
+                    .FirstOrDefault(f => !Path.GetFileName(f)
+                        .StartsWith("Unity", StringComparison.OrdinalIgnoreCase));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
 
-            return Named[root] = name;
+            return Executables[root] = exe;
         }
     }
+
+    private static string? ExecutableName(GameInstallation game)
+        => ExecutablePath(game) is { } exe ? Path.GetFileNameWithoutExtension(exe) : null;
 
     /// Ends the game and waits for it to go.
     ///
@@ -131,8 +152,7 @@ public static class GameProcess
     /// when Steam is already there skips the handoff and starts noticeably sooner.
     public static bool Launch(GameInstallation game)
     {
-        var exe = Directory.EnumerateFiles(game.RootDirectory, "*.exe")
-            .FirstOrDefault(f => !Path.GetFileName(f).StartsWith("Unity", StringComparison.OrdinalIgnoreCase));
+        var exe = ExecutablePath(game);
 
         try
         {

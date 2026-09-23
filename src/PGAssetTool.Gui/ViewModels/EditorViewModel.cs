@@ -373,11 +373,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             return null;
 
         string? version = null;
-        if (_bundles() is { Context.HasClassDatabase: true } bundles)
+        if (_bundles() is { } bundles)
         {
             await _reading.WaitAsync();
-            try { version = await Task.Run(() => GameVersion.Read(bundles.Context, bundles.Game)); }
-            catch (Exception e) when (e is IOException or InvalidDataException) { }
+            try { version = await Task.Run(() => GameVersion.Of(bundles.Context, bundles.Game)); }
             finally { _reading.Release(); }
         }
 

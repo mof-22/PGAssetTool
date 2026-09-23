@@ -153,6 +153,16 @@ public sealed class BundleSet : IDisposable
         foreach (var entry in file.file.BlockAndDirInfo.DirectoryInfos)
         {
             if (!string.Equals(entry.Name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Asked of the entry rather than trusted: where an object says its bytes are is data
+            // like any other, and these bundles are not always the ones this tool wrote. A size
+            // that runs off the end would be an enormous allocation on the way to an unreadable
+            // answer, and a negative one an exception from somewhere with nothing to say.
+            if (offset < 0 || size < 0 || offset + size > entry.DecompressedSize)
+                throw new InvalidDataException(
+                    $"'{bundle}' says an object's bytes are {size} long at {offset} in '{wanted}', "
+                    + $"which holds {entry.DecompressedSize}.");
+
             var reader = file.file.DataReader;
             reader.Position = entry.Offset + offset;
             return reader.ReadBytes((int)size);

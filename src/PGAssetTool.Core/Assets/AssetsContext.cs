@@ -218,4 +218,28 @@ public static class GameVersion
         var info = ggm.file.AssetInfos.First(a => a.TypeId == (int)AssetClassID.PlayerSettings);
         return context.Deserialize(ggm, info)!["bundleVersion"].AsString;
     }
+
+    /// The version if it can be read, and null if it cannot.
+    ///
+    /// Every caller asked the first of the two questions this answers — whether the engine class
+    /// database is there to read the file with — and wrote the same line to do it. None asked the
+    /// second: the file being read is the game's own, so it can be missing or damaged like anything
+    /// else of theirs, and it is read while building a pack and while installing one, neither of
+    /// which is worth stopping over a version string.
+    public static string? Of(AssetsContext context, GameInstallation game)
+    {
+        if (!context.HasClassDatabase) return null;
+
+        try
+        {
+            return Read(context, game);
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// The version, or the word this tool writes into a pack when it does not know.
+    public const string Unknown = "unknown";
 }

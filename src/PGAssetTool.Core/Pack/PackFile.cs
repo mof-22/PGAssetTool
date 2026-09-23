@@ -89,7 +89,24 @@ public static class PackFile
     private sealed record Header(string Author, string PublicKey, string Signature);
 
     /// Reads a pack, whichever shape it is in. The archive owns the stream it was opened from.
-    public static ZipArchive Open(string path) => new(new MemoryStream(Contents(path)), ZipArchiveMode.Read);
+    ///
+    /// A file that is not one comes back named. The zip layer's own answer is "Central Directory
+    /// corrupt", which says nothing about which file it was talking about or that a pack was what
+    /// it expected — and the file it is talking about arrived from somebody else, so being unable
+    /// to read it is an ordinary event rather than a fault.
+    public static ZipArchive Open(string path)
+    {
+        var contents = Contents(path);
+        try
+        {
+            return new ZipArchive(new MemoryStream(contents), ZipArchiveMode.Read);
+        }
+        catch (InvalidDataException e)
+        {
+            throw new InvalidDataException(
+                $"'{Path.GetFileName(path)}' is not a pack this can read: {e.Message}", e);
+        }
+    }
 
     /// As much of a pack as anything here will hold in memory at once.
     ///

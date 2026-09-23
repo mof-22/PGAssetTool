@@ -219,4 +219,18 @@ public class PackFileTests : IDisposable
         Assert.Equal(SealState.Invalid, PackFile.Inspect(path).State);
         Assert.Throws<InvalidDataException>(() => PackFile.Contents(path));
     }
+
+    /// Whatever somebody hands the tool. The zip layer's own answer names neither the file nor what
+    /// was expected of it, and it reaches the window as it is.
+    [Fact]
+    public void AFileThatIsNotAPackAtAllIsRefusedByName()
+    {
+        var path = Path("holiday-photo.pgmod");
+        File.WriteAllText(path, "this is not a pack");
+
+        var refused = Assert.Throws<InvalidDataException>(() => PackFile.Open(path));
+
+        Assert.Contains("holiday-photo.pgmod", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("not a pack", refused.Message, StringComparison.Ordinal);
+    }
 }
