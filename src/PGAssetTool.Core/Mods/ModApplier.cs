@@ -633,7 +633,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 foreach (var part in parts)
                     failed.Add($"{part.Mod.Id}: '{bundle}' in the {cache.ToString().ToLowerInvariant()} cache "
                         + "has already been modified by something else and there is no backup of it. "
-                        + "Restore it, or pass --force to accept its contents as the original.");
+                        + "Verify the game's files through its store to put it back. Installing from "
+                        + "the command line with --force instead accepts what is in that bundle now "
+                        + "as the original, which is what every uninstall here will then restore.");
                 continue;
             }
             store.Backup(cache, bundle, hash, live);

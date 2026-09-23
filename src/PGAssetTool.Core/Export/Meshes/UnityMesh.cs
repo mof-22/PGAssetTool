@@ -17,6 +17,38 @@ public enum VertexFormat
 
 public sealed record SubMesh(int IndexStart, int IndexCount, int Topology, int BaseVertex);
 
+/// The box a mesh's vertices fill: where its middle is, how large it is, and the radius of the
+/// sphere that holds it.
+///
+/// One answer for the renderer, which frames a model by all three, and for the facing, which wants
+/// the middle alone. Both worked it out for themselves, with the same six lines of min and max, and
+/// two accounts of where a model's middle is would be two accounts of where the camera points.
+public readonly record struct MeshBounds(
+    (float X, float Y, float Z) Centre, (float X, float Y, float Z) Size, float Radius)
+{
+    public static MeshBounds Of(UnityMesh mesh, float[]? positions = null)
+    {
+        positions ??= mesh.Get(VertexAttribute.Position);
+        if (positions is null || mesh.VertexCount == 0) return new MeshBounds((0, 0, 0), (0, 0, 0), 0);
+
+        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+
+        for (var v = 0; v < mesh.VertexCount; v++)
+        {
+            minX = Math.Min(minX, positions[v * 3]); maxX = Math.Max(maxX, positions[v * 3]);
+            minY = Math.Min(minY, positions[v * 3 + 1]); maxY = Math.Max(maxY, positions[v * 3 + 1]);
+            minZ = Math.Min(minZ, positions[v * 3 + 2]); maxZ = Math.Max(maxZ, positions[v * 3 + 2]);
+        }
+
+        var size = (maxX - minX, maxY - minY, maxZ - minZ);
+        return new MeshBounds(
+            ((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
+            size,
+            MathF.Sqrt(MathF.Pow(size.Item1 / 2, 2) + MathF.Pow(size.Item2 / 2, 2) + MathF.Pow(size.Item3 / 2, 2)));
+    }
+}
+
 /// A mesh decoded out of its packed vertex streams into plain float arrays.
 ///
 /// Everything is widened to float (and joints to int) rather than kept in its source layout. The

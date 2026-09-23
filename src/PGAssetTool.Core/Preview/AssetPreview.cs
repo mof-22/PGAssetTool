@@ -12,6 +12,25 @@ public sealed record PreviewImage(int Width, int Height, byte[] Bgra)
 {
     public int Stride => Width * 4;
 
+    /// Red and blue the other way round, which turns RGBA into BGRA and back.
+    ///
+    /// Everything that reads an image file gets RGBA and everything that shows or writes one here
+    /// wants BGRA, so this loop was written out wherever those two met. Both copies were right;
+    /// what made it worth having once is that a copy which is not is a picture with its reds and
+    /// blues exchanged, and nothing else about it wrong.
+    public static byte[] Swapped(byte[] pixels)
+    {
+        var swapped = new byte[pixels.Length];
+        for (var at = 0; at + 3 < pixels.Length; at += 4)
+        {
+            swapped[at] = pixels[at + 2];
+            swapped[at + 1] = pixels[at + 1];
+            swapped[at + 2] = pixels[at];
+            swapped[at + 3] = pixels[at + 3];
+        }
+        return swapped;
+    }
+
     /// The same pixels with every one made solid.
     ///
     /// Most model textures use alpha for something other than coverage — emission, most often — so
@@ -170,16 +189,7 @@ public static class AssetPreview
         if (image is null || image.Width == 0) return null;
 
         // Stb hands back RGBA rows top down; a bitmap wants BGRA the same way up.
-        var bgra = new byte[image.Width * image.Height * 4];
-        for (var i = 0; i < bgra.Length; i += 4)
-        {
-            bgra[i] = image.Data[i + 2];
-            bgra[i + 1] = image.Data[i + 1];
-            bgra[i + 2] = image.Data[i];
-            bgra[i + 3] = image.Data[i + 3];
-        }
-
-        return new PreviewImage(image.Width, image.Height, bgra);
+        return new PreviewImage(image.Width, image.Height, PreviewImage.Swapped(image.Data));
     }
 
     private static byte[] FlipRows(byte[] bgra, int width, int height)

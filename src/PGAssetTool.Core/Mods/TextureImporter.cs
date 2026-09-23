@@ -120,14 +120,7 @@ public static class TextureImporter
         var image = StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha)
             ?? throw new InvalidDataException($"'{Path.GetFileName(path)}' is not an image this reads.");
 
-        var bgra = new byte[image.Width * image.Height * 4];
-        for (var i = 0; i < bgra.Length; i += 4)
-        {
-            bgra[i] = image.Data[i + 2];
-            bgra[i + 1] = image.Data[i + 1];
-            bgra[i + 2] = image.Data[i];
-            bgra[i + 3] = image.Data[i + 3];
-        }
+        var bgra = Preview.PreviewImage.Swapped(image.Data);
 
         // SourceComp is what the file held, whatever it was decoded into.
         var hasAlpha = image.SourceComp is StbImageSharp.ColorComponents.RedGreenBlueAlpha

@@ -98,22 +98,7 @@ public static class Relocation
     }
 
     private static IEnumerable<AssetNode> ModelClosure(BundleSet bundles, SkinModel model)
-    {
-        try
-        {
-            var file = bundles.Open(model.Bundle);
-            var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
-            var root = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.GameObject, name);
-            return root is null
-                ? []
-                : ReferenceWalker.Closure(bundles.Context, file, root.PathId,
-                    new BundleGraph(bundles).Resolve, skip: WeaponResolver.Opaque);
-        }
-        catch (Exception e) when (e is IOException or KeyNotFoundException)
-        {
-            return [];
-        }
-    }
+        => model.Reaches(bundles, new BundleGraph(bundles).Resolve);
 
     /// Which of the bundles given holds this asset, other than the one it was missing from.
     ///

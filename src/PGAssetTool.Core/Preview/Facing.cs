@@ -271,22 +271,7 @@ public static class Facing
         return world;
     }
 
-    /// The middle of the bounding box, which is the point the renderer builds its frame around.
-    private static (float X, float Y, float Z) Centre(UnityMesh mesh)
-    {
-        var positions = mesh.Get(VertexAttribute.Position);
-        if (positions is null || mesh.VertexCount == 0) return (0, 0, 0);
-
-        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-        float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-
-        for (var v = 0; v < mesh.VertexCount; v++)
-        {
-            minX = Math.Min(minX, positions[v * 3]); maxX = Math.Max(maxX, positions[v * 3]);
-            minY = Math.Min(minY, positions[v * 3 + 1]); maxY = Math.Max(maxY, positions[v * 3 + 1]);
-            minZ = Math.Min(minZ, positions[v * 3 + 2]); maxZ = Math.Max(maxZ, positions[v * 3 + 2]);
-        }
-
-        return ((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-    }
+    /// The middle of the bounding box, which is the point the renderer builds its frame around —
+    /// the same box the renderer measures, so that the two cannot come to different answers.
+    private static (float X, float Y, float Z) Centre(UnityMesh mesh) => MeshBounds.Of(mesh).Centre;
 }

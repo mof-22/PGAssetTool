@@ -732,23 +732,5 @@ public static class MeshRenderer
 
     public static Basis View(Camera camera) => Basis.From(camera.Turn);
 
-    private static ((float X, float Y, float Z) Centre, (float X, float Y, float Z) Size, float Radius)
-        Bounds(UnityMesh mesh, float[] positions)
-    {
-        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-        float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-
-        for (var v = 0; v < mesh.VertexCount; v++)
-        {
-            minX = Math.Min(minX, positions[v * 3]); maxX = Math.Max(maxX, positions[v * 3]);
-            minY = Math.Min(minY, positions[v * 3 + 1]); maxY = Math.Max(maxY, positions[v * 3 + 1]);
-            minZ = Math.Min(minZ, positions[v * 3 + 2]); maxZ = Math.Max(maxZ, positions[v * 3 + 2]);
-        }
-
-        var centre = ((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-        var size = (maxX - minX, maxY - minY, maxZ - minZ);
-        var radius = MathF.Sqrt(
-            MathF.Pow(size.Item1 / 2, 2) + MathF.Pow(size.Item2 / 2, 2) + MathF.Pow(size.Item3 / 2, 2));
-        return (centre, size, radius);
-    }
+    private static MeshBounds Bounds(UnityMesh mesh, float[] positions) => MeshBounds.Of(mesh, positions);
 }

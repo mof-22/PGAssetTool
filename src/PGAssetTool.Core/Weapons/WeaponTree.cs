@@ -18,7 +18,40 @@ public sealed record WeaponSkinView(
 /// resolve against the usual roots at all, because the model carries what it needs. Recorded as a
 /// place rather than as its contents: reading the closure of every skin would cost a bundle walk
 /// per skin every time a weapon is selected, and it is wanted only when one is being exported.
-public sealed record SkinModel(string AssetPath, string Bundle);
+public sealed record SkinModel(string AssetPath, string Bundle)
+{
+    /// Everything the model reaches, from the bundle it lives in.
+    ///
+    /// The object is found by the leaf of the path that named it, which is the same rule the
+    /// resolver uses everywhere else. Written out twice before this — once to list a skin's
+    /// materials and once to work out which bundles a pack of it can have moved into — and the two
+    /// copies had come to disagree about what to do when the bundle is not there.
+    ///
+    /// Answers nothing rather than throwing: a model that cannot be read is a model that brings no
+    /// materials, and neither caller has anything better to do with the news.
+    /// <param name="resolve">
+    /// How to follow a reference into another bundle. The tree keeps one of these across a whole
+    /// weapon; a caller with no reason to cache can build one for the walk.
+    /// </param>
+    public IReadOnlyList<AssetNode> Reaches(BundleSet bundles, ReferenceWalker.ExternalResolver resolve)
+    {
+        try
+        {
+            var file = bundles.Open(Bundle);
+            var name = AssetPath[(AssetPath.LastIndexOf('/') + 1)..];
+            var root = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.GameObject, name);
+
+            return root is null
+                ? []
+                : ReferenceWalker.Closure(
+                    bundles.Context, file, root.PathId, resolve, skip: WeaponResolver.Opaque);
+        }
+        catch (Exception e) when (e is IOException or KeyNotFoundException)
+        {
+            return [];
+        }
+    }
+}
 
 /// <param name="Main">
 /// The texture in the material's main slot — the skin itself, as opposed to the gloss, noise and
@@ -358,22 +391,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     {
         if (model is null) return [];
 
-        try
-        {
-            var file = bundles.Open(model.Bundle);
-            var name = model.AssetPath[(model.AssetPath.LastIndexOf('/') + 1)..];
-            var root = ReferenceWalker.FindByName(bundles.Context, file, AssetClassID.GameObject, name);
-
-            return root is null
-                ? []
-                : ReferenceWalker.Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: Opaque)
-                    .Where(n => n.Class == AssetClassID.Material)
-                    .ToList();
-        }
-        catch (Exception e) when (e is IOException or FileNotFoundException)
-        {
-            return [];
-        }
+        return [.. model.Reaches(bundles, Graph.Resolve).Where(n => n.Class == AssetClassID.Material)];
     }
 
     /// A material's name with what a skin and its model disagree about set aside: a `WeaponNNN_`
