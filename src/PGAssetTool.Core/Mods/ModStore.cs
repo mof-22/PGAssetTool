@@ -101,6 +101,10 @@ public sealed class ModStore
         var full = Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar);
         var digest = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(full.ToLowerInvariant())))[..8];
+        // Deliberately not SafeName: this one names the folder holding an installation's backups
+        // and its ledger, and tidying the ends of it would move that folder for anyone whose game
+        // sits in a directory ending in a space or a dot — which is to say it would lose their
+        // backups. The digest follows the name, so nothing here can end in one anyway.
         var name = Path.GetFileName(full);
         foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
         return $"{name}-{digest}";
@@ -281,13 +285,8 @@ public sealed class ModStore
             ? Directory.EnumerateFiles(ModsDirectory, "*" + Pack.PackBuilder.Extension, SearchOption.AllDirectories)
             : [];
 
-    /// A folder name that means what it says and can be written down.
-    private static string Sanitize(string name)
-    {
-        var safe = new string(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray())
-            .Trim().TrimEnd('.');
-        return safe.Length == 0 ? "_" : safe;
-    }
+    /// A folder name that means what it says and can be written down. See `SafeName`.
+    private static string Sanitize(string name) => Settings.SafeName.For(name);
 
     /// Throws away the copy taken of a mod's pack, once nothing is installed from it.
     ///

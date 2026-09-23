@@ -147,15 +147,9 @@ public static class PackBuilder
         => Enum.TryParse<AssetsTools.NET.Extra.AssetClassID>(operation.Target.Class, out var cls)
             && !Replaceable.Supports(cls);
 
-    private static string Sanitise(string name)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var clean = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim();
-
-        // Windows will not have a name ending in a dot, and a name that is only dots and spaces
-        // leaves nothing behind at all.
-        return clean.TrimEnd('.', ' ');
-    }
+    /// Empty when the name was nothing Windows would take, because the caller has a second name to
+    /// try — the mod's id — before settling for anything. See `SafeName`.
+    private static string Sanitise(string name) => Settings.SafeName.For(name, "");
 
     /// <param name="signer">
     /// Signs and scrambles the pack when given. Null leaves it a plain zip, which is what every

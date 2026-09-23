@@ -244,23 +244,9 @@ public sealed class AssetExporter(BundleSet bundles)
             bundle, source, streamData["offset"].AsLong, streamData["size"].AsLong);
     }
 
-    /// A name from the game's own data, made into one Windows will take.
+    /// A name from the game's own data, made into one Windows will take. See `SafeName`.
     ///
-    /// Everything here is named by the game rather than by this tool, so the length is the game's
-    /// to decide too: the buffer is taken from the stack only while that is a few hundred
-    /// characters, because a stack overflow is the one failure nothing can catch or report.
-    ///
-    /// An object with no name at all — the game has those — comes back as something rather than as
+    /// An object with no name at all — the game has those — comes back as a word rather than as
     /// nothing, so that what is written is a file and not a bare extension.
-    public static string Sanitize(string name)
-    {
-        if (name.Length == 0) return "unnamed";
-
-        const int OnTheStack = 512;
-        var buffer = name.Length <= OnTheStack ? stackalloc char[name.Length] : new char[name.Length];
-        var invalid = Path.GetInvalidFileNameChars();
-        for (int i = 0; i < name.Length; i++)
-            buffer[i] = invalid.Contains(name[i]) ? '_' : name[i];
-        return new string(buffer);
-    }
+    public static string Sanitize(string name) => Settings.SafeName.For(name, "unnamed");
 }

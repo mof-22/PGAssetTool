@@ -26,6 +26,11 @@ public sealed record SubMesh(int IndexStart, int IndexCount, int Topology, int B
 public readonly record struct MeshBounds(
     (float X, float Y, float Z) Centre, (float X, float Y, float Z) Size, float Radius)
 {
+    /// Three floats to a vertex, which the mesh importer alone reads out of the mesh instead.
+    /// Counted: of 14,021 meshes in the first 400 bundles, 14,020 have three-component positions
+    /// and the one that does not has no position channel at all. Every other channel varies — the
+    /// last UV set is four components on 378 of them — so this holds for positions and for nothing
+    /// else.
     public static MeshBounds Of(UnityMesh mesh, float[]? positions = null)
     {
         positions ??= mesh.Get(VertexAttribute.Position);
@@ -170,10 +175,14 @@ public sealed record UnityMesh
         var vertexCount = vertexData["m_VertexCount"].AsInt;
         var raw = Bytes(vertexData["m_DataSize"]);
 
+        // Counted rather than assumed: of 14,021 meshes in the first 400 bundles, 358 are packed
+        // this way and every one of them is in a scene bundle — the maps, which this tool does not
+        // offer. Nothing an item is made of is compressed, which is why unpacking it has never been
+        // needed. (This used to say nothing in the game was, which was wrong.)
         if (field["m_MeshCompression"].AsInt != 0)
             throw new NotSupportedException(
                 $"'{name}' uses Unity's mesh compression, which packs vertices into a bit stream. "
-                + "Nothing in this game does, so unpacking it is not implemented.");
+                + "Only the game's maps are stored that way, and this tool does not offer those.");
 
         // Some meshes keep their vertices in the bundle's .resS rather than in the object, exactly
         // as most textures keep their pixels — the object then carries an empty buffer and a place
