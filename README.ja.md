@@ -138,6 +138,9 @@ the game faster* は閲覧したバンドルを展開して置いておく量で
 特に `author.key` はパックの署名に使う鍵で、失うと以降のパックが同じ作者のものだと示せなくなります。
 安全な場所にコピーを残しておくことをおすすめします。
 
+**入れたはずのMODが入れ替わる** - 1つのゲームに対して2つのツールから導入すると起こります。
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md) を参照してください。
+
 **ツールが落ちた・不具合を見つけた** - `PGAssetTool-data/logs` の中にある `crash-日時.txt`
 （落ちた場合）や `errors.log` を添えて報告してください。File → Open the log folder から開けます。
 

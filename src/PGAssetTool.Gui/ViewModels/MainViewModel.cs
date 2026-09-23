@@ -875,8 +875,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             FasterApplies = FasterApplies, LighterApplies = LighterApplies, ReadMemory = ReadMemory,
             MaskUnusedTextures = MaskUnusedTextures,
         };
+        // A folder that cannot be written to is not an IOException — it is its own kind — and this
+        // runs from a property changing, which is to say from somebody ticking a box. The tool
+        // installed somewhere it may not write took the window down on the first tick.
         try { _settings.Save(SettingsHome); }
-        catch (IOException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            ErrorLog.Record(e, "saving the settings");
+        }
     }
 
     /// Decodes the textures the renderer drawing this mesh uses, one per submesh.

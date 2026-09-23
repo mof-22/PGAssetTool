@@ -302,7 +302,17 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         finally
         {
             foreach (var archive in archives) archive.Dispose();
-            staging.Delete(recursive: true);
+
+            // Tidying up is not worth losing the reason for. This is a temporary directory, and
+            // something holding one of its files open — a virus scanner reading what was just
+            // written is the ordinary case — used to throw from inside the finally, which both
+            // ended a successful apply as a failure and threw away whatever the real trouble had
+            // been when there was one.
+            try { staging.Delete(recursive: true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Settings.ErrorLog.Record(e, $"clearing '{staging.FullName}'");
+            }
         }
 
         // Record which bundle version each mod actually wrote to, so a later update is detectable.

@@ -138,6 +138,9 @@ about a third less memory.
 `author.key` above all is the key your packs are signed with: lose it, and packs you build afterwards cannot be
 shown to be by the same author. Keeping a copy somewhere safe is recommended.
 
+**The mods you installed keep changing** - Two copies of the tool installing into one game do that to each
+other. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+
 **The tool crashed, or you found a bug** - Send a report with the `crash-<date and time>.txt` (if it crashed)
 or `errors.log` from `PGAssetTool-data/logs`. **File → Open the log folder** opens it.
 

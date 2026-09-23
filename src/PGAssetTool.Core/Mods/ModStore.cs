@@ -135,7 +135,7 @@ public sealed class ModStore
         {
             return Parse(StatePath);
         }
-        catch (Exception e) when (e is JsonException or IOException)
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
         {
             var previous = StatePath + PreviousSuffix;
             if (File.Exists(previous))
@@ -150,7 +150,7 @@ public sealed class ModStore
                     File.Copy(previous, StatePath, overwrite: true);
                     return mods;
                 }
-                catch (Exception also) when (also is JsonException or IOException)
+                catch (Exception also) when (also is JsonException or IOException or UnauthorizedAccessException)
                 {
                     // Fall through to the message below: neither copy can be read.
                 }
@@ -197,7 +197,7 @@ public sealed class ModStore
                     : new Dictionary<string, WrittenBundle>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, WrittenBundle>(StringComparer.OrdinalIgnoreCase);
         }
-        catch (Exception e) when (e is IOException or JsonException)
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
             return new Dictionary<string, WrittenBundle>(StringComparer.OrdinalIgnoreCase);
         }

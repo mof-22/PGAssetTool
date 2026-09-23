@@ -124,7 +124,7 @@ public sealed record ToolSettings
                 ? JsonSerializer.Deserialize<ToolSettings>(File.ReadAllText(path), Json) ?? new ToolSettings()
                 : new ToolSettings();
         }
-        catch (Exception e) when (e is IOException or JsonException)
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
             return new ToolSettings();
         }
