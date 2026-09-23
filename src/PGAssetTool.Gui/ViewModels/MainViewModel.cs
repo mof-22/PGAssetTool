@@ -110,7 +110,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Remember();
         OnPropertyChanged(nameof(GameDescribed));
-        if (!_loading) _ = ReloadAsync();
+
+        // Nobody waits for this one — it is a property changing — so anything it throws would go
+        // past the window rather than into its status line.
+        if (!_loading) _ = Reloading();
+    }
+
+    private async Task Reloading()
+    {
+        try { await ReloadAsync(); }
+        catch (Exception ex) { Status = Describe(ex, "opening the game that was chosen"); }
     }
 
     /// What the setting is doing right now, said where it is set. A path that is not a game is the
@@ -358,11 +367,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         var wanted = Selected?.Record.GameNumber;
 
-        Editor.Dispose();
-        _bundles?.Dispose();
-        (_bundles, _catalogs, _resolver, _tree, _clips) = (null, null, null, null, null);
-        Detail = null;
-        Preview.Clear();
+        // Closed under the lock everything reads through. A preview or a resolve that is running
+        // right now holds it and is reading the BundleSet on a thread of its own; disposing it from
+        // here left that thread reading a closed file, and this is reached from a menu item and
+        // from the game folder being changed in the options — both of them while somebody is
+        // looking at something.
+        await _reading.WaitAsync();
+        try
+        {
+            Editor.Dispose();
+            CloseReader();
+        }
+        finally
+        {
+            _reading.Release();
+        }
+
         Busy = true;
         Status = "Reloading…";
 
@@ -1303,6 +1323,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             await _reading.WaitAsync();
             try
             {
+                // Somebody has moved on while this waited its turn. Going down a tree of seventy
+                // rows with the arrow keys queues one decode per row, and each of them had to
+                // finish before the row actually wanted could start.
+                if (!ReferenceEquals(Detail?.SelectedNode, node)) return;
+
                 var loaded = await Task.Run(object? () =>
                 {
                     // An icon is registered by name with no path id, and may live in the game's own

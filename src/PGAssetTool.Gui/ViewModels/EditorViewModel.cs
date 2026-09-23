@@ -602,6 +602,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 // disposed reader, or kept the bundle open across a write to it.
                 if (_bundles() is not { } bundles) { Edited.Clear("The game is not open."); return; }
 
+                // Another file has been selected while this one waited its turn — going down a
+                // workspace of thirty files with the arrow keys, or a watcher firing while one is
+                // being read. Whatever this would load is already out of date.
+                if (SelectedFile != file) return;
+
                 // Read here rather than on the thread below: the list belongs to the window and is
                 // rebuilt on it whenever the workspace is read again.
                 var named = Files.Select(f => f.Target.Container).Where(c => c.Length > 0).Distinct().ToList();
