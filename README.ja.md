@@ -102,6 +102,7 @@ MODのON/OFFが可能なTurn on/off\
 | `Ctrl+1` `Ctrl+2` `Ctrl+3` | Browse / Editor / Manager |
 | `Ctrl+F` | そのタブの検索欄へ |
 | `Ctrl+E` | 選択中の武器を抽出 |
+| `Ctrl+O` | ワークスペースのフォルダを開く |
 | `Ctrl+Shift+E` | 選択中のアセットだけを抽出 |
 | `Shift+A` | 今見えている画像のアルファを表示 |
 | `Ctrl+Shift+R` | 差し替えられるものだけ表示 |

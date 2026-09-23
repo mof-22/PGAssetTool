@@ -102,6 +102,7 @@ Drag the `.pgmod` file onto the window. Several at once works too.
 | `Ctrl+1` `Ctrl+2` `Ctrl+3` | Browse / Editor / Manager |
 | `Ctrl+F` | Jump to the search on this tab |
 | `Ctrl+E` | Extract the selected weapon |
+| `Ctrl+O` | Open the workspace folder |
 | `Ctrl+Shift+E` | Extract just the selected asset |
 | `Shift+A` | Show the alpha of the picture in front of you |
 | `Ctrl+Shift+R` | Show only what can be replaced |
