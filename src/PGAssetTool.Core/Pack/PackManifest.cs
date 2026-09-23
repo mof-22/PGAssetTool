@@ -181,10 +181,28 @@ public sealed record PackManifest
 
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
+    /// <exception cref="InvalidDataException">
+    /// Anything wrong with the text, including its not being JSON at all.
+    ///
+    /// Said as one kind of trouble rather than two, because everything that reads a manifest — the
+    /// editor listing workspaces, the builder, the applier opening a pack — already answers for a
+    /// manifest it cannot use, and a JsonException went past all of them. A workspace's manifest is
+    /// a file the author edits by hand, so a stray comma there is an ordinary event and not a
+    /// reason to take the window down.
+    /// </exception>
     public static PackManifest Parse(string json)
     {
-        var manifest = JsonSerializer.Deserialize<PackManifest>(json, Json)
-            ?? throw new InvalidDataException("The manifest is empty.");
+        PackManifest? read;
+        try
+        {
+            read = JsonSerializer.Deserialize<PackManifest>(json, Json);
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidDataException($"The manifest is not readable: {e.Message}", e);
+        }
+
+        var manifest = read ?? throw new InvalidDataException("The manifest is empty.");
         if (manifest.FormatVersion > CurrentFormatVersion)
             throw new InvalidDataException(
                 $"This pack needs format version {manifest.FormatVersion}; this build understands {CurrentFormatVersion}.");

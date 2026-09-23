@@ -285,6 +285,17 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
         return 2;
     }
 
+    // Everything past here rewrites the game's bundles, and the game holds them open while it runs:
+    // a write that lands in the middle of that leaves a half-written file where a bundle was. The
+    // manager and the editor have always refused; this had not, and it is the same game.
+    if (GameProcess.IsRunning(game))
+    {
+        Console.Error.WriteLine(
+            "The game is running, and rewriting its bundles now can leave a half-written file "
+            + "behind. Close it, then run this again.");
+        return 1;
+    }
+
     // Said before the game is written to rather than after, and said whichever way it goes: a
     // signature is only worth carrying if somebody hears about it while there is still a decision
     // to make. An altered pack still installs — with --force, so it takes saying so.

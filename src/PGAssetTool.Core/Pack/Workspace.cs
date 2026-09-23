@@ -67,7 +67,7 @@ public static class Workspace
             Subject = subject,
             Operations = operations.ToList(),
         };
-        File.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
+        Settings.AtomicFile.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
         return manifest;
     }
 
@@ -149,7 +149,7 @@ public static class Workspace
     /// which version it is. The operations are the addresses the export resolved, and nothing that
     /// edits a name has any business rewriting those.
     public static void Save(string directory, PackManifest manifest)
-        => File.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
+        => Settings.AtomicFile.WriteAllText(Path.Combine(directory, PackManifest.FileName), manifest.ToJson());
 
     /// Gives the workspace directory a different name, in place, and answers where it went.
     ///

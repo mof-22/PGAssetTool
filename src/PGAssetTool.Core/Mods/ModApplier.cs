@@ -682,7 +682,25 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         // rename leaves it for the next one to clear out. The game is not running while any of this
         // happens; that is checked before an apply starts.
         var rewritten = job.Live + Unfinished;
-        var wrote = EditBundle(job.Live, rewritten, job.Parts, job.Staging, applied, failed, shared, lost);
+        List<string> wrote;
+
+        // One bundle going wrong is that bundle's failure, not the whole install's. A disk that
+        // fills up, a file the system has locked, a library that throws at something it has never
+        // seen — any of those used to come back out of the parallel loop and end the reconcile
+        // where it stood, with the bundles already renamed into place and nothing written down
+        // about them. What is left behind here instead is the original: the rename is the last
+        // step, and the half-written file is thrown away.
+        try
+        {
+            wrote = EditBundle(job.Live, rewritten, job.Parts, job.Staging, applied, failed, shared, lost);
+        }
+        catch (Exception e)
+        {
+            Settings.ErrorLog.Record(e, $"rebuilding '{job.Bundle}'");
+            Discard(rewritten);
+            failed.Add($"'{job.Bundle}' could not be rebuilt and has been left as it was: {e.Message}");
+            return new Outcome(job, "", [], applied, failed, shared, lost);
+        }
 
         if (wrote.Count == 0)
         {
@@ -690,7 +708,18 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             return new Outcome(job, "", wrote, applied, failed, shared, lost);
         }
 
-        File.Move(rewritten, job.Live, overwrite: true);
+        try
+        {
+            File.Move(rewritten, job.Live, overwrite: true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Settings.ErrorLog.Record(e, $"putting the rebuilt '{job.Bundle}' in place");
+            Discard(rewritten);
+            failed.Add($"'{job.Bundle}' was rebuilt but could not be put in place, and has been "
+                + $"left as it was: {e.Message}");
+            return new Outcome(job, "", [], applied, failed, shared, lost);
+        }
 
         // Hashed as it goes in, so the next reconcile can tell this bundle apart from one somebody
         // has edited since. The file was written a moment ago and is still in the system's cache.

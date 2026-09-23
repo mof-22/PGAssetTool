@@ -77,11 +77,25 @@ public sealed class GameInstallation
 
     /// The name→hash manifest the game ships. Its contents change whenever any bundle is updated,
     /// which is what drives incremental re-indexing.
+    /// <exception cref="InvalidDataException">
+    /// The manifest is not readable — said as one kind of trouble, like everything else that reads
+    /// a file the tool did not write. A game whose manifest is damaged is a game to verify through
+    /// its store, and that is a thing to be told.
+    /// </exception>
     public IReadOnlyList<BundleEntry> ReadManifest()
     {
-        using var stream = File.OpenRead(ManifestPath);
-        return JsonSerializer.Deserialize<List<BundleEntry>>(stream, ManifestJsonOptions)
-            ?? throw new InvalidDataException($"Could not parse '{ManifestPath}'.");
+        try
+        {
+            using var stream = File.OpenRead(ManifestPath);
+            return JsonSerializer.Deserialize<List<BundleEntry>>(stream, ManifestJsonOptions)
+                ?? throw new InvalidDataException($"Could not parse '{ManifestPath}'.");
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidDataException(
+                $"The game's bundle manifest at '{ManifestPath}' is not readable: {e.Message}. "
+                + "Verifying the game's files through its store puts it back.", e);
+        }
     }
 
     private static readonly JsonSerializerOptions ManifestJsonOptions = new()

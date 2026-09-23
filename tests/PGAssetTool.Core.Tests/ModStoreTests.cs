@@ -319,6 +319,58 @@ public class ModStoreTests : IDisposable
     public void ThePackStoreSitsBesideEverythingElseTheToolKeeps()
         => Assert.Equal(Path.Combine(_home, "mods"), _store.ModsDirectory);
 
+    /// A truncated ledger is what an interrupted write used to leave, and answering "no mods" for
+    /// one would let the next install replace the record of every other mod with itself.
+    [Fact]
+    public void ALedgerThatCannotBeReadFallsBackToTheCopyKeptBesideIt()
+    {
+        _store.Write([Mod("a"), Mod("b")]);
+        _store.Write([Mod("a"), Mod("b"), Mod("c")]);
+
+        var ledger = Path.Combine(_store.Root, "installed.json");
+        File.WriteAllText(ledger, "[{\"id\": \"a\", trunca");
+
+        // The copy is the ledger as it was before the last change: wrong by at most one mod.
+        Assert.Equal(["a", "b"], _store.Read().Select(m => m.Id));
+
+        // And it is put back, so the next write does not file the broken one as the copy to keep.
+        Assert.Equal(["a", "b"], _store.Read().Select(m => m.Id));
+        _store.Write([Mod("a")]);
+        Assert.Contains("\"b\"", File.ReadAllText(ledger + ".previous"));
+    }
+
+    [Fact]
+    public void ALedgerWithNoReadableCopySaysSoRatherThanAnsweringThatNothingIsInstalled()
+    {
+        _store.Write([Mod("a")]);
+        var ledger = Path.Combine(_store.Root, "installed.json");
+        File.WriteAllText(ledger, "not json at all");
+        File.WriteAllText(ledger + ".previous", "nor is this");
+
+        var refused = Assert.Throws<InvalidDataException>(() => _store.Read());
+        Assert.Contains("installed.json", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnEmptyLedgerFileIsStillNotReadAsNoMods()
+    {
+        _store.Write([Mod("a")]);
+        _store.Write([Mod("a"), Mod("b")]);
+
+        var ledger = Path.Combine(_store.Root, "installed.json");
+        File.WriteAllText(ledger, "");
+
+        // What an interrupted write leaves most often of all: nothing at all.
+        Assert.Equal(["a"], _store.Read().Select(m => m.Id));
+    }
+
+    private static InstalledMod Mod(string id) => new()
+    {
+        Id = id, Name = id.ToUpperInvariant(), PackPath = id + ".pgmod",
+        InstalledAt = DateTimeOffset.UnixEpoch, GameVersion = "26.11.0",
+        TouchedBundles = new Dictionary<string, string>(),
+    };
+
     [Fact]
     public void TheDigestGoesAfterTheNameSoTheFolderSortsByWhatItHolds()
     {

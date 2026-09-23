@@ -134,6 +134,6 @@ public sealed record ToolSettings
     {
         var directory = home ?? ModStore.DefaultHome();
         Directory.CreateDirectory(directory);
-        File.WriteAllText(PathIn(directory), JsonSerializer.Serialize(this, Json));
+        AtomicFile.WriteAllText(PathIn(directory), JsonSerializer.Serialize(this, Json));
     }
 }

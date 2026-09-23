@@ -162,9 +162,12 @@ public static class PackFile
     /// Writes a pack: the zip as it is, or wrapped and signed.
     public static void Write(string path, byte[] zip, PackAuthor? signer, string author)
     {
+        // Both ways out go through one write that either lands whole or does not land: a pack cut
+        // off half way is a file that still looks like a pack, and the protected one would then be
+        // a container whose header runs off the end of it.
         if (signer is null)
         {
-            File.WriteAllBytes(path, zip);
+            Settings.AtomicFile.WriteAllBytes(path, zip);
             return;
         }
 
@@ -173,7 +176,7 @@ public static class PackFile
                 Convert.ToBase64String(signer.Sign(Signed(author, zip)))),
             Json);
 
-        using var file = File.Create(path);
+        var file = new MemoryStream(Magic.Length + 5 + header.Length + zip.Length);
         file.Write(Magic);
         file.WriteByte(Format);
 
@@ -185,6 +188,8 @@ public static class PackFile
         // Signed over the plain contents, scrambled on the way out: the signature says what the
         // pack holds, not how it happens to be stored.
         file.Write(Scramble((byte[])zip.Clone()));
+
+        Settings.AtomicFile.WriteAllBytes(path, file.ToArray());
     }
 
     /// Splits a protected pack into what it says about itself and what it holds. Null for a plain

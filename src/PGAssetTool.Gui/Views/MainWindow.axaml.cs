@@ -107,9 +107,20 @@ public partial class MainWindow : Window
     /// Decided by what the file is rather than by which pane it landed on. A .pgmod is a mod
     /// wherever it is dropped, and there is only one thing to do with one; a texture is an edit to
     /// whatever is being worked on, and there is only one workspace that could mean.
+    /// Nothing waits for a handler like this, so anything it throws goes past the window rather than
+    /// into it. What lands here is whatever somebody dragged in — a pack from anywhere, a folder,
+    /// a file that is none of those — which makes it one of the likelier places to be handed
+    /// something unexpected.
     private async void OnDrop(object? sender, DragEventArgs e)
     {
         if (DataContext is not MainViewModel model) return;
+
+        try { await Dropped(model, e); }
+        catch (Exception ex) { model.Status = ErrorLog.Said(ex, "opening what was dropped on the window"); }
+    }
+
+    private static async Task Dropped(MainViewModel model, DragEventArgs e)
+    {
         if (e.DataTransfer.TryGetFiles()?.Select(f => f.TryGetLocalPath()).OfType<string>().ToList()
             is not { Count: > 0 } paths)
             return;

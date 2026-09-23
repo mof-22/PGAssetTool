@@ -524,7 +524,19 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// Reads the workspaces under the root again.
+    ///
+    /// Guarded for the same reason the manager's refresh is: a watcher on the workspace folder
+    /// calls this whenever the author saves a file there, and it arrives on the UI thread with
+    /// nobody waiting for it. The folder being renamed or taken away underneath — which is what an
+    /// author doing housekeeping does — would otherwise take the window with it.
     public void Rescan(string root)
+    {
+        try { Scan(root); }
+        catch (Exception ex) { Status = ErrorLog.Said(ex, "reading the workspaces"); }
+    }
+
+    private void Scan(string root)
     {
         Root = root;
         var chosen = SelectedWorkspace?.Directory;

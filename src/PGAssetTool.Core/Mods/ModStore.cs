@@ -114,10 +114,58 @@ public sealed class ModStore
     public string BackupRoot { get; }
     private string StatePath => Path.Combine(Root, StateFileName);
 
+    /// The copy `Write` keeps of what the ledger said before the last change. `Read` falls back to
+    /// it, so it is a working part of the ledger rather than a leftover.
+    private const string PreviousSuffix = ".previous";
+
+    /// The ledger, or the copy kept beside it when the ledger itself cannot be read.
+    ///
+    /// Answering "no mods" for a file that is there but unreadable would be the worst of the three
+    /// answers: the next thing to write the ledger would replace it with the one mod it was
+    /// installing, and the record of the rest — which is what uninstalling them goes through —
+    /// would be gone. So a broken ledger falls back to the copy `Write` keeps, which is the ledger
+    /// as it was before the last change and therefore wrong by at most one mod; and if that cannot
+    /// be read either, this says so rather than guessing. The backups are still all there; it is
+    /// only the record of who put what where that is at stake.
     public List<InstalledMod> Read()
-        => File.Exists(StatePath)
-            ? JsonSerializer.Deserialize<List<InstalledMod>>(File.ReadAllText(StatePath), Json) ?? []
-            : [];
+    {
+        if (!File.Exists(StatePath)) return [];
+
+        try
+        {
+            return Parse(StatePath);
+        }
+        catch (Exception e) when (e is JsonException or IOException)
+        {
+            var previous = StatePath + PreviousSuffix;
+            if (File.Exists(previous))
+            {
+                try
+                {
+                    var mods = Parse(previous);
+
+                    // Put back as well as read: `Write` copies the ledger aside before overwriting
+                    // it, and leaving the broken one in place would make the next write file it as
+                    // the copy worth keeping.
+                    File.Copy(previous, StatePath, overwrite: true);
+                    return mods;
+                }
+                catch (Exception also) when (also is JsonException or IOException)
+                {
+                    // Fall through to the message below: neither copy can be read.
+                }
+            }
+
+            throw new InvalidDataException(
+                $"The list of installed mods at '{StatePath}' cannot be read: {e.Message}. "
+                + "The backups of the game's bundles are unaffected. Move that file aside to start "
+                + "a fresh list, and the mods already installed will have to be removed by putting "
+                + "those backups back by hand.", e);
+        }
+    }
+
+    private static List<InstalledMod> Parse(string path)
+        => JsonSerializer.Deserialize<List<InstalledMod>>(File.ReadAllText(path), Json) ?? [];
 
     /// Keeps the previous contents beside the file before overwriting.
     ///
@@ -127,8 +175,8 @@ public sealed class ModStore
     public void Write(IEnumerable<InstalledMod> mods)
     {
         Directory.CreateDirectory(Root);
-        if (File.Exists(StatePath)) File.Copy(StatePath, StatePath + ".previous", overwrite: true);
-        File.WriteAllText(StatePath, JsonSerializer.Serialize(mods.ToList(), Json));
+        if (File.Exists(StatePath)) File.Copy(StatePath, StatePath + PreviousSuffix, overwrite: true);
+        Settings.AtomicFile.WriteAllText(StatePath, JsonSerializer.Serialize(mods.ToList(), Json));
     }
 
     private string WrittenPath => Path.Combine(Root, WrittenFileName);
@@ -158,7 +206,7 @@ public sealed class ModStore
     public void WriteWritten(IReadOnlyDictionary<string, WrittenBundle> written)
     {
         Directory.CreateDirectory(Root);
-        File.WriteAllText(WrittenPath, JsonSerializer.Serialize(written, Json));
+        Settings.AtomicFile.WriteAllText(WrittenPath, JsonSerializer.Serialize(written, Json));
     }
 
     /// Backups are filed under the bundle's hash, so a backup taken before an update stays
@@ -206,7 +254,7 @@ public sealed class ModStore
         Directory.CreateDirectory(into);
 
         var kept = KeptPathFor(into, full);
-        File.Copy(packPath, kept, overwrite: true);
+        Settings.AtomicFile.Copy(packPath, kept);
         return kept;
     }
 

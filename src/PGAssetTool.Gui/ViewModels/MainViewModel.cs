@@ -244,8 +244,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public async Task LoadAsync()
     {
         // Preferences are read before the game, so the first catalog load is already in the right
-        // language rather than being read once in English and then again.
-        // Preferences are read before the game, so the first catalog load is already in the right
         // language rather than being read once in English and then again. Nothing is resolved yet,
         // so the change handlers below find nothing to rebuild.
         ErrorLog.Home = SettingsHome;
@@ -949,7 +947,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// several of which bring a model, and walking every one of them to fill rows nobody opens
     /// would be paid on every click in the weapon list. Walking one when it is asked for is paid by
     /// whoever asked.
+    /// Nothing waits for this one, and an exception in a method that returns void and awaits is not
+    /// handed to anybody — it goes straight past the window and takes it down. Opening a skin reads
+    /// the game, so it is exactly the kind of thing that can fail on data nothing here has seen.
     private async void OpenSkin(TreeNode node)
+    {
+        try { await ShowSkin(node); }
+        catch (Exception ex) { Status = Describe(ex, "opening a skin"); }
+    }
+
+    private async Task ShowSkin(TreeNode node)
     {
         if (node.Skin is not { } skin) return;
 

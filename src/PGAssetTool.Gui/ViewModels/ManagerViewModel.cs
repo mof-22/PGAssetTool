@@ -439,7 +439,19 @@ public sealed partial class ManagerViewModel : ObservableObject
     [RelayCommand]
     private void CheckEverything() => Load(everything: true);
 
+    /// Reads the ledger and the bundles every mod claims.
+    ///
+    /// Guarded because of where it is called from: a timer notices the game starting or closing and
+    /// refreshes, and an exception out of a timer tick is an exception nobody is waiting for — it
+    /// takes the window down rather than reaching a status line. The ledger being unreadable is the
+    /// case this is for, and it is a thing to be told about, not to be closed over.
     private void Load(bool everything)
+    {
+        try { Read(everything); }
+        catch (Exception ex) { Status = ErrorLog.Said(ex, "reading what is installed"); }
+    }
+
+    private void Read(bool everything)
     {
         if (_game() is not { } game) { Status = "The game is not open."; return; }
 

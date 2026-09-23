@@ -52,8 +52,13 @@ public sealed record WorkspaceView(string Directory, PackManifest Manifest, IRea
     {
         if (!System.IO.Directory.Exists(root)) return [];
 
+        // A folder this cannot look into is a folder with no workspace in it as far as this is
+        // concerned. The overload that takes a SearchOption throws at the first one instead, which
+        // made one unreadable directory anywhere under the workspace root — and the root is
+        // wherever the author points it — the end of the whole list.
         return System.IO.Directory
-            .EnumerateDirectories(root, "*", SearchOption.AllDirectories)
+            .EnumerateDirectories(root, "*",
+                new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
             .Where(d => File.Exists(Path.Combine(d, PackManifest.FileName)))
             .OrderByDescending(d => File.GetLastWriteTimeUtc(Path.Combine(d, PackManifest.FileName)))
             .ToList();

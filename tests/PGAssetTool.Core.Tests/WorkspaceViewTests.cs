@@ -224,6 +224,28 @@ public class WorkspaceViewTests : IDisposable
         Assert.Equal("", Workspace.Read(directory).Icon);
     }
 
+    /// pgmod.json is a file the author edits by hand, so a stray comma in one is an ordinary event.
+    /// It used to come back as a JsonException, which is not what anything reading a manifest
+    /// answers for — the editor listing workspaces let it past and the window went with it.
+    [Fact]
+    public void AManifestThatIsNotJsonIsSaidToBeUnreadableRatherThanThrownRaw()
+    {
+        var refused = Assert.Throws<InvalidDataException>(
+            () => PackManifest.Parse("{ \"name\": \"half a manifest\""));
+
+        Assert.Contains("not readable", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AWorkspaceWithAnUnreadableManifestIsSkippedRatherThanStoppingTheScan()
+    {
+        var directory = MakeWorkspace("w9", ("textures/a.png", "original"));
+        File.WriteAllText(Path.Combine(directory, PackManifest.FileName), "{ oh dear");
+
+        Assert.Null(WorkspaceView.Open(directory));
+        Assert.Contains(directory, WorkspaceView.Discover(_root));
+    }
+
     [Fact]
     public void EveryImageInTheWorkspaceIsOfferedAsAnIcon()
     {
