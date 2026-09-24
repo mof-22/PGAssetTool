@@ -71,7 +71,7 @@ public sealed class AssetExporter(BundleSet bundles)
         {
             AssetClassID.Texture2D => ExportTexture(bundle, info.PathId, field, stem),
             AssetClassID.AudioClip => ExportAudio(bundle, field, stem),
-            AssetClassID.Mesh => ExportMesh(bundle, field, stem),
+            AssetClassID.Mesh => ExportMesh(bundle, info.PathId, field, stem),
             _ => null,
         };
 
@@ -184,7 +184,33 @@ public sealed class AssetExporter(BundleSet bundles)
     }
 
     /// A mesh that cannot be unpacked writes nothing rather than failing the export.
-    private ExportedAsset? ExportMesh(string bundle, AssetTypeValueField field, string stem)
+    /// Where each of the mesh's bones sits at rest, in the order the bind poses are in, or null for
+    /// a mesh nothing skins or one whose rig cannot be read.
+    private IReadOnlyList<float[]>? RestPoses(string bundle, long pathId, Meshes.UnityMesh mesh)
+    {
+        if (mesh.BindPoses.Count == 0) return null;
+        if (Preview.Skeleton.For(bundles, bundle, pathId) is not { } skeleton) return null;
+
+        try
+        {
+            var rest = skeleton.World(null, 0);
+            var poses = new List<float[]>(mesh.BindPoses.Count);
+
+            for (var b = 0; b < mesh.BindPoses.Count; b++)
+            {
+                if (b >= skeleton.Bones.Count) return null;
+                poses.Add(rest[skeleton.Bones[b]]);
+            }
+
+            return poses;
+        }
+        catch (Exception e) when (e is IndexOutOfRangeException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    private ExportedAsset? ExportMesh(string bundle, long pathId, AssetTypeValueField field, string stem)
     {
         try
         {
@@ -192,7 +218,10 @@ public sealed class AssetExporter(BundleSet bundles)
                 (path, offset, size) => bundles.ReadResource(bundle, path, offset, size));
             if (mesh.VertexCount == 0) return null;
             var path = stem + ".glb";
-            GlbWriter.Write(mesh, path);
+
+            // With the bones where the game has them, so what opens in an editor is the weapon and
+            // not its parts laid out around the origin. See GlbWriter.Write.
+            GlbWriter.Write(mesh, path, RestPoses(bundle, pathId, mesh));
             return new ExportedAsset(path, AssetClassID.Mesh, "", "glb", new FileInfo(path).Length, Placeholder);
         }
         catch (NotSupportedException)

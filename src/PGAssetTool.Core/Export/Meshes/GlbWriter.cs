@@ -19,7 +19,17 @@ public static class GlbWriter
     private const int UnsignedShort = 5123;
     private const int UnsignedInt = 5125;
 
-    public static void Write(UnityMesh mesh, string path)
+    /// <param name="restPoses">
+    /// Where each of the mesh's bones sits when nothing is playing, in the model's own space and in
+    /// the order the bind poses are in — `Skeleton.World(null, 0)` read through `Skeleton.Bones`.
+    ///
+    /// Null puts every joint at the inverse of its own inverse bind matrix, so the pair cancels and
+    /// the file holds the mesh exactly as it is written. That is right for a mesh whose bones all
+    /// carry the same skinning matrix at rest, which is most of this game — and wrong for the 518
+    /// weapons of 1517 where they do not, which come apart when the armature is switched on. See
+    /// `Skeleton.Assembled`.
+    /// </param>
+    public static void Write(UnityMesh mesh, string path, IReadOnlyList<float[]>? restPoses = null)
     {
         var buffer = new MemoryStream();
         var accessors = new JsonArray();
@@ -72,7 +82,7 @@ public static class GlbWriter
             ["bufferViews"] = views,
         };
 
-        if (mesh.IsSkinned) AddSkin(mesh, gltf, buffer, views, accessors);
+        if (mesh.IsSkinned) AddSkin(mesh, gltf, buffer, views, accessors, restPoses);
 
         // Written last: the skin appends to the buffer, and a byteLength captured before that leaves
         // a bufferView pointing past the declared end, which readers are entitled to reject.
@@ -171,7 +181,9 @@ public static class GlbWriter
         return AddRaw(buffer, views, accessors, bytes, joints.Length / 4, "VEC4", UnsignedShort);
     }
 
-    private static void AddSkin(UnityMesh mesh, JsonObject gltf, MemoryStream buffer, JsonArray views, JsonArray accessors)
+    private static void AddSkin(
+        UnityMesh mesh, JsonObject gltf, MemoryStream buffer, JsonArray views, JsonArray accessors,
+        IReadOnlyList<float[]>? restPoses)
     {
         // Unity names these eRC — row R, column C — and reads out row by row. glTF wants them column
         // major, so the indices are transposed on the way out; leaving them as read produces
@@ -199,11 +211,18 @@ public static class GlbWriter
 
         for (int i = 0; i < mesh.BindPoses.Count; i++)
         {
-            // A joint left without a transform sits at the origin, and the deform at rest becomes the
-            // inverse bind matrix applied to every vertex instead of cancelling against it — the mesh
-            // is right in edit mode and wrong once the armature is on. Placing each joint at the
-            // inverse of its inverse bind matrix is what makes the pair cancel.
-            var placement = InvertAffine(matrices.AsSpan(i * 16, 16));
+            // Where the bone actually sits when nothing is playing, if the caller knows. The deform
+            // at rest is then the skinning matrix the game itself uses, so the armature assembles
+            // the model — which for the 518 weapons whose bones do not all share one skinning
+            // matrix is the difference between a weapon and a pile of its parts.
+            //
+            // Without it, each joint goes at the inverse of its own inverse bind matrix so the pair
+            // cancels and the mesh stays exactly as written. A joint left at the origin instead
+            // would apply the inverse bind matrix to every vertex: right in edit mode, wrong the
+            // moment the armature is switched on.
+            var placement = restPoses is not null && i < restPoses.Count && restPoses[i].Length >= 16
+                ? Sided(restPoses[i])
+                : InvertAffine(matrices.AsSpan(i * 16, 16));
 
             joints.Add(nodes.Count);
             sceneNodes.Add(nodes.Count);
@@ -220,6 +239,24 @@ public static class GlbWriter
             new JsonObject { ["joints"] = joints, ["inverseBindMatrices"] = accessor },
         };
         ((JsonObject)nodes[0]!)["skin"] = 0;
+    }
+
+    /// A column-major matrix from Unity's left-handed space into glTF's right-handed one.
+    ///
+    /// The same change of basis the bind poses get — S·M·S with S = diag(1,1,-1,1), which flips the
+    /// cells where exactly one of the row and the column is Z — but without the transpose, because
+    /// these arrive column-major already while Unity writes a bind pose out row by row.
+    private static float[] Sided(IReadOnlyList<float> m)
+    {
+        var sided = new float[16];
+        for (var column = 0; column < 4; column++)
+            for (var row = 0; row < 4; row++)
+            {
+                var value = m[column * 4 + row];
+                sided[column * 4 + row] = row == 2 ^ column == 2 ? -value : value;
+            }
+
+        return sided;
     }
 
     /// Inverts a column-major affine matrix: the linear part by cofactors, the translation by

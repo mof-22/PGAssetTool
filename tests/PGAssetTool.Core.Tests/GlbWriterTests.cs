@@ -36,10 +36,11 @@ public class GlbWriterTests : IDisposable
 
     private static float[] Identity() => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
-    private (JsonElement Json, byte[] Binary) WriteAndRead(UnityMesh mesh)
+    private (JsonElement Json, byte[] Binary) WriteAndRead(
+        UnityMesh mesh, IReadOnlyList<float[]>? restPoses = null)
     {
         var path = Path.Combine(_directory, "out.glb");
-        GlbWriter.Write(mesh, path);
+        GlbWriter.Write(mesh, path, restPoses);
         var bytes = File.ReadAllBytes(path);
 
         Assert.Equal(0x46546C67u, BitConverter.ToUInt32(bytes, 0));
@@ -138,6 +139,59 @@ public class GlbWriterTests : IDisposable
                     Assert.Equal(row == column ? 1f : 0f, sum, 4);
                 }
         }
+    }
+
+    /// Told where the bones actually are, the joints go there instead — so switching the armature on
+    /// assembles the model rather than leaving it as written.
+    ///
+    /// This is the difference between a weapon and a pile of its parts for 518 of the game's 1517
+    /// weapons, whose bones do not all carry the same skinning matrix at rest. The two bones here
+    /// are a metre apart, which is that case in miniature: with the pair cancelling, both halves of
+    /// the triangle stay where they were written; with the rest poses given, the half carried by
+    /// the second bone moves by the metre between them.
+    [Fact]
+    public void WithTheBonesWhereTheyReallyAreTheArmatureAssemblesTheModel()
+    {
+        var mesh = Triangle(skinned: true);
+
+        // Column major, as the rest of the tool keeps them: the second bone a metre along x.
+        float[] here = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        float[] along = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1];
+
+        var (json, binary) = WriteAndRead(mesh, [here, along]);
+        var skin = json.GetProperty("skins")[0];
+        var inverseBind = Floats(json, binary, skin.GetProperty("inverseBindMatrices").GetInt32(), 16);
+        var joints = skin.GetProperty("joints").EnumerateArray().Select(j => j.GetInt32()).ToList();
+
+        float[] Placement(int slot) => json.GetProperty("nodes")[joints[slot]].GetProperty("matrix")
+            .EnumerateArray().Select(v => v.GetSingle()).ToArray();
+
+        // The bind poses are identities, so each joint's whole deform is where the bone sits.
+        Assert.Equal(0f, Deform(Placement(0), inverseBind, 0, 12), 4);
+        Assert.Equal(1f, Deform(Placement(1), inverseBind, 1, 12), 4);
+
+        // And without them, the pair still cancels — every mesh that was right stays right.
+        var (plain, plainBinary) = WriteAndRead(mesh);
+        var plainBind = Floats(plain, plainBinary, plain.GetProperty("skins")[0]
+            .GetProperty("inverseBindMatrices").GetInt32(), 16);
+        var plainJoints = plain.GetProperty("skins")[0].GetProperty("joints")
+            .EnumerateArray().Select(j => j.GetInt32()).ToList();
+
+        for (var slot = 0; slot < plainJoints.Count; slot++)
+        {
+            var placement = plain.GetProperty("nodes")[plainJoints[slot]].GetProperty("matrix")
+                .EnumerateArray().Select(v => v.GetSingle()).ToArray();
+            Assert.Equal(0f, Deform(placement, plainBind, slot, 12), 4);
+        }
+    }
+
+    /// One cell of (joint matrix × inverse bind matrix), which is what a glTF reader deforms with.
+    private static float Deform(float[] placement, float[] inverseBind, int slot, int cell)
+    {
+        var (column, row) = (cell / 4, cell % 4);
+        float sum = 0;
+        for (var k = 0; k < 4; k++) sum += placement[k * 4 + row] * inverseBind[slot * 16 + column * 4 + k];
+        return sum;
     }
 
     [Fact]
