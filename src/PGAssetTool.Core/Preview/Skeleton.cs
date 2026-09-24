@@ -50,7 +50,17 @@ public sealed class Skeleton
     /// Found the way the dressing is: nothing points from a mesh to the renderer that draws it, so
     /// the renderers are read and the one naming this mesh answers. Its `m_Bones` is the order
     /// everything else is in.
-    public static Skeleton? For(BundleSet bundles, string bundle, long meshPathId)
+    /// <param name="under">
+    /// The name of an object the renderer has to hang under, or null for the first renderer that
+    /// names this mesh whatever it hangs under.
+    ///
+    /// Several renderers draw the same mesh and they disagree: a weapon's own prefab holds one, and
+    /// the `<prefab>_info` prefab the game's shop shows holds another, arranged its own way — which
+    /// is where #943's two swords are crossed. Whichever of them comes first in the bundle is what
+    /// answering by mesh alone gives, and that is an accident of file order. Naming the root is how
+    /// a caller says which arrangement it means.
+    /// </param>
+    public static Skeleton? For(BundleSet bundles, string bundle, long meshPathId, string? under = null)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
@@ -63,6 +73,7 @@ public sealed class Skeleton
             var renderer = bundles.Context.Deserialize(file, info);
             if (renderer is null) continue;
             if (renderer["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
+            if (under is not null && !Beneath(bundles, file, renderer["m_GameObject"], under)) continue;
 
             var bones = renderer["m_Bones"]["Array"].Children
                 .Select(b => b["m_PathID"].AsLong)
@@ -104,6 +115,38 @@ public sealed class Skeleton
         }
 
         return null;
+    }
+
+    /// Whether this object hangs somewhere under one of the given name.
+    ///
+    /// Walked up rather than down: an object has one parent and a root has hundreds of descendants,
+    /// and the chain from a weapon's mesh to its prefab root is a handful of steps. The count is a
+    /// guard against a hierarchy that points at itself, which a bundle this tool did not write
+    /// could hold.
+    private static bool Beneath(
+        BundleSet bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
+    {
+        if (owner.IsDummy) return false;
+
+        var transform = TransformOf(bundles, file, owner["m_PathID"].AsLong);
+
+        for (var step = 0; transform != 0 && step < 64; step++)
+        {
+            var info = file.file.GetAssetInfo(transform);
+            var field = info is null ? null : bundles.Context.Deserialize(file, info);
+            if (field is null) return false;
+
+            var holder = field["m_GameObject"];
+            if (!holder.IsDummy
+                && file.file.GetAssetInfo(holder["m_PathID"].AsLong) is { } named
+                && string.Equals(bundles.Context.NameOf(file, named), root, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var father = field["m_Father"];
+            transform = father.IsDummy ? 0 : father["m_PathID"].AsLong;
+        }
+
+        return false;
     }
 
     private static long TransformOf(BundleSet bundles, AssetsFileInstance file, long gameObject)
