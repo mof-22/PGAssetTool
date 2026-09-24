@@ -93,6 +93,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     {
         Stop();
         _skeleton = skeleton;
+        _unposable = false;
         Clips.Clear();
 
         if (skeleton is not null)
@@ -173,14 +174,33 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     public void Stop() => Playing = false;
 
     /// Puts the model where the clip has it now, or back as it was read when nothing is playing.
+    ///
+    /// Guarded because of when it runs: once for every frame the display draws, from a property
+    /// changing, with nobody waiting for it — so a rig this cannot pose would not be a preview that
+    /// fails, it would be the window going. The model then stays as it was read, which is a still
+    /// picture of the right thing rather than nothing at all, and the clip stops so that the same
+    /// failure is not met sixty times a second. Said once per model, not once per frame.
     private void Pose()
     {
         if (Rest is not { } rest) return;
+        if (_skeleton is null || Clip is null || _unposable) { Mesh = rest; return; }
 
-        Mesh = _skeleton is null || Clip is null
-            ? rest
-            : _skeleton.Pose(rest, Clip.Motion, (float)Time);
+        try
+        {
+            Mesh = _skeleton.Pose(rest, Clip.Motion, (float)Time);
+        }
+        catch (Exception e) when (e is IndexOutOfRangeException or ArgumentOutOfRangeException
+                                      or KeyNotFoundException or InvalidOperationException)
+        {
+            _unposable = true;
+            Mesh = rest;
+            Stop();
+            ErrorLog.Record(e, $"posing '{rest.Name}' with '{Clip?.Motion.Name}'");
+        }
     }
+
+    /// Set when a model turns out not to be poseable, and cleared when another is put on show.
+    private bool _unposable;
 
     /// What is on show, as far as "is this still the same thing" goes. Null for anything that has
     /// no lasting identity, which starts the view over the way a different asset does.

@@ -540,12 +540,29 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             // Held open for the whole run rather than reopened at each bundle. A pack is a small
             // file read whole into memory, and a mod that writes to four bundles would otherwise
             // be read four times.
-            var archive = PackFile.Open(mod.PackPath);
-            archives.Add(archive);
+            //
+            // A pack that will not open is this mod's failure and not the run's. It used to come
+            // back out of here and end the reconcile before anything had been looked at, so one
+            // damaged file among a hundred meant nothing in the manager worked at all — and the
+            // way to find out which file it was was to read the message and go looking.
+            ZipArchive archive;
+            List<PackOperation> operations;
+            try
+            {
+                archive = PackFile.Open(mod.PackPath);
+                archives.Add(archive);
+                operations = PackBuilder.ReadManifest(mod.PackPath).Operations;
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException
+                                          or System.Text.Json.JsonException or UnauthorizedAccessException)
+            {
+                failed.Add($"{mod.Id}: {e.Message}");
+                continue;
+            }
 
             // Each to wherever its asset was last found, which for nearly every operation is where
             // the pack says.
-            foreach (var group in PackBuilder.ReadManifest(mod.PackPath).Operations
+            foreach (var group in operations
                          .Select(o => (Key: Relocation.Key(o.Target), Operation: Relocation.Follow(o, mod.Moved)))
                          .GroupBy(o => o.Operation.Target.Container, StringComparer.OrdinalIgnoreCase))
             {
