@@ -703,7 +703,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         return cls switch
         {
             AssetClassID.Texture2D => AssetPreview.Texture(bundles, file.Target.Container, field),
-            AssetClassID.Mesh => AssetPreview.Mesh(field, bundles, file.Target.Container),
+            // The game's side of the comparison, put together the way its bones put it together —
+            // the edited side comes from a glTF and is already whole. See Skeleton.Assembled.
+            AssetClassID.Mesh => AssetPreview.Mesh(field, bundles, file.Target.Container) is { } mesh
+                ? Skeleton.For(bundles, file.Target.Container, info.PathId)?.Assembled(mesh) ?? mesh
+                : null,
             AssetClassID.AudioClip => AssetPreview.Audio(bundles, file.Target.Container, field),
             _ => null,
         };

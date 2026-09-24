@@ -157,6 +157,7 @@ internal static class SelfTest
             if (TheModelPlaysItsAnimations(model) is { } movingProblem) return Fail(movingProblem);
             if (SkinModelsMoveWithoutClipsOrBonesOfTheirOwn(model) is { } stillProblem) return Fail(stillProblem);
             if (HalfFloatNormalsAreReadAsNormals(model) is { } normalProblem) return Fail(normalProblem);
+            if (ModelsAreShownAssembled(model) is { } piecesProblem) return Fail(piecesProblem);
 
             model.Search = "beretta";
             Console.WriteLine($"search   'beretta' -> {model.Weapons.Count}");
@@ -3601,6 +3602,51 @@ internal static class SelfTest
 
         if (unit < mesh.VertexCount * 0.95) return $"only {unit} of '{row.Label}'s {mesh.VertexCount} normals are unit length";
         if (agree < all * 0.9) return $"only {agree} of '{row.Label}'s {all} triangles face the way they are wound";
+
+        return null;
+    }
+
+    /// A model is shown put together the way its own bones put it together.
+    ///
+    /// The preview drew the mesh as it is written, which is the assembled model only when every
+    /// bone carries the same skinning matrix at rest. 518 of the game's 1517 weapons break that:
+    /// #1496's barrel, its skull plate and its wooden mount are each written where their own bone
+    /// would put them and nowhere near each other, so the preview showed the pieces scattered — and
+    /// tiny, because the framing is worked out from a bounding box the far-flung pieces are in.
+    ///
+    /// Checked by the box rather than by the picture: assembling a model that needs it pulls the
+    /// pieces together, so the radius the preview frames by comes down sharply. #16 moves by
+    /// nothing at all through the same code, which is the other half of the check.
+    private static string? ModelsAreShownAssembled(MainViewModel model)
+    {
+        foreach (var (number, apart) in new[] { (1496, true), (16, false) })
+        {
+            if (!Select(model, number)) return $"#{number} never resolved";
+            if (model.Detail?.SelectedNode is not { } row) return $"#{number} selected nothing to show";
+            if (!Arrived(model, row)) return $"'{row.Label}' never appeared";
+            if (model.Preview.Rest is not { } shown) return $"'{row.Label}' is not a model";
+
+            // The same mesh as the tool reads it, with nothing done to it.
+            if (model.Game is not { } game) return "the game is not open";
+            using var bundles = new Core.Assets.BundleSet(game);
+            var file = bundles.Open(row.Bundle);
+            if (file.file.GetAssetInfo(row.PathId) is not { } info) return $"'{row.Label}' is not in {row.Bundle}";
+            if (bundles.Context.Deserialize(file, info) is not { } field) return $"'{row.Label}' would not read";
+            if (Core.Preview.AssetPreview.Mesh(field, bundles, row.Bundle) is not { } written)
+                return $"'{row.Label}' would not unpack";
+
+            var wasRadius = Core.Export.Meshes.MeshBounds.Of(written).Radius;
+            var nowRadius = Core.Export.Meshes.MeshBounds.Of(shown).Radius;
+            var shrunk = wasRadius > 0 ? 1 - nowRadius / wasRadius : 0;
+
+            Console.WriteLine($"whole    #{number} '{row.Label}': radius {wasRadius:N2} as written, "
+                + $"{nowRadius:N2} as shown ({shrunk:P0} smaller)");
+
+            if (apart && shrunk < 0.25f)
+                return $"#{number} is written in pieces and was shown {shrunk:P0} smaller, not gathered up";
+            if (!apart && MathF.Abs(wasRadius - nowRadius) > 0.001f)
+                return $"#{number} is already whole and was changed: {wasRadius:N3} -> {nowRadius:N3}";
+        }
 
         return null;
     }

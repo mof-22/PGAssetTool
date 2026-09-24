@@ -229,6 +229,24 @@ public sealed class Skeleton
         return moved;
     }
 
+    /// The model put together the way its own bones put it together.
+    ///
+    /// A skinned mesh is written in the space its bind poses map from, and what makes that the
+    /// assembled model is every bone carrying the same skinning matrix at rest — which is what
+    /// nearly every weapon in this game does, and what drawing the mesh as it is written quietly
+    /// assumed. It is not true of all of them: measured over every weapon, **518 of 1517** have a
+    /// vertex further than a fiftieth of the model's own radius from where its bones put it, and
+    /// the worst of them throw a piece two thousand radii away, which is why one weapon in three
+    /// was drawn scattered and tiny — the far-flung pieces are in the bounding box that the framing
+    /// is worked out from.
+    ///
+    /// Beretta_3_Mesh moves by 0.000 through this and adventure_swords_mesh by 0.012, so the
+    /// weapons that were already drawn right are drawn identically.
+    ///
+    /// Posing a clip starts from the mesh as it was written, never from this: the pose already
+    /// carries the bones' own transforms, and starting here would apply them twice.
+    public UnityMesh Assembled(UnityMesh mesh) => Pose(mesh, null, 0f);
+
     /// The mesh with its vertices moved to where this clip puts them at this moment.
     ///
     /// Ordinary linear blend skinning: every vertex is carried by up to four bones, each with a

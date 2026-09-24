@@ -187,7 +187,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
         try
         {
-            Mesh = _skeleton.Pose(rest, Clip.Motion, (float)Time);
+            Mesh = _skeleton.Pose(_authored ?? rest, Clip.Motion, (float)Time);
         }
         catch (Exception e) when (e is IndexOutOfRangeException or ArgumentOutOfRangeException
                                       or KeyNotFoundException or InvalidOperationException)
@@ -201,6 +201,10 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     /// Set when a model turns out not to be poseable, and cleared when another is put on show.
     private bool _unposable;
+
+    /// The model as it was written, which is what a pose starts from. `Rest` is the same model put
+    /// together, which is what is shown and what the framing is taken from.
+    private UnityMesh? _authored;
 
     /// What is on show, as far as "is this still the same thing" goes. Null for anything that has
     /// no lasting identity, which starts the view over the way a different asset does.
@@ -337,8 +341,11 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         _automatic = textures;
         Image?.Dispose();
         Image = null;
-        Rest = mesh;
-        Mesh = mesh;
+        // Shown put together the way its bones put it together, and kept as it was written for the
+        // posing: a clip carries the bones' own transforms already. See Skeleton.Assembled.
+        _authored = mesh;
+        Rest = skeleton?.Assembled(mesh) ?? mesh;
+        Mesh = Rest;
         Standing = standing;
         MeshTextures = textures;
         ChosenTexture = seen?.Texture;

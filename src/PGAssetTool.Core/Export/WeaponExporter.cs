@@ -654,7 +654,13 @@ public sealed class WeaponExporter(BundleSet bundles)
         if (info is null) return null;
 
         var field = bundles.Context.Deserialize(file, info);
-        return field is null ? null : Preview.AssetPreview.Mesh(field, bundles, bundle);
+        if (field is null || Preview.AssetPreview.Mesh(field, bundles, bundle) is not { } mesh) return null;
+
+        // Put together the way its bones put it together, or the pack's picture is of a model in
+        // pieces — one weapon in three. See Skeleton.Assembled.
+        return Preview.Skeleton.For(bundles, bundle, pathId) is { } skeleton
+            ? skeleton.Assembled(mesh)
+            : mesh;
     }
 
     private Preview.PreviewImage? TextureFor(Assets.AssetNode? node)

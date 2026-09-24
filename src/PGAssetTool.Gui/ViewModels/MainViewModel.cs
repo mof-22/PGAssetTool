@@ -1382,8 +1382,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // Which way round it opens, from the prefab rather than from the bounding box, so
                 // every weapon points the same way. Read here because it needs the bundle, which
                 // the renderer has no business holding; on the same thread and lock as the rest.
+                // Of the model put together rather than of the model as written: the box a
+                // scattered model fills says nothing about which way it lies. See
+                // Skeleton.Assembled.
                 var standing = loaded is UnityMesh model
-                    ? await Task.Run(() => Facing.Standing(_bundles!, node.Bundle, model, node.PathId))
+                    ? await Task.Run(() => Facing.Standing(
+                        _bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId))
                     : (MeshRenderer.Basis?)null;
 
                 switch (loaded)
