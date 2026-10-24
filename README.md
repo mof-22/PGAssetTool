@@ -100,6 +100,13 @@ or edit one in Blender through a `.glb`.\
 Write a .glb to edit puts every animation and the model into `animations/animations.glb`, and Use a .glb (or
 dropping the file on the window) brings the edited one back.
 
+**Maps** - **File → Export a map…** lists the game's maps; type part of a name, pick one and Export writes it as
+one `.glb` into the `maps` folder beside the workspaces, ready to open in Blender (File › Import › glTF 2.0).
+Everything the map draws is in it where it stands, with its pictures — models on bones as they stand, and the
+meshes the game keeps compressed. The sky, and what the game parks out of sight until a match moves it in (the
+battle royale chests), are nodes of their own, to hide.
+Maps are for looking at and building from — they are written out, not back.
+
 **Manager** - Look after the mod packs you have installed.\
 Turn on/off switches a mod on or off\
 Remove takes it out of the tool (hold `SHIFT` to delete the file as well)\
@@ -194,6 +201,8 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `remove <id>...` | Uninstall mods. A mod can be named by its id, by the start of its id, or by its name, as long as that names only one. |
 | `verify` | Check every bundle against the hash the game recorded for it. |
 | `consolidate` | Report what emptying the downloaded cache would change. `--apply` removes only the copies that change nothing. |
+| `maps [<filter>]` | List the game's maps. |
+| `map <name>` | Write a map out as one `.glb` — every mesh where it stands, with its pictures and their tiling — to `maps/<name>.glb`, or `--out <file>`. The sky, and what the game parks out of sight until a match moves it in, are nodes of their own, to hide in Blender. |
 | `animation <directory> [<clip>]` | List a workspace's animations, or change one: `--from <item>` puts in that item's animation of the same name (or `--clip <name>`), fitted to this item's bones; `--anim <file>` puts in a `.anim` from another workspace; `--glb <file>` puts in one from a glTF; `--reset` puts the original back. `--export` writes them all, with the item's models, into one `.glb` to edit. The animation always keeps this item's own length. |
 
 | Option | What it does |
@@ -235,6 +244,9 @@ pgassettool apply workspace/0819_something/something.pgmod
 pgassettool items pets
 pgassettool extract pet_alien_cat --workspace
 pgassettool disable pet_alien_cat
+
+pgassettool maps arena
+pgassettool map arena_castle
 
 pgassettool animation workspace/0001_FirstPistol
 pgassettool animation workspace/0001_FirstPistol Reload --from 416
