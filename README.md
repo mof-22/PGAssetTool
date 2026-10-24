@@ -20,20 +20,20 @@ Everything to do with the game's assets, made simple.
 |---------|------|--------------------|
 | Weapons | ✅️ | |
 | Weapon skins | ✅️ | |
-| Hats | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Masks | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Avatars | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Capes | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Boots | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Gliders | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Transports | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Pets | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Hats | ⚠️ | Not recommended |
+| Masks | ⚠️ | Not recommended |
+| Avatars | ⚠️ | Not recommended |
+| Capes | ⚠️ | Not recommended |
+| Boots | ⚠️ | Not recommended |
+| Gliders | ⚠️ | Not recommended |
+| Transports | ⚠️ | Not recommended |
+| Pets | ⚠️ | Not recommended |
+| Hat skins | ⚠️ | Partly. Not recommended |
+| Mask skins | ⚠️ | Partly. Not recommended |
+| Cape skins | ⚠️ | Partly. Not recommended |
+| Boot skins | ⚠️ | Partly. Not recommended |
 | Gadgets | ❌️ | Planned |
 | Buttons and other UI | ❌️ | Planned |
-| Hat skins | ❌️ | Planned |
-| Mask skins | ❌️ | Planned |
-| Cape skins | ❌️ | Planned |
-| Boot skins | ❌️ | Planned |
 | Lobby items | ❌️ | Undecided |
 | Armor | ❌️ | Undecided |
 | Graffiti | ❌️ | Undecided |
@@ -95,13 +95,10 @@ The panel on the right is the preview: look at the actual model, show it in its 
 The workspace's details can be changed in Pack details at the bottom left.\
 With one or more files changed, the Build pack button writes a mod pack, a `.pgmod` file, into the workspace folder.\
 Build and apply installs the mod pack in one click.\
-Selecting a weapon's animation plays it on the model, the game's next to the workspace's. It can be swapped for
-another item's animation — type its number or name, pick the clip, Use — or for one made in Blender: Write a .glb
-to edit puts every animation and the model into `animations/animations.glb`, and Use a .glb (or dropping the file
-on the window) brings the edited one back. A `.anim` dragged in from another weapon's workspace is fitted to
-this weapon's bones the same way. Put the original back undoes any of them.\
-**An animation always keeps the length of the weapon's own**: the game times shots and reloads by them, so the
-new motion is played faster or slower to fit, and the weapon fires and reloads exactly as before.
+With a `.anim` selected, the panel at the top changes the animation: put another item's animation in its place,
+or edit one in Blender through a `.glb`.\
+Write a .glb to edit puts every animation and the model into `animations/animations.glb`, and Use a .glb (or
+dropping the file on the window) brings the edited one back.
 
 **Manager** - Look after the mod packs you have installed.\
 Turn on/off switches a mod on or off\
@@ -225,9 +222,9 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `--version` | Say which version this is. |
 
 Options can go before or after the command, as `--name value` or `--name=value`. An option the tool does not
-know is refused by name rather than ignored. An id with a space in it — the game has one, `avatar_ programmer` —
-needs quoting. A mistake in what was typed exits with `2` and anything else that goes wrong with `1`, said in a
-sentence; something the tool did not expect also leaves a crash report in `PGAssetTool-data/logs`.
+know is refused by name rather than ignored. An id with a space in it needs quoting. A mistake in what was typed
+exits with `2` and anything else that goes wrong with `1`, said in a sentence; something the tool did not expect
+also leaves a crash report in `PGAssetTool-data/logs`.
 
 ```
 pgassettool weapons crystal
@@ -298,10 +295,6 @@ classes only and has nothing to do with the game's own code.** See
 - It rewrites the game's files, so use it at your own risk. The author accepts no responsibility for any
   damage arising from using this tool, including any effect on your account (such as a ban).
 - Do not redistribute other people's work without their permission.
-- The tool changes how things look, never how they play. A replaced animation is always stretched or squeezed to
-  the length of the weapon's own, because the game times shots and reloads by its animations and another length
-  would change the weapon's fire rate and damage. If you installed animation mods with a version from before
-  this, use **Reapply all** in the Manager.
 
 ---
 
