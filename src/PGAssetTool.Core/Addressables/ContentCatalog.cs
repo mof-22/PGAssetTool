@@ -26,6 +26,15 @@ public sealed record CatalogBundle(
     public string PathIn(string localDirectory) => Path.Combine(localDirectory, FileName);
 }
 
+/// One thing a key loads: the asset path the game asks the bundle for, the provider that loads it,
+/// and the bundles it needs — the one holding it among them.
+///
+/// <paramref name="InternalId"/> is the asset's own path, and the bundle's container table names it
+/// by exactly that string: these paths keep their case and their extension, unlike the lower-cased
+/// ones in the bundles on the old path.
+public sealed record CatalogLocation(
+    string InternalId, string Provider, IReadOnlyList<CatalogBundle> Bundles);
+
 /// The Addressables catalog: what the game can load, which bundle each thing is in, and what each
 /// bundle has to hash to.
 ///
@@ -37,17 +46,19 @@ public sealed class ContentCatalog
     private readonly CatalogTables.Bucket[] _buckets;
     private readonly byte[] _keys;
     private readonly string[] _internalIds;
+    private readonly string[] _providerIds;
     private readonly Dictionary<string, List<int>> _bucketsByKey;
     private readonly Dictionary<string, CatalogBundle> _byHash;
     private readonly Dictionary<string, CatalogBundle> _byCacheName;
 
     private ContentCatalog(
         string path, string locatorId, byte[] keys, byte[] buckets, byte[] entries, byte[] extra,
-        string[] internalIds)
+        string[] internalIds, string[] providerIds)
     {
         (FilePath, LocatorId) = (path, locatorId);
         _keys = keys;
         _internalIds = internalIds;
+        _providerIds = providerIds;
         _entries = CatalogTables.ReadEntries(entries);
         _buckets = CatalogTables.ReadBuckets(buckets);
 
@@ -86,29 +97,49 @@ public sealed class ContentCatalog
     public CatalogBundle? ByCacheName(string cacheName)
         => _byCacheName.TryGetValue(cacheName, out var bundle) ? bundle : null;
 
-    /// The bundles an address needs, itself included.
+    /// What a key loads, and out of which bundles.
     ///
     /// A location names the key its dependencies are filed under rather than listing them, so this
-    /// is two hops: the address's bucket gives its locations, and each location's dependency key
-    /// gives a bucket whose locations are the bundles.
-    public IReadOnlyList<CatalogBundle> BundlesFor(string key)
+    /// is two hops: the key's bucket gives its locations, and each location's dependency key gives a
+    /// bucket whose locations are the bundles. Both have to be made or an item answers with nothing.
+    public IReadOnlyList<CatalogLocation> LocationsFor(string key)
     {
         if (!_bucketsByKey.TryGetValue(key, out var buckets)) return [];
 
+        var locations = new List<CatalogLocation>();
+        foreach (var bucket in buckets)
+            foreach (var at in _buckets[bucket].Entries)
+            {
+                var entry = _entries[at];
+                var bundles = new List<CatalogBundle>();
+                if (entry.DependencyKey >= 0 && entry.DependencyKey < _buckets.Length)
+                {
+                    var seen = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var dependency in _buckets[entry.DependencyKey].Entries)
+                    {
+                        var id = _internalIds[_entries[dependency].InternalId];
+                        if (seen.Add(id) && BundleFor(id) is { } bundle) bundles.Add(bundle);
+                    }
+                }
+
+                locations.Add(new CatalogLocation(
+                    _internalIds[entry.InternalId],
+                    entry.Provider >= 0 && entry.Provider < _providerIds.Length
+                        ? _providerIds[entry.Provider]
+                        : "",
+                    bundles));
+            }
+        return locations;
+    }
+
+    /// The bundles a key needs, itself included, each named once.
+    public IReadOnlyList<CatalogBundle> BundlesFor(string key)
+    {
         var found = new List<CatalogBundle>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var bucket in buckets)
-            foreach (var location in _buckets[bucket].Entries)
-            {
-                var entry = _entries[location];
-                if (entry.DependencyKey < 0 || entry.DependencyKey >= _buckets.Length) continue;
-                foreach (var dependency in _buckets[entry.DependencyKey].Entries)
-                {
-                    var id = _internalIds[_entries[dependency].InternalId];
-                    if (!seen.Add(id)) continue;
-                    if (BundleFor(id) is { } bundle) found.Add(bundle);
-                }
-            }
+        foreach (var location in LocationsFor(key))
+            foreach (var bundle in location.Bundles)
+                if (seen.Add(bundle.Hash)) found.Add(bundle);
         return found;
     }
 
@@ -178,7 +209,7 @@ public sealed class ContentCatalog
                 Convert.FromBase64String(raw.BucketDataString ?? ""),
                 Convert.FromBase64String(raw.EntryDataString ?? ""),
                 Convert.FromBase64String(raw.ExtraDataString ?? ""),
-                raw.InternalIds ?? []);
+                raw.InternalIds ?? [], raw.ProviderIds ?? []);
         }
         catch (Exception e) when (e is FormatException or ArgumentOutOfRangeException or IndexOutOfRangeException)
         {
