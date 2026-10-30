@@ -136,6 +136,31 @@
 
         <StackPanel Spacing="6">
           <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyFetchAtOnce" Classes="why" Content="?" />
+            <TextBlock Text="Bundles downloaded at once" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <ComboBox ItemsSource="{Binding FetchParallelism}" SelectedItem="{Binding FetchAtOnce}"
+                    HorizontalAlignment="Stretch" />
+          <TextBlock Classes="why" IsVisible="{Binding #WhyFetchAtOnce.IsChecked}"
+                     Text="The game downloads a weapon or a map when it is picked and offers no way to ask for the rest, so on a new installation most of what it has is not on disk and nothing here can read it. Downloading the lot is about twelve thousand files and four and a half gigabytes. Two different limits meet in this number: the large bundles fill the line well before six at once — the forty largest, 584MB of them, took 31s at six and 29s at sixteen — while the small ones are nothing but latency, and 150 of them took 1.6s at eight against 0.8s at thirty-two. Eight is where the second has given up most of what it has while the first is already at the line's speed." />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyFetchInto" Classes="why" Content="?" />
+            <TextBlock Text="Where downloaded content is kept" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Choose…" Click="OnChooseFetchDirectory" Margin="6,0,0,0" />
+            <TextBox Text="{Binding FetchDirectory}" Watermark="Left blank for the cache the game loads from" />
+          </DockPanel>
+          <TextBlock Text="{Binding FetchDescribed}" Opacity="0.55" FontSize="11" TextWrapping="Wrap" />
+          <TextBlock Classes="why" IsVisible="{Binding #WhyFetchInto.IsChecked}"
+                     Text="Left blank, downloads go where the game itself puts them, which is the only place it loads them from — a bundle fetched here and a bundle the game fetched for itself are the same bytes at the same path. Anywhere else is a copy to look at: the tool can read it, the game cannot, and a mod written into it changes nothing in the game. The path the game uses is its own and changes with the version, so there is nothing to keep here between updates." />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+          <DockPanel>
             <ToggleButton DockPanel.Dock="Right" Name="WhyReadMemory" Classes="why" Content="?" />
             <TextBlock Text="Memory for reading the game faster" FontWeight="SemiBold" VerticalAlignment="Center" />
           </DockPanel>

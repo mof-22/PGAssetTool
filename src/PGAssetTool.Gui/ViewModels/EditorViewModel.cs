@@ -23,12 +23,12 @@ public sealed record WorkspaceItem(string Directory, string Name, int Files, int
 /// authoritative for long. The directory is watched and re-read rather than kept in step by hand.
 public sealed partial class EditorViewModel : ObservableObject, IDisposable
 {
-    private readonly Func<BundleSet?> _bundles;
+    private readonly Func<IBundleReader?> _bundles;
     private readonly SemaphoreSlim _reading;
     private FileSystemWatcher? _watcher;
     private Timer? _settle;
 
-    public EditorViewModel(Func<BundleSet?> bundles, SemaphoreSlim reading, AlphaPreference? alpha = null)
+    public EditorViewModel(Func<IBundleReader?> bundles, SemaphoreSlim reading, AlphaPreference? alpha = null)
     {
         (_bundles, _reading) = (bundles, reading);
         alpha ??= new AlphaPreference();
@@ -374,10 +374,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             return null;
 
         string? version = null;
-        if (_bundles() is { } bundles)
+        if (_bundles() is { } bundles && Game?.Invoke() is { } installation)
         {
             await _reading.WaitAsync();
-            try { version = await Task.Run(() => GameVersion.Of(bundles.Context, bundles.Game)); }
+            try { version = await Task.Run(() => GameVersion.Of(bundles.Context, installation)); }
             finally { _reading.Release(); }
         }
 
@@ -671,7 +671,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// always live in the same one — and the workspace was extracted from the prefab, so whichever
     /// bundle holds the renderer is named by something in it.
     /// </param>
-    private IReadOnlyList<AssetNode?> Wears(BundleSet bundles, WorkspaceFile file, IReadOnlyList<string> named)
+    private IReadOnlyList<AssetNode?> Wears(IBundleReader bundles, WorkspaceFile file, IReadOnlyList<string> named)
     {
         if (file.Target.Class != nameof(AssetClassID.Mesh) || file.Target.PathId is not { } mesh) return [];
 
@@ -694,12 +694,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
     }
 
-    private (BundleSet? Reader, Dressing? Dressing) _dressed;
+    private (IBundleReader? Reader, Dressing? Dressing) _dressed;
 
     /// What the model now being shown is drawn with, in submesh order, as the game's renderer says.
     private IReadOnlyList<AssetNode?> _wearing = [];
 
-    private static object? FromGame(BundleSet bundles, WorkspaceFile file)
+    private static object? FromGame(IBundleReader bundles, WorkspaceFile file)
     {
         if (!Enum.TryParse<AssetClassID>(file.Target.Class, out var cls)) return null;
         if (AssetPreview.Locate(bundles, file.Target.Container, cls, file.Target.PathId ?? 0, file.Target.Name)

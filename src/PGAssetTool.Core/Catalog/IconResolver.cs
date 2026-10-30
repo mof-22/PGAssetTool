@@ -12,7 +12,7 @@ public sealed record IconLocation(string TextureName, string Container, string? 
 /// Almost every icon is registered in the lookup table as `OfferIcons/&lt;slug&gt;_icon1_big`, so no
 /// scan is needed. A handful of the newest weapons are only in resources.assets, which is read
 /// lazily and only when one of those is asked for.
-public sealed class IconResolver(BundleSet bundles, AssetLookup lookup)
+public sealed class IconResolver(IBundleReader bundles, AssetLookup lookup)
 {
     public const string Suffix = "_icon1_big";
 
@@ -43,7 +43,7 @@ public sealed class IconResolver(BundleSet bundles, AssetLookup lookup)
         _dataFileTextures = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!bundles.Context.HasClassDatabase) return _dataFileTextures;
 
-        foreach (var file in bundles.Game.EnumerateSerializedFiles())
+        foreach (var file in bundles.SerializedFiles)
         {
             if (!Path.GetFileName(file).StartsWith("resources.assets", StringComparison.OrdinalIgnoreCase))
                 continue;

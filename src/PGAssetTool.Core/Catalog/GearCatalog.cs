@@ -43,7 +43,7 @@ public sealed class GearCatalog
         [210000] = ItemKinds.Transport,
     };
 
-    public static GearCatalog Load(BundleSet bundles)
+    public static GearCatalog Load(RegistryReader registries)
     {
         var byKind = new Dictionary<string, List<WeaponRecord>>(StringComparer.OrdinalIgnoreCase);
 
@@ -68,9 +68,9 @@ public sealed class GearCatalog
 
         try
         {
-            ReadWear(bundles, Add);
-            ReadPets(bundles, Add);
-            ReadRoyale(bundles, Add);
+            ReadWear(registries, Add);
+            ReadPets(registries, Add);
+            ReadRoyale(registries, Add);
         }
         catch (Exception e) when (e is JsonException or IOException or KeyNotFoundException
                                       or InvalidOperationException)
@@ -88,9 +88,9 @@ public sealed class GearCatalog
     /// The five worn kinds. Ids and categories are in one table and the descriptions in another,
     /// keyed by id — and the ids come as groups, because a cape and its two upgrade tiers are three
     /// entries the shop shows as one. All three are separate things to an author.
-    private static void ReadWear(BundleSet bundles, Action<ItemKind, string, string?, string, int> add)
+    private static void ReadWear(RegistryReader registries, Action<ItemKind, string, string?, string, int> add)
     {
-        var wear = bundles.MonoBehaviour("generated_data", "Wear_GENERATED");
+        var wear = registries.Read(Registries.Wear);
         using var ids = JsonDocument.Parse(wear["DictionaryWearIdsJson"].AsString);
         using var infos = JsonDocument.Parse(wear["DictionaryWearInfoByIdJson"].AsString);
 
@@ -113,19 +113,19 @@ public sealed class GearCatalog
         }
     }
 
-    private static void ReadPets(BundleSet bundles, Action<ItemKind, string, string?, string, int> add)
+    private static void ReadPets(RegistryReader registries, Action<ItemKind, string, string?, string, int> add)
     {
         using var pets = JsonDocument.Parse(
-            bundles.MonoBehaviour("generated_data", "Pets_GENERATED")["InfoJson"].AsString);
+            registries.Read(Registries.Pets)["InfoJson"].AsString);
 
         foreach (var pet in pets.RootElement.EnumerateObject())
             add(ItemKinds.Pet, pet.Name, Text(pet.Value, "Lkey"), "", 0);
     }
 
-    private static void ReadRoyale(BundleSet bundles, Action<ItemKind, string, string?, string, int> add)
+    private static void ReadRoyale(RegistryReader registries, Action<ItemKind, string, string?, string, int> add)
     {
         using var royale = JsonDocument.Parse(
-            bundles.MonoBehaviour("generated_data", "Royale_GENERATED")["InfoJson"].AsString);
+            registries.Read(Registries.Royale)["InfoJson"].AsString);
 
         foreach (var item in royale.RootElement.EnumerateObject())
         {

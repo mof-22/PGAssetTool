@@ -35,16 +35,16 @@ internal sealed class Hierarchy
 
     private static readonly ConditionalWeakTable<AssetsFileInstance, Hierarchy> Known = new();
 
-    public static Hierarchy Of(BundleSet bundles, AssetsFileInstance file)
+    public static Hierarchy Of(IBundleReader bundles, AssetsFileInstance file)
         => Known.GetValue(file, _ => new Hierarchy(bundles, file));
 
-    private readonly BundleSet _bundles;
+    private readonly IBundleReader _bundles;
     private readonly AssetsFileInstance _file;
     private readonly Dictionary<long, List<Drawing>> _drawing = [];
     private readonly Dictionary<long, Node?> _objects = [];
     private readonly Dictionary<long, long> _transforms = [];
 
-    private Hierarchy(BundleSet bundles, AssetsFileInstance file)
+    private Hierarchy(IBundleReader bundles, AssetsFileInstance file)
     {
         _bundles = bundles;
         _file = file;

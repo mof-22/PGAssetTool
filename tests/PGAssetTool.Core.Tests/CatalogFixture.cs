@@ -17,11 +17,17 @@ internal static class CatalogFixture
     internal const string AssetPath = "Assets/Test/Content/Thing.prefab";
 
     internal static string RemoteFileName => $"bundle_one_{RemoteHash}.bundle";
-    internal static string LocalFileName => $"bundle_two_{LocalHash}.bundle";
+
+    /// Named without the hash it is filed under, as the game's localization bundles are. Reading a
+    /// hash off a name works for almost every bundle and silently drops these.
+    internal const string LocalFileName = "localization-assets-shared_assets_all.bundle";
 
     /// A catalog holding two bundles and one asset that needs both. The written file is deleted
     /// before this returns; the catalog is read whole.
-    internal static ContentCatalog Written()
+    internal static ContentCatalog Written() => ReadBack(Json());
+
+    /// The same catalog as the text of a file, for a test that has to write one and read it again.
+    internal static string Json()
     {
         string[] internalIds =
         [
@@ -67,7 +73,7 @@ internal static class CatalogFixture
             ["m_ExtraDataString"] = Convert.ToBase64String(extra.ToArray()),
         };
 
-        return ReadBack(JsonSerializer.Serialize(catalog));
+        return JsonSerializer.Serialize(catalog);
     }
 
     internal static ContentCatalog ReadBack(string json)

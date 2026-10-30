@@ -19,14 +19,14 @@ public sealed class SkinCatalog
         Dictionary<string, SkinRecord> byId)
         => (_skinIndexesByWeapon, _idBySkinIndex, _byId) = (skinIndexesByWeapon, idBySkinIndex, byId);
 
-    public static SkinCatalog Load(BundleSet bundles)
+    public static SkinCatalog Load(BundleSet bundles, RegistryReader registries)
     {
         var byWeapon = new Dictionary<int, List<int>>();
-        foreach (var e in bundles.MonoBehaviour("ws_d", "WeaponSkinsDataStorage")["WeaponToSkinsDatas"]["Array"].Children)
+        foreach (var e in registries.Read(Registries.WeaponSkins)["WeaponToSkinsDatas"]["Array"].Children)
             byWeapon[e["weaponIndex"].AsInt] = e["skinIndexes"]["Array"].Children.Select(x => x.AsInt).ToList();
 
         var ids = new Dictionary<int, string>();
-        foreach (var e in bundles.MonoBehaviour("generated_data", "WeaponSkinItemTypeIndices_GENERATED")["indices"]["Array"].Children)
+        foreach (var e in registries.Read(Registries.WeaponSkinIndices)["indices"]["Array"].Children)
             ids.TryAdd(e["index"].AsInt, e["id"].AsString);
 
         var definitions = new Dictionary<string, SkinRecord>(StringComparer.OrdinalIgnoreCase);

@@ -8,7 +8,7 @@ namespace PGAssetTool.Core.Assets;
 /// about which bundle holds them. The CAB index answers that, and costs a tenth of a second across
 /// all 2300 bundles because only headers are read — so it is built on first use and kept, rather
 /// than cached anywhere on disk.
-public sealed class BundleGraph(BundleSet bundles)
+public sealed class BundleGraph(IBundleReader bundles)
 {
     private readonly Lazy<CabIndex> _cabs = new(() => CabIndex.Build(bundles));
     private readonly Dictionary<string, AssetsFileInstance> _open = new(StringComparer.OrdinalIgnoreCase);

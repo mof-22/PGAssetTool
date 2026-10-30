@@ -32,7 +32,7 @@ public sealed record SkinModel(string AssetPath, string Bundle)
     /// How to follow a reference into another bundle. The tree keeps one of these across a whole
     /// weapon; a caller with no reason to cache can build one for the walk.
     /// </param>
-    public IReadOnlyList<AssetNode> Reaches(BundleSet bundles, ReferenceWalker.ExternalResolver resolve)
+    public IReadOnlyList<AssetNode> Reaches(IBundleReader bundles, ReferenceWalker.ExternalResolver resolve)
     {
         try
         {
@@ -106,7 +106,7 @@ public sealed record WeaponTree(
 
 /// Assembles everything belonging to one weapon. Resolution happens on demand: the catalogs plus
 /// the single bundle holding the prefab are enough, so nothing is precomputed.
-public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
+public sealed class WeaponResolver(IBundleReader bundles, GameCatalogs catalogs)
 {
     private readonly IconResolver _icons = new(bundles, catalogs.Lookup);
 
@@ -252,8 +252,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 && id.Contains(record.Slug, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        return catalogs.Lookup.Entries
-            .Select(e => e.Key)
+        return catalogs.Lookup.Paths
             .Where(p => p != prefabPath && Names(p, record.Slug) && !longer.Any(id => Names(p, id)))
             .ToList();
     }

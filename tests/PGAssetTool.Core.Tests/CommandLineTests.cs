@@ -28,6 +28,21 @@ public class CommandLineTests
         Assert.True(line.Has("workspace"));
     }
 
+    /// A command's options have to be registered as well as read, or the command refuses every one
+    /// of them by name — which is how `fetch --dry-run` first answered.
+    [Fact]
+    public void TheFetchOptionsAreKnownToTheParser()
+    {
+        var line = CommandLine.Parse(
+            ["fetch", "--parallel", "16", "--into", @"D:\somewhere", "--dry-run", "--check-cached"]);
+
+        Assert.Equal("fetch", line.Command);
+        Assert.Equal(16, line.Number("parallel", 8));
+        Assert.Equal(@"D:\somewhere", line.Option("into"));
+        Assert.True(line.Has("dry-run"));
+        Assert.True(line.Has("check-cached"));
+    }
+
     [Fact]
     public void AValueCanBeJoinedToItsOption()
     {

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using AssetsTools.NET.Extra;
+using PGAssetTool.Core.Addressables;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export.Meshes;
@@ -17,7 +18,14 @@ namespace PGAssetTool.Gui.ViewModels;
 
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
+    /// The registries: the item catalogue, the names, the skins, the gear and the lookup table,
+    /// each a MonoBehaviour in a small bundle of its own on the old path, where the game still
+    /// keeps them.
     private BundleSet? _bundles;
+
+    /// What an item is made of, which since 26.15 is behind the content catalog. The old reader
+    /// stands in on an installation from before the move.
+    private IBundleReader? _content;
     private GameCatalogs? _catalogs;
     private WeaponResolver? _resolver;
 
@@ -31,7 +39,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Preview = new PreviewViewModel(_alpha);
         Preview.PropertyChanged += OnPreviewChanged;
-        Editor = new EditorViewModel(() => _bundles, _reading, _alpha) { Catalogs = () => _catalogs };
+        Editor = new EditorViewModel(() => _content, _reading, _alpha)
+        {
+            Catalogs = () => _catalogs,
+            Game = () => _installation,
+        };
         Editor.PackRequested += BuildPack;
 
         Manager = new ManagerViewModel(() => _installation);
@@ -51,14 +63,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 or nameof(ManagerViewModel.Order))
                 Remember();
 
-            if (e.PropertyName is nameof(ManagerViewModel.Busy)) OnPropertyChanged(nameof(Working));
+            if (e.PropertyName is nameof(ManagerViewModel.Busy)) WorkingChanged();
         };
     }
 
     [ObservableProperty] private string _status = "Looking for the game…";
     [ObservableProperty] private bool _busy = true;
 
-    partial void OnBusyChanged(bool value) => OnPropertyChanged(nameof(Working));
+    partial void OnBusyChanged(bool value) => WorkingChanged();
+
+    private void WorkingChanged()
+    {
+        OnPropertyChanged(nameof(Working));
+        OnPropertyChanged(nameof(BusyBar));
+    }
 
     /// How large the windows draw themselves, as a percentage. See ToolSettings.UiScale.
     [ObservableProperty] private int _uiScale = 100;
@@ -92,6 +110,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// screen that says the tool is doing something — is bound to this rather than to the busy flag
     /// the manager keeps of its own.
     public bool Working => Busy || Manager.Busy;
+
+    /// The bar that only says something is going on, which a fetch replaces with one that fills.
+    public bool BusyBar => Working && !Fetching;
 
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private WeaponListItem? _selected;
@@ -327,6 +348,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ReadMemory = _settings.ReadMemory;
         MaskUnusedTextures = _settings.MaskUnusedTextures;
         UiScale = _settings.UiScale;
+        ReadFetchSettings(_settings);
         Manager.Packing = Packing;
         _loading = false;
 
@@ -349,18 +371,45 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // It also stops a protected pack being lifted straight back out of the game it went
                 // into, which is the weaker reason. Mods are checked in the game.
                 var store = new ModStore(game);
-                _bundles = new BundleSet(game, originals: store.OriginalOf)
-                {
-                    UnpackBudget = ReadMemory * 1024L * 1024,
-                };
+
+                // The registries are small and there is nothing to gain from holding them unpacked;
+                // the budget belongs to the content, which is what browsing reads megabytes of.
+                _bundles = new BundleSet(game, originals: store.OriginalOf);
+
+                // The content the game downloads as it is played, which since 26.15 is nearly all
+                // of it. An installation from before the move has no catalog, and the old reader
+                // stands in: its 90 bundles are all such a game has.
+                _addressables = ReadAddressables(game);
+                _content = _addressables is { } addressables
+                    // The context is shared, so the engine class database is loaded once; the
+                    // registries' reader owns it and closes it.
+                    //
+                    // No kept originals yet: nothing writes into these bundles, and when something
+                    // does it will not need any — the delivered bytes can be fetched again and
+                    // checked against the catalog's CRC.
+                    ? new AddressableSet(addressables, _bundles.Context)
+                    {
+                        UnpackBudget = ReadMemory * 1024L * 1024,
+                    }
+                    : _bundles;
 
                 // The name tables are kept in this installation's own folder, beside its backups
                 // and its ledger: they are read from this game's bundles and are worth nothing
                 // against another. See WeaponNames.
+                //
+                // Which bundle holds a logical path is the one thing the registries cannot answer
+                // for themselves any more: the table they ship names bundles the game no longer
+                // has. The catalog is asked instead, where the same paths are the keys.
+                //
+                // The item tables go the same way. The copies the old bundles still hold parse and
+                // are out of date — 1,523 weapons where the game has 1,530 — so a 26.15 game read
+                // through them is missing whatever the last updates added.
                 _catalogs = GameCatalogs.Load(
                     _bundles, string.IsNullOrEmpty(Language) ? _settings.Language : Language,
-                    remember: store.Root);
-                _resolver = new WeaponResolver(_bundles, _catalogs);
+                    remember: store.Root,
+                    lookup: _addressables is null ? null : CatalogLookup.Of(_addressables.Catalog),
+                    registries: new RegistryReader(_bundles, _content as AddressableSet));
+                _resolver = new WeaponResolver(_content!, _catalogs);
             });
 
             Languages.Clear();
@@ -405,6 +454,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             Manager.Refresh();
             UpdateNotice = UpdateNoticeFor(_installation!, _bundles!);
+            await NoticeWhatIsMissing();
             if (ErrorLog.UntoldCrash() is { } crash)
             {
                 CrashReport = crash;
@@ -554,7 +604,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ExtractWeapon()
     {
-        if (_tree is null || _bundles is null) { Status = "Select an item first."; return; }
+        if (_tree is null || _content is null) { Status = "Select an item first."; return; }
 
         var tree = _tree;
         if (ReferenceEquals(ChosenSkin, SkinChoice.All))
@@ -565,11 +615,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         await RunExclusively($"extracting the {tree.Record.Kind.Name.ToLowerInvariant()}", async () =>
         {
-            var version = GameVersion.Of(_bundles.Context, _bundles.Game);
+            var version = GameVersion.Of(_bundles!.Context, _installation!);
 
             var skin = ChosenSkin?.Id;
             var export = await Task.Run(() =>
-                new WeaponExporter(_bundles)
+                new WeaponExporter(_content)
                 {
                     Opaque = _settings.OpaqueTextures, Skin = skin,
                     MaskUnused = _settings.MaskUnusedTextures,
@@ -592,13 +642,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         await RunExclusively($"extracting the {tree.Record.Kind.Name.ToLowerInvariant()} and its skins", async () =>
         {
-            var version = GameVersion.Of(_bundles!.Context, _bundles.Game);
+            var version = GameVersion.Of(_bundles!.Context, _installation!);
             // Made here, so what it reports arrives on the window's thread.
             var progress = new Progress<string>(said => Status = said);
             IProgress<string> report = progress;
 
             var looks = await Task.Run(() => WeaponExporter.ExportEveryLook(
-                _bundles, tree, WorkspaceRoot, _settings.Author, version,
+                _content, tree, WorkspaceRoot, _settings.Author, version,
                 opaque: _settings.OpaqueTextures, maskUnused: _settings.MaskUnusedTextures,
                 progress: (at, of, name) => report.Report($"Extracting {at} of {of}: {name}…")));
 
@@ -632,15 +682,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 // The same refusal a whole weapon gets: a bundle another copy of the tool modded is,
                 // from here, just what the game holds now. See BundleSet.ReadsAsShipped.
-                if (_bundles!.Altered([node.Bundle]) is { Count: > 0 })
+                if (_content!.Altered([node.Bundle]) is { Count: > 0 })
                     throw new InvalidOperationException(
                         $"'{node.Bundle}' has been changed by something other than this copy of the tool, which has "
                         + "no original to read instead. Extracting would write that change out as the game's own.");
 
-                if (AssetPreview.Locate(_bundles!, node.Bundle, node.Class.Value, node.PathId, node.Label)
+                if (AssetPreview.Locate(_content!, node.Bundle, node.Class.Value, node.PathId, node.Label)
                     is not var (file, info)) return null;
 
-                return new AssetExporter(_bundles!) { Opaque = _settings.OpaqueTextures }
+                return new AssetExporter(_content!) { Opaque = _settings.OpaqueTextures }
                     .Export(node.Bundle, file, info, directory);
             });
 
@@ -679,8 +729,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void CloseReader()
     {
-        _bundles?.Dispose();
-        (_bundles, _catalogs, _resolver, _tree, _clips) = (null, null, null, null, null);
+        _content?.Dispose();
+        if (!ReferenceEquals(_content, _bundles)) _bundles?.Dispose();
+        (_bundles, _content, _catalogs, _resolver, _tree, _clips) =
+            (null, null, null, null, null, null);
         Detail = null;
         Preview.Clear();
     }
@@ -775,8 +827,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <param name="sofar">What has already happened, for the message that says why nothing more will.</param>
     private async Task ApplyPacks(IReadOnlyList<string> paths, string trouble, string sofar)
     {
-        if (_bundles is null) { Status = "The game is not open."; return; }
-        var game = _bundles.Game;
+        if (_installation is null) { Status = "The game is not open."; return; }
+        var game = _installation;
 
         // The manager has always refused to write while the game is running; this path never
         // did, and it is the one an author uses over and over. The packs are built and on disk,
@@ -958,7 +1010,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             _catalogs = _catalogs.WithLanguage(_bundles, value);
-            _resolver = new WeaponResolver(_bundles, _catalogs);
+            _resolver = new WeaponResolver(_content!, _catalogs);
             Show(Found());
 
             // The manager's headings are weapon and skin names too, and they are read out of the
@@ -1026,6 +1078,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ShowArms = ShowArms,
             FasterApplies = FasterApplies, LighterApplies = LighterApplies, ReadMemory = ReadMemory,
             MaskUnusedTextures = MaskUnusedTextures, UiScale = UiScale,
+            FetchAtOnce = FetchAtOnce, FetchDirectory = FetchDirectory.Trim(),
         };
         // A folder that cannot be written to is not an IOException — it is its own kind — and this
         // runs from a property changing, which is to say from somebody ticking a box. The tool
@@ -1125,10 +1178,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// head beside the body. The walk costs a rig per placement, which is why it is asked only when
     /// the item's own root has answered nothing.
     private Skeleton? Under(string bundle, long pathId)
-        => (PrefabRoot is { } root ? Skeleton.For(_bundles!, bundle, pathId, root, whole: true) : null)
-            ?? Skeleton.Every(_bundles!, bundle, pathId, whole: true)
+        => (PrefabRoot is { } root ? Skeleton.For(_content!, bundle, pathId, root, whole: true) : null)
+            ?? Skeleton.Every(_content!, bundle, pathId, whole: true)
                 .FirstOrDefault(place => !Outlined(place.Under) && !Copy(place.Root))?.Skeleton
-            ?? Skeleton.For(_bundles!, bundle, pathId, whole: true);
+            ?? Skeleton.For(_content!, bundle, pathId, whole: true);
 
     private string? PrefabRoot
         => _tree?.PrefabPath is { Length: > 0 } path ? path[(path.LastIndexOf('/') + 1)..] : null;
@@ -1152,7 +1205,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// plague doctor's mask above, and one weapon reaching another's mesh the same way.
     private List<Skeleton.Placement> Places(AssetNode mesh, string bundle, bool hasOwn)
     {
-        var places = Skeleton.Every(_bundles!, bundle, mesh.PathId, whole: true)
+        var places = Skeleton.Every(_content!, bundle, mesh.PathId, whole: true)
             .Where(p => !Outlined(p.Under) && !Copy(p.Root))
             .ToList();
 
@@ -1236,12 +1289,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// to borrow and is left to the box. See Facing.
     private MeshRenderer.Basis Standing(TreeNode node, UnityMesh model, Skeleton? skeleton)
         => _tree?.Record.Kind == ItemKinds.Weapon || skeleton?.Home(model) is not { } home
-            ? Facing.Standing(_bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId)
+            ? Facing.Standing(_content!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId)
             : Facing.Upright(home);
 
-    /// Whether a root is the item's own prefab root.
+    /// Whether a root is one of this item's own names.
+    ///
+    /// The prefab root is the address's leaf — `Weapon530` — and the hierarchy a mesh hangs under is
+    /// named after the model the prefab instantiates, which is the item's slug: `magicbook_love`.
+    /// Since 26.15 the prefab and that model are in different bundles and the ancestry walk stops at
+    /// the bundle boundary, so for a weapon the prefab root is never reached — 0 of 40 measured —
+    /// and asking for it alone answered no for every one of them. Both names are the item's, which
+    /// is what `Somebody` has always taken them for.
     private bool Mine(string root)
-        => string.Equals(root, PrefabRoot, StringComparison.OrdinalIgnoreCase);
+        => string.Equals(root, PrefabRoot, StringComparison.OrdinalIgnoreCase)
+            || (_tree?.Record is { } record
+                && (string.Equals(root, record.Slug, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(root, record.PrefabName, StringComparison.OrdinalIgnoreCase)));
 
     /// The sphere the item's own parts fill, in the prefab's space.
     ///
@@ -1317,11 +1380,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Asked of the names alone, before any rig is read: a transport comes to twenty placements and
     /// reading the rig is most of what one costs. See Skeleton.Placings.
     private bool HasOwnHierarchy(IReadOnlyList<AssetNode> meshes, string prefabBundle)
-        => PrefabRoot is { } root && meshes.Any(mesh => Skeleton
-            .Placings(_bundles!, mesh.Bundle.Length > 0 ? mesh.Bundle : prefabBundle, mesh.PathId)
-            .Any(under => !Outlined(under)
-                && under.Count > 0
-                && string.Equals(under[^1], root, StringComparison.OrdinalIgnoreCase)));
+        => PrefabRoot is not null && meshes.Any(mesh => Skeleton
+            .Placings(_content!, mesh.Bundle.Length > 0 ? mesh.Bundle : prefabBundle, mesh.PathId)
+            .Any(under => !Outlined(under) && under.Count > 0 && Mine(under[^1])));
 
     /// A prefab holding the game's own second arrangement of an item: the shop's, and the one the
     /// preview in a weapon's info panel uses.
@@ -1409,16 +1470,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var bundle = other.Bundle.Length > 0 ? other.Bundle : prefabBundle;
             try
             {
-                if (AssetPreview.Locate(_bundles!, bundle, AssetClassID.Mesh, other.PathId, other.Name)
+                if (AssetPreview.Locate(_content!, bundle, AssetClassID.Mesh, other.PathId, other.Name)
                     is not var (file, info)) continue;
 
-                var field = _bundles!.Context.Deserialize(file, info);
+                var field = _content!.Context.Deserialize(file, info);
                 // Through AssetPreview, because a part can keep its vertices in the bundle's
                 // companion file as a texture keeps its pixels, and read without one it has no
                 // geometry at all. Three transports' bodies are stored that way.
-                if (field is null || AssetPreview.Mesh(field, _bundles, bundle)
+                if (field is null || AssetPreview.Mesh(field, _content, bundle)
                     is not { VertexCount: > 0 } mesh) continue;
-                if (!Skeleton.Drawn(_bundles, bundle, other.PathId)) continue;
+                if (!Skeleton.Drawn(_content, bundle, other.PathId)) continue;
 
                 found.Add((other, mesh, Places(other, bundle, hasOwn)));
             }
@@ -1497,11 +1558,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (node is null) return null;
             try
             {
-                if (AssetPreview.Locate(_bundles!, node.Bundle, AssetClassID.Texture2D, node.PathId, node.Name)
+                if (AssetPreview.Locate(_content!, node.Bundle, AssetClassID.Texture2D, node.PathId, node.Name)
                     is not var (file, info)) return null;
 
-                var field = _bundles!.Context.Deserialize(file, info);
-                return field is null ? null : AssetPreview.Texture(_bundles, node.Bundle, field);
+                var field = _content!.Context.Deserialize(file, info);
+                return field is null ? null : AssetPreview.Texture(_content, node.Bundle, field);
             }
             catch (Exception)
             {
@@ -1579,7 +1640,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             await _reading.WaitAsync();
             try
             {
-                if (_bundles is not { } bundles) return;
+                if (_content is not { } bundles) return;
 
                 var walked = await Task.Run(() =>
                 {
@@ -1693,10 +1754,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 var loaded = await Task.Run(() =>
                 {
-                    if (AssetPreview.Locate(_bundles!, choice.Bundle, AssetClassID.Texture2D, choice.PathId, choice.Name)
+                    if (AssetPreview.Locate(_content!, choice.Bundle, AssetClassID.Texture2D, choice.PathId, choice.Name)
                         is not var (file, info)) return null;
-                    var field = _bundles!.Context.Deserialize(file, info);
-                    return field is null ? null : AssetPreview.Texture(_bundles, choice.Bundle, field);
+                    var field = _content!.Context.Deserialize(file, info);
+                    return field is null ? null : AssetPreview.Texture(_content, choice.Bundle, field);
                 });
 
                 // Only if the choice still stands: reading a texture takes long enough for someone
@@ -1794,7 +1855,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private IReadOnlyList<Motion> Clips()
     {
         if (_clips is not null) return _clips;
-        if (_tree is not { } tree || _bundles is null) return [];
+        if (_tree is not { } tree || _content is null) return [];
 
         return _clips = ClipsAmong(tree.PrefabAssets, tree.PrefabBundle);
     }
@@ -1830,7 +1891,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private IReadOnlyList<Motion> ClipsAmong(IEnumerable<AssetNode> assets, string? fallback)
     {
         var found = new List<Motion>();
-        if (_bundles is null) return found;
+        if (_content is null) return found;
 
         foreach (var node in assets.Where(a => a.Class == AssetClassID.AnimationClip))
         {
@@ -1839,9 +1900,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             try
             {
-                var file = _bundles.Open(bundle);
+                var file = _content.Open(bundle);
                 var info = file.file.GetAssetInfo(node.PathId);
-                var field = info is null ? null : _bundles.Context.Deserialize(file, info);
+                var field = info is null ? null : _content.Context.Deserialize(file, info);
 
                 if (field is not null && Motion.Read(field) is { } motion) found.Add(motion);
             }
@@ -1885,17 +1946,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 {
                     // An icon is registered by name with no path id, and may live in the game's own
                     // resources.assets rather than in a bundle, so finding it is not a lookup by id.
-                    if (AssetPreview.Locate(_bundles!, node.Bundle, node.Class.Value, node.PathId, node.Label)
+                    if (AssetPreview.Locate(_content!, node.Bundle, node.Class.Value, node.PathId, node.Label)
                         is not var (file, info)) return null;
 
-                    var field = _bundles!.Context.Deserialize(file, info);
+                    var field = _content!.Context.Deserialize(file, info);
                     if (field is null) return null;
 
                     return node.Class switch
                     {
-                        AssetClassID.Texture2D => AssetPreview.Texture(_bundles, node.Bundle, field),
-                        AssetClassID.AudioClip => AssetPreview.Audio(_bundles, node.Bundle, field),
-                        _ => AssetPreview.Mesh(field, _bundles, node.Bundle),
+                        AssetClassID.Texture2D => AssetPreview.Texture(_content, node.Bundle, field),
+                        AssetClassID.AudioClip => AssetPreview.Audio(_content, node.Bundle, field),
+                        _ => AssetPreview.Mesh(field, _content, node.Bundle),
                     };
                 });
 
@@ -1967,7 +2028,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         Preview.Show(sound, $"{node.Label}   @ {node.Bundle}");
                         break;
                     default:
-                        Preview.Clear(_bundles!.Context.HasClassDatabase || !node.Bundle.Contains('.')
+                        Preview.Clear(_content!.Context.HasClassDatabase || _content.Knows(node.Bundle)
                             ? $"'{node.Label}' could not be read from {node.Bundle}."
                             : $"'{node.Label}' lives in {node.Bundle}, which needs {ClassPackage.FileName}.");
                         break;
@@ -1993,7 +2054,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public bool Reading => _reading.CurrentCount == 0;
 
     /// What Browse and extraction read through, for a check that it is the game as shipped.
-    internal BundleSet? Reader => _bundles;
+    internal IBundleReader? Reader => _content;
+
+    /// The registries' reader, which is the old path's and stays that way while the game keeps them
+    /// there. Only a test asks for it: everything in the window goes through the catalogues.
+    internal BundleSet? Registries => _bundles;
+
+    /// The registries as this window read them, lookup and all. A check that resolves an item of
+    /// its own wants these rather than a fresh load, which would read the old route's lookup table
+    /// and find none of the bundles the game still has.
+    internal GameCatalogs? Catalogues => _catalogs;
 
     /// Said across the top of the window when the game has been updated under installed mods.
     [ObservableProperty] private string? _updateNotice;
@@ -2033,6 +2103,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         System.Diagnostics.Process.Start("explorer.exe", target);
     }
 
+    /// The catalog and the cache, or null on an installation that has neither.
+    private static AddressableBundles? ReadAddressables(GameInstallation game)
+    {
+        try
+        {
+            return File.Exists(ContentCatalog.PathIn(game.DataDirectory))
+                ? AddressableBundles.For(game.DataDirectory)
+                : null;
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException)
+        {
+            ErrorLog.Record(e, "reading the game's content catalog");
+            return null;
+        }
+    }
+
     /// Worked out on opening the game, not on being asked: after an update nothing else about the
     /// tool looks wrong. See GameUpdate.
     private static string? UpdateNoticeFor(GameInstallation game, BundleSet bundles)
@@ -2054,7 +2140,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         Editor.Dispose();
-        _bundles?.Dispose();
+        _content?.Dispose();
+        if (!ReferenceEquals(_content, _bundles)) _bundles?.Dispose();
         _reading.Dispose();
     }
 }

@@ -124,6 +124,15 @@ public sealed record ToolSettings
     /// unpacked against about 110ms without. Zero reads everything from disk a block at a time.
     public int ReadMemory { get; init; } = 1024;
 
+    /// How many bundles the content fetch downloads at once. See BundleFetcher.AtOnce for where
+    /// eight comes from.
+    public int FetchAtOnce { get; init; } = 8;
+
+    /// Where the content fetch writes. Empty is the cache the game itself downloads into, which is
+    /// the only place the game reads it from — anywhere else is a copy to look at rather than
+    /// something the game will load.
+    public string FetchDirectory { get; init; } = "";
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

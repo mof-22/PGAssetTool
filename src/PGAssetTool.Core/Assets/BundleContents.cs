@@ -20,7 +20,7 @@ namespace PGAssetTool.Core.Assets;
 /// The `assets/editor/resources/` in front is not matched against, because it is where the game's
 /// authors happened to keep these and says nothing about what the game asks for. See `Names` for
 /// what is compared instead.
-public sealed class BundleContents(BundleSet bundles)
+public sealed class BundleContents(IBundleReader bundles)
 {
     private readonly Dictionary<string, List<(string Path, long PathId)>> _byBundle = new(StringComparer.OrdinalIgnoreCase);
 

@@ -18,6 +18,9 @@ public sealed class GameCatalogs
     /// needs the item catalog that is being built alongside it.
     public WeaponNames? Names { get; private set; }
 
+    /// Where these were read from, so reading them again in another language goes the same way.
+    public RegistryReader? Registries { get; private init; }
+
     public ItemCatalog Items { get; }
     public AssetLookup Lookup { get; }
     public Localization Localization { get; }
@@ -85,17 +88,34 @@ public sealed class GameCatalogs
     /// all eleven of the game's is 355ms of the 930 a window waits before it has a list, and they
     /// change only when the game does. Null reads them every time. See WeaponNames.
     /// </param>
+    /// <param name="lookup">
+    /// Where to ask which bundle holds a logical path. Left out, the registry the old route keeps
+    /// that in; the Addressables route hands in one built from the content catalog instead, since a
+    /// bundle name from the old registry means nothing to its reader. Everything else here — the
+    /// items, the names, the skins, the gear — is read the same way on both, out of the registries
+    /// the game still ships in its own small bundles.
+    /// </param>
+    /// <param name="registries">
+    /// Where to read the game's item tables from. Left out, the bundles the old path keeps them in
+    /// — which on a 26.15 installation are **still readable and out of date**: they describe the
+    /// game before the move, seven weapons short. See `RegistryReader`.
+    /// </param>
     public static GameCatalogs Load(
-        BundleSet bundles, string language = DefaultLanguage, string? remember = null)
+        BundleSet bundles, string language = DefaultLanguage, string? remember = null,
+        AssetLookup? lookup = null, RegistryReader? registries = null)
     {
+        registries ??= new RegistryReader(bundles);
         var catalogs = new GameCatalogs(
-            ItemCatalog.Load(bundles),
-            AssetLookup.Load(bundles),
-            Localization.Load(bundles, language),
-            SkinCatalog.Load(bundles),
-            GearCatalog.Load(bundles));
+            ItemCatalog.Load(registries),
+            lookup ?? AssetLookup.Load(bundles),
+            Localization.Load(bundles, language, registries),
+            SkinCatalog.Load(bundles, registries),
+            GearCatalog.Load(registries))
+        {
+            Registries = registries,
+        };
 
-        catalogs.Names = WeaponNames.Load(bundles, catalogs.Items, remember);
+        catalogs.Names = WeaponNames.Load(bundles, catalogs.Items, remember, registries);
         return catalogs;
     }
 
@@ -105,18 +125,61 @@ public sealed class GameCatalogs
     /// and the search index do not. Rebuilding all of them to change which name is displayed costs
     /// the better part of a second for no reason.
     public GameCatalogs WithLanguage(BundleSet bundles, string language)
-        => new(Items, Lookup, Localization.Load(bundles, language), Skins, Gear) { Names = Names };
+        => new(Items, Lookup, Localization.Load(bundles, language, Registries), Skins, Gear)
+        {
+            Names = Names,
+            Registries = Registries,
+        };
 }
 
 /// Maps a logical asset path such as "Weapons/Weapon25" to the bundle holding it. The game resolves
 /// these strings at runtime, so following binary PPtr references alone leaves the graph disconnected.
+/// Both of the game's layouts answer this question and neither one's answer means anything to the
+/// other reader, so a lookup is built with the paths it knows and a way of asking where one of them
+/// is. `Load` reads the registry the old route keeps it in; the Addressables route builds one from
+/// the catalog, where the same logical paths are the keys the game asks for.
 public sealed partial class AssetLookup
 {
-    private readonly Dictionary<string, string> _bundleByPath;
+    /// Every path in the order it was given, and the spelling each one is stored under.
+    ///
+    /// Two maps rather than one because the two halves of this disagree about case. A registry says
+    /// `BerserkBoots_Up1` where the content catalog has `BerserkBoots_up1`, and the icon names do
+    /// not match the slugs either — so a path has to be findable however it is spelt. But what is
+    /// asked of the route has to be the spelling the route itself holds, since the catalog's keys
+    /// are case-sensitive: asked for the caller's capitalisation it answers nothing, which is what
+    /// left fourteen pairs of boots unresolved.
+    private readonly List<string> _order = [];
+    private readonly Dictionary<string, string> _spelling = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<string, string?> _bundleFor;
     private readonly Dictionary<int, List<string>> _pathsByWeapon;
+    private readonly Dictionary<string, string?> _answered = new(StringComparer.Ordinal);
 
-    private AssetLookup(Dictionary<string, string> bundleByPath, Dictionary<int, List<string>> pathsByWeapon)
-        => (_bundleByPath, _pathsByWeapon) = (bundleByPath, pathsByWeapon);
+    /// <param name="paths">
+    /// Every logical path this lookup knows, in the order they are to be offered. Paths collide when
+    /// compared case-insensitively and the first spelling wins, as with localization.
+    /// </param>
+    /// <param name="bundleFor">
+    /// Where one of those paths is, in whatever a bundle is called on this route, or null for a path
+    /// nothing holds. Asked at most once per path.
+    /// </param>
+    public AssetLookup(IEnumerable<string> paths, Func<string, string?> bundleFor)
+    {
+        _bundleFor = bundleFor;
+        _pathsByWeapon = [];
+
+        foreach (var path in paths)
+        {
+            if (!_spelling.TryAdd(path, path)) continue;
+            _order.Add(path);
+
+            foreach (Match match in WeaponToken.Matches(path))
+            {
+                if (!int.TryParse(match.Groups[1].ValueSpan, out var number)) continue;
+                if (!_pathsByWeapon.TryGetValue(number, out var list)) _pathsByWeapon[number] = list = [];
+                if (!list.Contains(path)) list.Add(path);
+            }
+        }
+    }
 
     /// A weapon's assets are spread over a dozen namespaces, tied together only by the number in
     /// their name. Extracting that token rather than enumerating known namespaces means namespaces
@@ -124,26 +187,15 @@ public sealed partial class AssetLookup
     [GeneratedRegex(@"\b(?:Weapon|Ray)(\d+)")]
     private static partial Regex WeaponToken { get; }
 
+    /// The registry the old route keeps this in, which is a MonoBehaviour in a bundle of its own.
     public static AssetLookup Load(BundleSet bundles)
     {
         var entries = bundles.MonoBehaviour("assets_lookup_table", "*")["TableEntries"]["Array"];
-        // Paths collide when compared case-insensitively; the first entry wins, as with localization.
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var byWeapon = new Dictionary<int, List<string>>();
-
         foreach (var e in entries.Children)
-        {
-            var path = e["AssetPath"].AsString;
-            if (!map.TryAdd(path, e["BundleName"].AsString)) continue;
+            map.TryAdd(e["AssetPath"].AsString, e["BundleName"].AsString);
 
-            foreach (Match match in WeaponToken.Matches(path))
-            {
-                if (!int.TryParse(match.Groups[1].ValueSpan, out var number)) continue;
-                if (!byWeapon.TryGetValue(number, out var list)) byWeapon[number] = list = [];
-                if (!list.Contains(path)) list.Add(path);
-            }
-        }
-        return new AssetLookup(map, byWeapon);
+        return new AssetLookup(map.Keys, path => map.GetValueOrDefault(path));
     }
 
     /// Every asset path whose name carries this prefab number, in any namespace.
@@ -154,17 +206,27 @@ public sealed partial class AssetLookup
     public static readonly string[] SkinAssetRoots =
         ["WeaponSkinsV2/WeaponSkinAssets/", "WeaponSkinsV2/CustomModels/", "WeaponSkinsV2/"];
 
-    public int Count => _bundleByPath.Count;
-    public string? BundleFor(string assetPath) => _bundleByPath.GetValueOrDefault(assetPath);
-    public IEnumerable<KeyValuePair<string, string>> Entries => _bundleByPath;
+    public int Count => _order.Count;
+
+    /// Every path this lookup knows, in the order they were given.
+    public IReadOnlyList<string> Paths => _order;
+
+    public bool Knows(string assetPath) => _spelling.ContainsKey(assetPath);
+
+    public string? BundleFor(string assetPath)
+    {
+        if (!_spelling.TryGetValue(assetPath, out var exact)) return null;
+        if (_answered.TryGetValue(exact, out var already)) return already;
+        return _answered[exact] = _bundleFor(exact);
+    }
 
     /// Resolves a path that may be written relative to one of the given roots. Returns the full
     /// path that matched along with its bundle.
     public (string Path, string Bundle)? Resolve(string assetPath, params string[] roots)
     {
-        if (_bundleByPath.TryGetValue(assetPath, out var direct)) return (assetPath, direct);
+        if (BundleFor(assetPath) is { } direct) return (assetPath, direct);
         foreach (var root in roots)
-            if (_bundleByPath.TryGetValue(root + assetPath, out var prefixed))
+            if (BundleFor(root + assetPath) is { } prefixed)
                 return (root + assetPath, prefixed);
         return null;
     }
@@ -183,11 +245,18 @@ public sealed class Localization
     public static Localization FromTerms(string language, IEnumerable<KeyValuePair<string, string>> terms)
         => new(language, terms.ToDictionary(t => t.Key, t => t.Value, StringComparer.Ordinal));
 
-    public static Localization Load(BundleSet bundles, string language)
+    /// <param name="registries">
+    /// Where to read the table from. Given, the catalog's copy is used and the bundle on the old
+    /// path stands in only where the catalog has none — and on a 26.15 game the old copy is stale
+    /// in a way that shows as wrong names rather than missing ones. See `Registries.Languages`.
+    /// </param>
+    public static Localization Load(
+        BundleSet bundles, string language, RegistryReader? registries = null)
     {
+        var table = registries?.TryReadLanguage(language) ?? bundles.MonoBehaviour(language, "*");
+
         var terms = new Dictionary<string, string>(StringComparer.Ordinal);
-        var array = bundles.MonoBehaviour(language, "*")["mTerms"]["Array"];
-        foreach (var e in array.Children)
+        foreach (var e in table["mTerms"]["Array"].Children)
             terms.TryAdd(e["term"].AsString, e["translation"].AsString);
         return new Localization(language, terms);
     }

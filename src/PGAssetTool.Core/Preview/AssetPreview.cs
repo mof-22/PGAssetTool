@@ -49,7 +49,7 @@ public sealed record PreviewImage(int Width, int Height, byte[] Bgra)
 /// it needs pixels and triangles in memory — so the decoding is shared but the writing is not.
 public static class AssetPreview
 {
-    public static PreviewImage? Texture(BundleSet bundles, string bundle, AssetTypeValueField field)
+    public static PreviewImage? Texture(IBundleReader bundles, string bundle, AssetTypeValueField field)
     {
         var texture = TextureFile.ReadTextureFile(field);
 
@@ -75,7 +75,7 @@ public static class AssetPreview
     /// name and records no id, so it has to be found by the name it is registered under — and the
     /// newest weapons keep theirs in the game's own resources.assets rather than in a bundle.
     public static (AssetsFileInstance File, AssetFileInfo Info)? Locate(
-        BundleSet bundles, string container, AssetClassID cls, long pathId, string name)
+        IBundleReader bundles, string container, AssetClassID cls, long pathId, string name)
     {
         if (OpenContainer(bundles, container) is not { } file) return null;
 
@@ -90,9 +90,9 @@ public static class AssetPreview
     }
 
     /// A container is a bundle name, unless it is one of the game's own serialized files.
-    private static AssetsFileInstance? OpenContainer(BundleSet bundles, string container)
+    private static AssetsFileInstance? OpenContainer(IBundleReader bundles, string container)
     {
-        if (!container.Contains('.', StringComparison.Ordinal))
+        if (bundles.Knows(container))
         {
             try { return bundles.Open(container); }
             catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
@@ -102,7 +102,7 @@ public static class AssetPreview
         // Without it the icon is simply not previewable, which is worth saying rather than hiding.
         if (!bundles.Context.HasClassDatabase) return null;
 
-        var path = bundles.Game.EnumerateSerializedFiles().FirstOrDefault(
+        var path = bundles.SerializedFiles.FirstOrDefault(
             f => string.Equals(Path.GetFileName(f), container, StringComparison.OrdinalIgnoreCase));
         return path is null ? null : bundles.Context.OpenSerializedFile(path);
     }
@@ -113,7 +113,7 @@ public static class AssetPreview
     /// and the clips inside it are PCM or Vorbis depending on the sound. Fmod5Sharp rebuilds one as
     /// a WAV or an Ogg, and from there it is the same decoding path a replacement takes on the way
     /// in — so a clip that previews wrong is one that would have been packed wrong.
-    public static PreviewSound? Audio(BundleSet bundles, string bundle, AssetTypeValueField field)
+    public static PreviewSound? Audio(IBundleReader bundles, string bundle, AssetTypeValueField field)
     {
         var resource = field["m_Resource"];
         if (resource.IsDummy) return null;
@@ -140,7 +140,7 @@ public static class AssetPreview
     /// <param name="bundles">Where a mesh that keeps its vertices in a companion file reads them
     /// from. Without it such a mesh has no model to show.</param>
     public static UnityMesh? Mesh(
-        AssetTypeValueField field, Assets.BundleSet? bundles = null, string bundle = "")
+        AssetTypeValueField field, Assets.IBundleReader? bundles = null, string bundle = "")
     {
         try
         {

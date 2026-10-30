@@ -49,7 +49,7 @@ public static class Relocation
     /// Its prefab and everything that reaches, what its meshes are drawn with, every skin's materials
     /// and model, and what the lookup table files under its name. The look the pack is for comes
     /// first, and its model is walked, since a skin's own textures are only reachable through it.
-    public static IReadOnlyList<string> Candidates(BundleSet bundles, GameCatalogs catalogs, PackSubject subject)
+    public static IReadOnlyList<string> Candidates(IBundleReader bundles, GameCatalogs catalogs, PackSubject subject)
     {
         var record = catalogs.Find(subject.Id)
             ?? (subject.Prefab.Length > 0 ? catalogs.Find(subject.Prefab) : null);
@@ -98,7 +98,7 @@ public static class Relocation
         return found.Where(bundles.BundleNames.Contains).ToList();
     }
 
-    private static IEnumerable<AssetNode> ModelClosure(BundleSet bundles, SkinModel model)
+    private static IEnumerable<AssetNode> ModelClosure(IBundleReader bundles, SkinModel model)
         => model.Reaches(bundles, new BundleGraph(bundles).Resolve);
 
     /// Which of the bundles given holds this asset, other than the one it was missing from.
@@ -106,7 +106,7 @@ public static class Relocation
     /// A bundle holding it under the same path id is the answer outright. Failing that, a bundle
     /// holding one of that class and name is the answer only if it is the only one: the same name in
     /// two of an item's bundles is two assets, and picking one would be writing into a guess.
-    public static string? Find(BundleSet bundles, IReadOnlyList<string> candidates, AssetAddress target, string missingFrom)
+    public static string? Find(IBundleReader bundles, IReadOnlyList<string> candidates, AssetAddress target, string missingFrom)
     {
         var byName = new List<string>();
 

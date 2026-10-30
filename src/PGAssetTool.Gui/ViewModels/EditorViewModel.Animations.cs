@@ -27,6 +27,10 @@ public sealed partial class EditorViewModel
 
     public Func<GameCatalogs?> Catalogs { set => _catalogs = value; }
 
+    /// The installation behind the reader, for the version a pack records. A reader names bundles
+    /// and not the game they came from.
+    public Func<Core.Game.GameInstallation?>? Game { get; set; }
+
     /// Whether the file selected is an animation, which is when choosing another one is offered.
     [ObservableProperty] private bool _isAnimation;
 
@@ -301,7 +305,7 @@ public sealed partial class EditorViewModel
     }
 
     private async Task Swap(
-        WorkspaceItem workspace, WorkspaceFile file, string what, Func<BundleSet, GameCatalogs, string> work)
+        WorkspaceItem workspace, WorkspaceFile file, string what, Func<IBundleReader, GameCatalogs, string> work)
     {
         if (await Run(what, work) is not { } said) return;
 
@@ -314,7 +318,7 @@ public sealed partial class EditorViewModel
 
     /// Does something with the game open and nothing else reading it, and says what came of it.
     /// Null when it could not be done, which is then what the status says.
-    private async Task<string?> Run(string what, Func<BundleSet, GameCatalogs, string> work)
+    private async Task<string?> Run(string what, Func<IBundleReader, GameCatalogs, string> work)
     {
         await _reading.WaitAsync();
         try
@@ -345,7 +349,7 @@ public sealed partial class EditorViewModel
     /// Which model is the one of this workspace's meshes whose bones the clip moves — the gun, not
     /// the muzzle flash beside it — and of several, the largest. It is dressed from the workspace's
     /// own pictures, as the model itself is when it is selected.
-    private async Task CompareAnimationAsync(BundleSet bundles, WorkspaceFile file)
+    private async Task CompareAnimationAsync(IBundleReader bundles, WorkspaceFile file)
     {
         var meshes = Files.Where(f => f.Target.Class == nameof(AssetClassID.Mesh)).ToList();
         var directory = SelectedWorkspace?.Directory;

@@ -37,7 +37,7 @@ public sealed record AnimationRig(
     }
 
     /// The component that plays this clip, looked for in the bundles given, or null if none does.
-    public static AnimationRig? Playing(BundleSet bundles, IEnumerable<string> lookIn, string clipBundle, long clipPathId)
+    public static AnimationRig? Playing(IBundleReader bundles, IEnumerable<string> lookIn, string clipBundle, long clipPathId)
         => lookIn
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .SelectMany(b => In(bundles, b))
@@ -45,7 +45,7 @@ public sealed record AnimationRig(
                 && string.Equals(c.Bundle, clipBundle, StringComparison.OrdinalIgnoreCase)));
 
     /// Every Animation component in one bundle.
-    public static IReadOnlyList<AnimationRig> In(BundleSet bundles, string bundle)
+    public static IReadOnlyList<AnimationRig> In(IBundleReader bundles, string bundle)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
@@ -83,11 +83,11 @@ public sealed record AnimationRig(
         return rigs;
     }
 
-    private static string NameOf(BundleSet bundles, AssetsFileInstance file, long gameObject)
+    private static string NameOf(IBundleReader bundles, AssetsFileInstance file, long gameObject)
         => file.file.GetAssetInfo(gameObject) is { } info ? bundles.Context.NameOf(file, info) : "";
 
     /// The Transform among a GameObject's components.
-    private static long? TransformOf(BundleSet bundles, AssetsFileInstance file, long gameObject)
+    private static long? TransformOf(IBundleReader bundles, AssetsFileInstance file, long gameObject)
     {
         if (file.file.GetAssetInfo(gameObject) is not { } info) return null;
         var field = bundles.Context.Deserialize(file, info);
@@ -108,7 +108,7 @@ public sealed record AnimationRig(
     /// The depth limit is a guard against a hierarchy that loops, which a bundle this tool did not
     /// write could hold.
     private static void Walk(
-        BundleSet bundles, AssetsFileInstance file, long transform, string path, int parent,
+        IBundleReader bundles, AssetsFileInstance file, long transform, string path, int parent,
         List<string> into, List<int> parents, List<float[]> locals, int depth)
     {
         if (depth > 64 || file.file.GetAssetInfo(transform) is not { } info) return;

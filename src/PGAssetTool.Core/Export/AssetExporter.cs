@@ -29,7 +29,7 @@ public sealed record ExportedAsset(
 
 /// Writes assets out in whatever format is actually editable for their type: an image editor can
 /// open a PNG, an audio editor a WAV. A type with no such format is not written at all.
-public sealed class AssetExporter(BundleSet bundles)
+public sealed class AssetExporter(IBundleReader bundles)
 {
     /// The per-type writers do not know the asset's address; Export fills it in on the way out.
     private static readonly AssetAddress Placeholder = new("", "", "");

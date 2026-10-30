@@ -27,6 +27,29 @@ public partial class OptionsWindow : Window
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 
+    /// Picks where downloaded content is kept. Blank, which is the default, is the cache the game
+    /// loads from, and there is no picker for "nowhere in particular".
+    private async void OnChooseFetchDirectory(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel model) return;
+
+        try
+        {
+            var chosen = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Where downloaded content is kept",
+                AllowMultiple = false,
+            });
+
+            if (chosen.FirstOrDefault()?.TryGetLocalPath() is { Length: > 0 } path)
+                model.FetchDirectory = path;
+        }
+        catch (Exception ex)
+        {
+            model.Status = ErrorLog.Said(ex, "choosing where downloaded content is kept");
+        }
+    }
+
     /// Picks the game's folder. Typing the path works just as well; this is for the far more
     /// common case of knowing where it is without knowing how to spell it.
     private async void OnChooseGame(object? sender, RoutedEventArgs e)

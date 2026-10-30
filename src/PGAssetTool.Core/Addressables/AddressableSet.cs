@@ -8,9 +8,13 @@ namespace PGAssetTool.Core.Addressables;
 ///
 /// The counterpart of `BundleSet` for the Addressables path, and deliberately not the same class.
 /// The two layouts share nothing — a bundle is named by a hash rather than by a name, there is no
-/// manifest, what is on disk is whatever the player has reached, and a bundle carries the CRC its
+/// manifest, what is on disk is whatever the player has fetched, and a bundle carries the CRC its
 /// contents must hash to. The old path keeps its own reader for its 90 bundles.
-public sealed class AddressableSet : IDisposable
+///
+/// What the two do share is everything downstream of opening a file, which is what `IBundleReader`
+/// is: the members it asks for take a bundle's file name, and `ByName` turns that back into the
+/// catalog entry the rest of this class works in.
+public sealed class AddressableSet : IBundleReader
 {
     private readonly AssetsContext _context;
     private readonly bool _ownsContext;
@@ -156,9 +160,80 @@ public sealed class AddressableSet : IDisposable
     }
 
     /// The bundles a key needs that are not on disk. An item with any of these is one the player
-    /// has never reached, and nothing in the tool or the game can fetch them.
+    /// has never reached; `BundleFetcher` is what puts them there.
     public IReadOnlyList<string> Missing(string key)
         => Catalog.BundlesFor(key).Where(b => !Holds(b)).Select(b => b.FileName).ToList();
+
+    /// The catalog entry behind a bundle's file name, which is what every `IBundleReader` member
+    /// here is given.
+    ///
+    public CatalogBundle ByName(string fileName)
+        => Catalog.ByFileName(fileName)
+           ?? throw new KeyNotFoundException($"'{fileName}' is not in the content catalog.");
+
+    public IEnumerable<string> SerializedFiles
+        => Directory.Exists(Bundles.DataDirectory)
+            ? Directory.EnumerateFiles(Bundles.DataDirectory)
+                .Where(f =>
+                {
+                    var n = Path.GetFileName(f);
+                    return n.EndsWith(".assets", StringComparison.OrdinalIgnoreCase)
+                        || n.Equals("globalgamemanagers", StringComparison.OrdinalIgnoreCase)
+                        || (n.StartsWith("level", StringComparison.OrdinalIgnoreCase)
+                            && n.Length > 5 && char.IsAsciiDigit(n[5]));
+                })
+                .Order(StringComparer.OrdinalIgnoreCase)
+            : [];
+
+    /// Every bundle the catalog names, downloaded and shipped alike — about 18,000 of them, where
+    /// the old route has 90. Anything that walks the lot pays very differently on the two, so the
+    /// list is built once rather than per ask.
+    public IReadOnlyCollection<string> BundleNames
+        => _names ??= [.. Catalog.Bundles.Select(b => b.FileName)];
+
+    private string[]? _names;
+
+    public bool Knows(string bundle) => Catalog.ByFileName(bundle) is not null;
+
+    public string PathOf(string bundle) => PathOf(ByName(bundle));
+
+    public AssetsFileInstance Open(string bundle) => Open(ByName(bundle));
+
+    public byte[] ReadResource(string bundle, string sourcePath, long offset, long size)
+        => ReadResource(ByName(bundle), sourcePath, offset, size);
+
+    /// Which of these bundles this reader cannot answer for as the game delivered them.
+    ///
+    /// The catalog says what each bundle's contents must hash to, so unlike the old route this needs
+    /// no manifest and no backup to tell a delivered bundle from an edited one — and a bundle that
+    /// fails is recoverable in a way the old route's are not, since the delivered bytes can simply
+    /// be fetched again. Kept per bundle, because the answer costs a decompress of the whole file.
+    public IReadOnlyList<string> Altered(IEnumerable<string> bundles)
+        => [.. bundles.Where(b => b.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(b => Catalog.ByFileName(b) is not null && !ReadsAsDelivered(b))];
+
+    private readonly Dictionary<string, bool> _delivered = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool ReadsAsDelivered(string bundle)
+    {
+        if (_delivered.TryGetValue(bundle, out var already)) return already;
+
+        var entry = ByName(bundle);
+        // A kept original is the delivered bytes by definition; it is what the tool put aside
+        // before writing. Otherwise the file on disk has to hash to the catalog's number.
+        if (_originals?.Invoke(entry) is { } original && File.Exists(original))
+            return _delivered[bundle] = true;
+
+        if (Bundles.Resolve(entry) is not { } live) return _delivered[bundle] = false;
+
+        uint? crc;
+        try { crc = BundleCrc.OfBundle(live.Path); }
+        catch (Exception e) when (e is IOException or InvalidDataException or NotSupportedException)
+        {
+            return _delivered[bundle] = false;
+        }
+        return _delivered[bundle] = crc == entry.Crc;
+    }
 
     /// Texture and audio payloads are not in the serialized object; they sit in a sibling .resS or
     /// .resource entry the object points into. This reads that slice.
@@ -189,6 +264,7 @@ public sealed class AddressableSet : IDisposable
     {
         _opened.Clear();
         _containers.Clear();
+        _delivered.Clear();
         if (_ownsContext) _context.Dispose();
     }
 }

@@ -42,7 +42,7 @@ public static class Facing
     /// A model whose prefab carries none of the landmarks — six of the 157 — is left as the box
     /// laid it.
     public static MeshRenderer.Basis Standing(
-        BundleSet bundles, string bundle, UnityMesh mesh, long meshPathId)
+        IBundleReader bundles, string bundle, UnityMesh mesh, long meshPathId)
     {
         var standing = MeshRenderer.Standing(mesh);
         var found = LandmarksIn(bundles, bundle, mesh, meshPathId);
@@ -128,7 +128,7 @@ public static class Facing
     /// to when it was rigged, which the prefab no longer says — <see cref="Skeleton"/> works it out
     /// from the model at rest, and the same matrix carries a prefab position into it.
     public static IReadOnlyDictionary<string, (float X, float Y, float Z)> LandmarksIn(
-        BundleSet bundles, string bundle, UnityMesh mesh, long meshPathId)
+        IBundleReader bundles, string bundle, UnityMesh mesh, long meshPathId)
     {
         var found = new Dictionary<string, (float, float, float)>(StringComparer.Ordinal);
 
@@ -189,7 +189,7 @@ public static class Facing
     /// partway up is recognised without walking to the top again.
     /// </param>
     private static long RootOf(
-        BundleSet bundles, AssetsFileInstance file, long meshPathId, out HashSet<long> chain)
+        IBundleReader bundles, AssetsFileInstance file, long meshPathId, out HashSet<long> chain)
     {
         chain = [];
 
@@ -229,7 +229,7 @@ public static class Facing
 
     /// The transform of the first of these GameObjects whose ancestors reach the given root.
     private static long? Find(
-        BundleSet bundles, AssetsFileInstance file, IEnumerable<AssetFileInfo> holders, long root, HashSet<long> chain)
+        IBundleReader bundles, AssetsFileInstance file, IEnumerable<AssetFileInfo> holders, long root, HashSet<long> chain)
     {
         foreach (var info in holders)
         {
@@ -244,7 +244,7 @@ public static class Facing
     }
 
     private static bool Reaches(
-        BundleSet bundles, AssetsFileInstance file, long transform, long root, HashSet<long> chain)
+        IBundleReader bundles, AssetsFileInstance file, long transform, long root, HashSet<long> chain)
     {
         for (var at = transform; at != 0;)
         {
@@ -274,7 +274,7 @@ public static class Facing
 
     /// Composed up the chain to the root, the same way Skeleton composes its own — so the two land
     /// in the same space and `home` means what it says.
-    private static float[]? WorldOf(BundleSet bundles, AssetsFileInstance file, long transform)
+    private static float[]? WorldOf(IBundleReader bundles, AssetsFileInstance file, long transform)
     {
         var locals = new List<float[]>();
 

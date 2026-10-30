@@ -33,10 +33,12 @@ public sealed class WeaponNames
     /// A directory to keep the finished table in, so the next start reads it instead of the game's
     /// eleven. Null reads them every time, which is what a caller with nowhere to write does.
     /// </param>
-    public static WeaponNames Load(BundleSet bundles, ItemCatalog items, string? remember = null)
+    public static WeaponNames Load(
+        BundleSet bundles, ItemCatalog items, string? remember = null,
+        RegistryReader? registries = null)
     {
         var languages = GameCatalogs.Languages(bundles);
-        var key = Key(bundles, languages, items);
+        var key = Key(bundles, languages, items, registries);
 
         if (remember is not null && Kept(remember, key) is { } kept) return new WeaponNames(kept);
 
@@ -44,8 +46,11 @@ public sealed class WeaponNames
         foreach (var (bundle, _) in languages)
         {
             // One unreadable table is not worth losing the other ten over.
-            try { tables.Add(Localization.Load(bundles, bundle)); }
-            catch (Exception e) when (e is IOException or InvalidOperationException) { }
+            try { tables.Add(Localization.Load(bundles, bundle, registries)); }
+            catch (Exception e) when (e is IOException or InvalidOperationException
+                                          or KeyNotFoundException)
+            {
+            }
         }
 
         var byIndex = new Dictionary<int, string[]>();
@@ -68,9 +73,18 @@ public sealed class WeaponNames
     /// Unity 6 — so a table built against the version before it is not mistaken for this one's. A
     /// mod cannot stale it: the tables are read from the game as shipped whatever is installed.
     private static string Key(
-        BundleSet bundles, IReadOnlyList<(string Bundle, string Name)> languages, ItemCatalog items)
+        BundleSet bundles, IReadOnlyList<(string Bundle, string Name)> languages, ItemCatalog items,
+        RegistryReader? registries)
     {
-        var said = new List<string> { $"weapons={items.Weapons.Count()}" };
+        // Which tables these names came from is part of what they were built from. The bundles on
+        // the old path keep their hashes whatever the catalog says, so a table built from the stale
+        // copies would otherwise be handed back for a game now read through the catalog — with the
+        // wrong names in it and nothing to say so.
+        var said = new List<string>
+        {
+            $"weapons={items.Weapons.Count()}",
+            $"from={(registries?.ReadsLanguagesFromTheCatalog == true ? "catalog" : "bundles")}",
+        };
         foreach (var (bundle, _) in languages)
         {
             try { said.Add($"{bundle}={bundles.HashOf(bundle)}"); }

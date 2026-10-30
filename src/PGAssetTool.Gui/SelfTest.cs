@@ -2,6 +2,7 @@
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.VisualTree;
+using PGAssetTool.Core.Addressables;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Export;
 using PGAssetTool.Core.Mods;
@@ -80,6 +81,43 @@ internal static class SelfTest
         task.GetAwaiter().GetResult();
     }
 
+    /// A pair of readers of this installation's own, built the way the window builds them: the
+    /// registries on the old route, the content behind the catalog where there is one, and the
+    /// lookup that joins the two. Several checks want readers nothing else is using.
+    private sealed class OwnReaders : IDisposable
+    {
+        private readonly AddressableSet? _fromCatalog;
+
+        public OwnReaders(Core.Game.GameInstallation game, bool asShipped = false)
+        {
+            Registries = asShipped
+                ? new BundleSet(game, originals: new ModStore(game).OriginalOf)
+                : new BundleSet(game);
+
+            var delivered = File.Exists(ContentCatalog.PathIn(game.DataDirectory))
+                ? AddressableBundles.For(game.DataDirectory)
+                : null;
+            _fromCatalog = delivered is null ? null : new AddressableSet(delivered, Registries.Context);
+            Content = _fromCatalog is { } reader ? reader : Registries;
+            Lookup = delivered is null ? null : CatalogLookup.Of(delivered.Catalog);
+        }
+
+        public BundleSet Registries { get; }
+        public IBundleReader Content { get; }
+        public Core.Catalog.AssetLookup? Lookup { get; }
+
+        public Core.Catalog.GameCatalogs Catalogs()
+            => Core.Catalog.GameCatalogs.Load(
+                Registries, lookup: Lookup,
+                registries: new Core.Catalog.RegistryReader(Registries, _fromCatalog));
+
+        public void Dispose()
+        {
+            _fromCatalog?.Dispose();
+            Registries.Dispose();
+        }
+    }
+
     private static bool WaitWhile(Func<bool> busy, int milliseconds)
     {
         for (var waited = 0; waited < milliseconds; waited += 25)
@@ -150,6 +188,9 @@ internal static class SelfTest
             Console.WriteLine($"status   preferences for this run: {model.SettingsPath}");
 
             if (ReaderReleasesItsBundles(model) is { } stillOpen) return Fail(stillOpen);
+
+            if (TheContentTheGameFetchesIsAccountedFor(model, scratch) is { } contentProblem)
+                return Fail(contentProblem);
 
             if (ABundleSurvivesBeingWrittenBothWays(model, scratch) is { } packProblem) return Fail(packProblem);
 
@@ -1590,8 +1631,9 @@ internal static class SelfTest
 
         // Scoped, and put down before anything installs. A reader holds the bundle it has opened,
         // and the install below writes to that same bundle.
-        using (var bundles = new Core.Assets.BundleSet(model.Game!))
+        using (var own = new OwnReaders(model.Game!))
         {
+            var bundles = own.Content;
             var file = bundles.Open(bundle);
             if (file.file.AssetInfos.FirstOrDefault(
                     i => i.TypeId == (int)AssetsTools.NET.Extra.AssetClassID.MonoBehaviour) is not { } info)
@@ -2188,6 +2230,89 @@ internal static class SelfTest
         return null;
     }
 
+    /// What the game downloads as it is played: that the catalog is read, that what is missing is
+    /// counted and said, and that a bundle already on disk is left alone.
+    ///
+    /// Nothing here goes to the network. The one rule that matters for both resuming and updating —
+    /// a file at the path the catalog gives is the bundle, so it is not asked for again — is checked
+    /// against the installation's own cache instead, which is the data a download would land in.
+    private static string? TheContentTheGameFetchesIsAccountedFor(MainViewModel model, string scratch)
+    {
+        var data = model.Game!.DataDirectory;
+        if (!File.Exists(ContentCatalog.PathIn(data)))
+        {
+            Console.WriteLine("content  this installation has no Addressables catalog");
+            return null;
+        }
+
+        var bundles = AddressableBundles.For(data);
+        var catalog = bundles.Catalog;
+        Console.WriteLine($"content  {catalog.Bundles.Count:N0} bundles in the catalog, "
+            + $"{catalog.Bundles.Count(b => b.IsRemote):N0} downloaded, locator {catalog.LocatorId}");
+        if (catalog.Bundles.Count == 0) return "the content catalog named no bundles";
+
+        if (bundles.Cache is not { } cache) return "the cache the game downloads into was not found";
+
+        var missing = BundleFetcher.Missing(catalog.Bundles, cache.Root);
+        var here = catalog.Bundles.Count(b => b.IsRemote) - missing.Count;
+        Console.WriteLine($"content  {here:N0} downloaded bundles here, {missing.Count:N0} "
+            + $"({missing.Sum(b => b.Size) / 1024.0 / 1024:N0} MB) not");
+
+        // The notice is the only thing that tells somebody why most of the game reads as empty, so
+        // it has to appear exactly when there is something to say.
+        Console.WriteLine($"content  notice: {model.ContentNotice ?? "(none)"}");
+        if (missing.Count > 0 && model.ContentNotice is null)
+            return $"{missing.Count:N0} bundles are not downloaded and the window said nothing";
+        if (missing.Count == 0 && model.ContentNotice is not null)
+            return "nothing is missing and the window said something was";
+
+        // Left blank, downloads go where the game loads from. Anywhere else the tool can read and
+        // the game cannot, and saying which is which is the whole of that setting.
+        if (model.FetchDirectory.Length != 0)
+            return $"this run started with a download directory set to '{model.FetchDirectory}'";
+        if (!model.FetchDescribed.Contains(cache.Root))
+            return $"the window did not name the game's own cache: {model.FetchDescribed}";
+
+        if (catalog.Bundles.FirstOrDefault(b => b.IsRemote) is not { } remote)
+            return "the catalog named no downloaded bundle";
+
+        // The url in the catalog is not the url that serves the file; getting this wrong is
+        // answered with 403 by a server that would otherwise hand over the bundle.
+        var url = BundleFetcher.UrlOf(remote);
+        Console.WriteLine($"content  {remote.FileName}");
+        Console.WriteLine($"content  is served from {url}");
+        if (!url.EndsWith($"/{remote.Hash}/{url[(url.LastIndexOf('/') + 1)..]}", StringComparison.Ordinal))
+            return $"the url a bundle is fetched from is not the three-part form: {url}";
+        if (url.Contains(".bundle", StringComparison.Ordinal))
+            return $"the url a bundle is fetched from still carries the catalog's file name: {url}";
+
+        // A bundle that is here is not fetched again, which is what makes stopping safe and what
+        // makes a run after a game update fetch only what the update changed.
+        if (catalog.Bundles.FirstOrDefault(b => b.IsRemote && cache.Holds(b)) is { } cached)
+        {
+            using var fetcher = new BundleFetcher();
+            var outcome = fetcher.Fetch([cached], cache.Root).Outcomes.Single();
+            if (outcome.State is not FetchState.AlreadyThere)
+                return $"a bundle already in the cache was not left alone: {outcome.State} "
+                    + $"{outcome.Trouble}";
+            Console.WriteLine($"content  '{cached.CacheName}' was already here and was left alone");
+
+            // And the one check that proves the arithmetic against the game's own number: the
+            // catalog says what this file has to hash to, and the tool arrives at the same answer.
+            var crc = BundleCrc.OfBundle(cache.PathOf(cached));
+            Console.WriteLine($"content  crc {crc?.ToString() ?? "(unreadable)"} "
+                + $"against the catalog's {cached.Crc}");
+            if (crc != cached.Crc)
+                return $"'{cached.CacheName}' hashes to {crc} where the catalog says {cached.Crc}";
+        }
+
+        // And nothing was written anywhere by any of it.
+        var touched = Path.Combine(scratch, AddressablesCache.DirectoryName);
+        if (Directory.Exists(touched)) return "reading the content catalog wrote into the scratch directory";
+
+        return null;
+    }
+
     /// Playing moves the clip on by the time that really passed between the display's frames, and
     /// stopping and starting again leaves exactly one run of frames going.
     ///
@@ -2455,8 +2580,12 @@ internal static class SelfTest
     {
         if (model.Game is null || Core.Catalog.ItemKinds.ByName("Hat") is not { } hats) return null;
 
-        using var bundles = new BundleSet(model.Game, originals: new ModStore(model.Game).OriginalOf);
-        var catalogs = Core.Catalog.GameCatalogs.Load(bundles);
+        // Read through the originals the way the window reads, so a hat whose bundles a mod has
+        // been installed over is still written out as the game ships it.
+        using var own = new OwnReaders(model.Game, asShipped: true);
+        var bundles = own.Content;
+
+        var catalogs = own.Catalogs();
         if (catalogs.Of(hats).FirstOrDefault() is not { } hat) return "the game lists no hats";
 
         var tree = new Core.Weapons.WeaponResolver(bundles, catalogs).Resolve(hat);
@@ -2889,21 +3018,27 @@ internal static class SelfTest
     /// table built against anything else ignored rather than believed.
     private static string? TheNameTablesAreKept(MainViewModel model)
     {
-        if (model.Reader is not { } bundles) return "there is no reader to ask";
+        if (model.Game is not { } game) return "the game is not open";
 
         var scratch = Path.Combine(Path.GetTempPath(), "pgassettool-selftest-names");
         try
         {
             if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
 
-            var items = Core.Catalog.ItemCatalog.Load(bundles);
+            // Through the readers the window uses, so what is kept is what it would keep. Read off
+            // the old bundles instead, this measured a table nothing shows: 1,523 weapons named by
+            // the stale term tables.
+            using var own = new OwnReaders(game);
+            var bundles = own.Registries;
+            var reader = new Core.Catalog.RegistryReader(bundles, own.Content as AddressableSet);
+            var items = Core.Catalog.ItemCatalog.Load(reader);
 
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            var read = Core.Catalog.WeaponNames.Load(bundles, items, scratch);
+            var read = Core.Catalog.WeaponNames.Load(bundles, items, scratch, reader);
             var reading = clock.ElapsedMilliseconds;
 
             clock.Restart();
-            var kept = Core.Catalog.WeaponNames.Load(bundles, items, scratch);
+            var kept = Core.Catalog.WeaponNames.Load(bundles, items, scratch, reader);
             var keeping = clock.ElapsedMilliseconds;
 
             Console.WriteLine($"names    {read.Count} in {reading}ms from the game, "
@@ -2920,8 +3055,16 @@ internal static class SelfTest
             // Built against something else: the key says so, and what it names is read again.
             var path = Path.Combine(scratch, "names.json");
             File.WriteAllText(path, File.ReadAllText(path).Replace("weapons=", "weapons=9"));
-            if (Core.Catalog.WeaponNames.Load(bundles, items, scratch).Count != read.Count)
+            if (Core.Catalog.WeaponNames.Load(bundles, items, scratch, reader).Count != read.Count)
                 return "a table kept against another game was taken as this one's";
+
+            // And a table built from the term tables left on the old path is not this one: those
+            // are stale in a way that shows as wrong names rather than missing ones, so a kept copy
+            // of them must not be handed back for a game read through the catalog.
+            var stale = Core.Catalog.WeaponNames.Load(bundles, items, scratch);
+            Console.WriteLine($"names    the old path's tables name {stale.Count} against {read.Count}");
+            if (Core.Catalog.WeaponNames.Load(bundles, items, scratch, reader).Count != read.Count)
+                return "a table built from the old path's term tables was taken for the catalog's";
 
             return null;
         }
@@ -3862,8 +4005,8 @@ internal static class SelfTest
     private static string? AnEditToTheWeaponReachesItsDefaultSkin(MainViewModel model)
     {
         if (model.Reader is not { } reader) return "the game is not open to extract from";
+        if (model.Catalogues is not { } catalogs) return "the registries are not read";
 
-        var catalogs = PGAssetTool.Core.Catalog.GameCatalogs.Load(reader);
         var resolver = new PGAssetTool.Core.Weapons.WeaponResolver(reader, catalogs);
         var weapons = catalogs.Of(PGAssetTool.Core.Catalog.ItemKinds.Weapon);
         var root = Path.Combine(Path.GetTempPath(), $"pgassettool-selftest-skins-{Guid.NewGuid():N}");
@@ -4763,9 +4906,11 @@ internal static class SelfTest
             if (!Arrived(model, row)) return $"'{row.Label}' never appeared";
             if (model.Preview.Rest is not { } shown) return $"'{row.Label}' is not a model";
 
-            // The same mesh as the tool reads it, with nothing done to it.
+            // The same mesh as the tool reads it, with nothing done to it, through a reader of
+            // this check's own so nothing the window did to it can carry over.
             if (model.Game is not { } game) return "the game is not open";
-            using var bundles = new Core.Assets.BundleSet(game);
+            using var own = new OwnReaders(game);
+            var bundles = own.Content;
             var file = bundles.Open(row.Bundle);
             if (file.file.GetAssetInfo(row.PathId) is not { } info) return $"'{row.Label}' is not in {row.Bundle}";
             if (bundles.Context.Deserialize(file, info) is not { } field) return $"'{row.Label}' would not read";

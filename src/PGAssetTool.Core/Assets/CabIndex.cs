@@ -18,7 +18,7 @@ public sealed class CabIndex
 
     public string? BundleFor(string cab) => _bundleByCab.GetValueOrDefault(cab);
 
-    public static CabIndex Build(BundleSet bundles)
+    public static CabIndex Build(IBundleReader bundles)
     {
         var found = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 

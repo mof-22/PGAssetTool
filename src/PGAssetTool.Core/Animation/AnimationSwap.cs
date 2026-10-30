@@ -47,7 +47,7 @@ public static class AnimationSwap
                Path.GetFileNameWithoutExtension(s.Source), name, StringComparison.OrdinalIgnoreCase));
 
     /// Every clip an item plays that moves anything, once each, by name.
-    public static IReadOnlyList<Choice> ClipsOf(BundleSet bundles, WeaponTree tree)
+    public static IReadOnlyList<Choice> ClipsOf(IBundleReader bundles, WeaponTree tree)
     {
         var choices = new List<Choice>();
         foreach (var node in tree.PrefabAssets.Where(a => a.Class == AssetClassID.AnimationClip))
@@ -65,7 +65,7 @@ public static class AnimationSwap
     /// <exception cref="KeyNotFoundException">`from` plays no clip of that name.</exception>
     /// <exception cref="InvalidOperationException">Nothing in that clip finds anything here to move.</exception>
     public static Outcome Use(
-        BundleSet bundles, GameCatalogs catalogs, string workspace, Slot slot, WeaponRecord from, string clip)
+        IBundleReader bundles, GameCatalogs catalogs, string workspace, Slot slot, WeaponRecord from, string clip)
     {
         var resolver = new WeaponResolver(bundles, catalogs);
         var target = TargetRig(bundles, catalogs, resolver, workspace, slot);
@@ -101,7 +101,7 @@ public static class AnimationSwap
 
     /// Puts the slot's own clip back, exactly as the extract wrote it — so the file is unedited
     /// again, and a pack leaves it out.
-    public static Outcome Restore(BundleSet bundles, string workspace, Slot slot)
+    public static Outcome Restore(IBundleReader bundles, string workspace, Slot slot)
     {
         var bundle = slot.Target.Container;
         var file = bundles.Open(bundle);
@@ -119,7 +119,7 @@ public static class AnimationSwap
     /// <exception cref="KeyNotFoundException">The file has no animation that is the one asked for.</exception>
     /// <exception cref="InvalidOperationException">Nothing in it finds anything here to move.</exception>
     public static Outcome UseGlb(
-        BundleSet bundles, GameCatalogs catalogs, string workspace, Slot slot, string glb, string? take = null)
+        IBundleReader bundles, GameCatalogs catalogs, string workspace, Slot slot, string glb, string? take = null)
     {
         var resolver = new WeaponResolver(bundles, catalogs);
         var target = TargetRig(bundles, catalogs, resolver, workspace, slot);
@@ -158,7 +158,7 @@ public static class AnimationSwap
     /// is fitted by its names alone.
     /// <exception cref="InvalidDataException">The file is not an animation this tool wrote.</exception>
     /// <exception cref="InvalidOperationException">Nothing in it finds anything here to move.</exception>
-    public static Outcome UseFile(BundleSet bundles, GameCatalogs catalogs, string workspace, Slot slot, string file)
+    public static Outcome UseFile(IBundleReader bundles, GameCatalogs catalogs, string workspace, Slot slot, string file)
     {
         var full = Path.GetFullPath(file);
         var destination = Path.GetFullPath(Path.Combine(workspace, slot.Source));
@@ -201,7 +201,7 @@ public static class AnimationSwap
 
     /// The motion made as long as the slot's own clip, and what to say about it. See ClipImporter:
     /// the game times the weapon by its clips, so a clip of another length changes how it fights.
-    private static (Motion Motion, IReadOnlyList<string> Notes) FitToSlot(BundleSet bundles, Slot slot, Motion motion)
+    private static (Motion Motion, IReadOnlyList<string> Notes) FitToSlot(IBundleReader bundles, Slot slot, Motion motion)
     {
         var own = PathIdOf(bundles, slot) is { } id ? Read(bundles, slot.Target.Container, id) : null;
         if (own is not { Length: > 0 } || MathF.Abs(own.Length - motion.Length) < 1e-3f) return (motion, []);
@@ -239,7 +239,7 @@ public static class AnimationSwap
     /// the one written.
     /// <param name="path">Where to write it; by default `animations/animations.glb` in the workspace.</param>
     public static (string Path, AnimationGlb.Written Written) ExportGlb(
-        BundleSet bundles, GameCatalogs catalogs, string workspace, string? path = null)
+        IBundleReader bundles, GameCatalogs catalogs, string workspace, string? path = null)
     {
         var manifest = Workspace.Read(workspace);
         var slots = Slots(manifest);
@@ -301,7 +301,7 @@ public static class AnimationSwap
 
     /// The component that plays the slot's clip in the workspace's own item, and everything under it.
     private static AnimationRig TargetRig(
-        BundleSet bundles, GameCatalogs catalogs, WeaponResolver resolver, string workspace, Slot slot)
+        IBundleReader bundles, GameCatalogs catalogs, WeaponResolver resolver, string workspace, Slot slot)
     {
         return (PathIdOf(bundles, slot) is { } id
                    ? RigsFor(bundles, catalogs, resolver, workspace, slot.Target.Container)
@@ -315,7 +315,7 @@ public static class AnimationSwap
     /// Every Animation component the workspace's item can have: in the bundle its clip is in, its
     /// prefab's, wherever else its prefab reaches one, and its skins' models.
     private static IEnumerable<AnimationRig> RigsFor(
-        BundleSet bundles, GameCatalogs catalogs, WeaponResolver resolver, string workspace, string clipBundle)
+        IBundleReader bundles, GameCatalogs catalogs, WeaponResolver resolver, string workspace, string clipBundle)
     {
         var subject = Workspace.Read(workspace).Subject;
         var record = subject is { IsKnown: true }
@@ -334,7 +334,7 @@ public static class AnimationSwap
         return lookIn.Distinct(StringComparer.OrdinalIgnoreCase).SelectMany(b => AnimationRig.In(bundles, b));
     }
 
-    private static long? PathIdOf(BundleSet bundles, Slot slot)
+    private static long? PathIdOf(IBundleReader bundles, Slot slot)
     {
         if (slot.Target.PathId is { } known) return known;
         var file = bundles.Open(slot.Target.Container);
@@ -351,7 +351,7 @@ public static class AnimationSwap
             if (node.Bundle.Length > 0) yield return node.Bundle;
     }
 
-    private static Motion? Read(BundleSet bundles, string bundle, long pathId)
+    private static Motion? Read(IBundleReader bundles, string bundle, long pathId)
     {
         try
         {

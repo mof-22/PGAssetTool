@@ -66,7 +66,7 @@ public sealed class Skeleton
     /// is for is on `Build`.
     /// </param>
     public static Skeleton? For(
-        BundleSet bundles, string bundle, long meshPathId, string? under = null, bool whole = false)
+        IBundleReader bundles, string bundle, long meshPathId, string? under = null, bool whole = false)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
@@ -124,7 +124,7 @@ public sealed class Skeleton
     /// arranged its own way, so drawing every placement there is draws each wheel twice, in two
     /// different places.
     public static IReadOnlyList<Placement> Every(
-        BundleSet bundles, string bundle, long meshPathId, bool whole = false)
+        IBundleReader bundles, string bundle, long meshPathId, bool whole = false)
     {
         if (Opened(bundles, bundle) is not { } file) return [];
 
@@ -159,14 +159,14 @@ public sealed class Skeleton
     /// for them: a transport's parts come to twenty placements and a rig read whole is most of what
     /// a placement costs.
     public static IReadOnlyList<IReadOnlyList<string>> Placings(
-        BundleSet bundles, string bundle, long meshPathId)
+        IBundleReader bundles, string bundle, long meshPathId)
     {
         if (Opened(bundles, bundle) is not { } file) return [];
 
         return [.. Renderers(bundles, file, meshPathId).Select(r => Ancestry(bundles, file, r.Transform))];
     }
 
-    private static AssetsFileInstance? Opened(BundleSet bundles, string bundle)
+    private static AssetsFileInstance? Opened(IBundleReader bundles, string bundle)
     {
         try { return bundles.Open(bundle); }
         catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
@@ -174,7 +174,7 @@ public sealed class Skeleton
 
     /// Every renderer in a bundle that names this mesh, with the transform it hangs off.
     private static IEnumerable<(bool Skinned, AssetTypeValueField Renderer, long Transform)> Renderers(
-        BundleSet bundles, AssetsFileInstance file, long meshPathId)
+        IBundleReader bundles, AssetsFileInstance file, long meshPathId)
     {
         var read = Hierarchy.Of(bundles, file);
 
@@ -202,7 +202,7 @@ public sealed class Skeleton
     ///
     /// Asked of the parts drawn beside a model rather than of the model on the row, which is shown
     /// because somebody asked for it whatever draws it.
-    public static bool Drawn(BundleSet bundles, string bundle, long meshPathId)
+    public static bool Drawn(IBundleReader bundles, string bundle, long meshPathId)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
@@ -244,7 +244,7 @@ public sealed class Skeleton
     /// are plain meshes, each put down several times over two arrangements, so the first filter in
     /// the file is a wheel of the shop's copy as often as not.
     private static Skeleton? Unskinned(
-        BundleSet bundles, AssetsFileInstance file, long meshPathId, string? under, bool whole = false)
+        IBundleReader bundles, AssetsFileInstance file, long meshPathId, string? under, bool whole = false)
     {
         var read = Hierarchy.Of(bundles, file);
 
@@ -273,7 +273,7 @@ public sealed class Skeleton
     /// own, so taken for the item's it is a car floating over its own wheels. `Placement.Root`
     /// reads the same end of the same chain.
     private static bool RootedAt(
-        BundleSet bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
+        IBundleReader bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
         => !owner.IsDummy
             && Ancestry(bundles, file, TransformOf(bundles, file, owner["m_PathID"].AsLong))
                 is { Count: > 0 } names
@@ -285,7 +285,7 @@ public sealed class Skeleton
     /// and the chain from a weapon's mesh to its prefab root is a handful of steps. The count is a
     /// guard against a hierarchy that points at itself, which a bundle this tool did not write
     /// could hold.
-    private static List<string> Ancestry(BundleSet bundles, AssetsFileInstance file, long transform)
+    private static List<string> Ancestry(IBundleReader bundles, AssetsFileInstance file, long transform)
     {
         var read = Hierarchy.Of(bundles, file);
         var names = new List<string>();
@@ -301,7 +301,7 @@ public sealed class Skeleton
         return names;
     }
 
-    private static long TransformOf(BundleSet bundles, AssetsFileInstance file, long gameObject)
+    private static long TransformOf(IBundleReader bundles, AssetsFileInstance file, long gameObject)
         => Hierarchy.Of(bundles, file).TransformOf(gameObject);
 
     /// Walks up from each bone to the top, so every transform between them is present and a parent
@@ -319,7 +319,7 @@ public sealed class Skeleton
     /// to land, and they are what lets two meshes of one prefab be posed in the same space.
     /// </param>
     private static Skeleton? Build(
-        BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer,
+        IBundleReader bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer,
         bool rigid = false, bool whole = false)
     {
         var read = Hierarchy.Of(bundles, file);

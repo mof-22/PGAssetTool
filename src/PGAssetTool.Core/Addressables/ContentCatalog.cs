@@ -50,6 +50,8 @@ public sealed class ContentCatalog
     private readonly Dictionary<string, List<int>> _bucketsByKey;
     private readonly Dictionary<string, CatalogBundle> _byHash;
     private readonly Dictionary<string, CatalogBundle> _byCacheName;
+    private readonly Dictionary<string, CatalogBundle> _byFileName;
+    private readonly Dictionary<string, CatalogBundle> _byInternalId;
 
     private ContentCatalog(
         string path, string locatorId, byte[] keys, byte[] buckets, byte[] entries, byte[] extra,
@@ -78,6 +80,12 @@ public sealed class ContentCatalog
         _byCacheName = bundles
             .GroupBy(b => b.CacheName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        _byFileName = bundles
+            .GroupBy(b => b.FileName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        _byInternalId = bundles
+            .GroupBy(b => b.InternalId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
     }
 
     public string FilePath { get; }
@@ -96,6 +104,13 @@ public sealed class ContentCatalog
 
     public CatalogBundle? ByCacheName(string cacheName)
         => _byCacheName.TryGetValue(cacheName, out var bundle) ? bundle : null;
+
+    /// A bundle by its file name, which is what it is called outside this class.
+    ///
+    /// Indexed rather than worked out from the name: most names end in the hash the bundle is filed
+    /// under, and the ones that do not — the localization tables among them — would be unfindable.
+    public CatalogBundle? ByFileName(string fileName)
+        => _byFileName.TryGetValue(fileName, out var bundle) ? bundle : null;
 
     /// What a key loads, and out of which bundles.
     ///
@@ -147,15 +162,14 @@ public sealed class ContentCatalog
     /// has moved to Addressables from one that has not.
     public bool Knows(string key) => _bucketsByKey.ContainsKey(key);
 
+    /// The bundle a dependency's internal id names.
+    ///
+    /// Indexed by that id rather than worked out from it. Most bundle names end in the hash the
+    /// bundle is filed under, and reading it off the name looked right until the ones that do not —
+    /// `localization-assets-shared_assets_all.bundle` among them — turned out to be dropped from
+    /// every dependency list they appear in, silently.
     private CatalogBundle? BundleFor(string internalId)
-    {
-        var name = internalId.Replace('\\', '/');
-        name = name[(name.LastIndexOf('/') + 1)..];
-        if (!name.EndsWith(".bundle", StringComparison.OrdinalIgnoreCase)) return null;
-        var hash = name[..^".bundle".Length];
-        hash = hash[(hash.LastIndexOf('_') + 1)..];
-        return ByHash(hash);
-    }
+        => _byInternalId.TryGetValue(internalId, out var bundle) ? bundle : null;
 
     /// Each bundle's options, read through the locations that carry them. Only a bundle has an
     /// object in the extra-data blob; every other location points at nothing.

@@ -14,7 +14,7 @@ namespace PGAssetTool.Core.Assets;
 /// which renderers belong to the weapon. The editor has no weapon — only a file it is showing and
 /// the address that file came from — so it asks the same thing the other way round, of everything
 /// in the bundle: which renderer draws this mesh.
-public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
+public sealed class Dressing(IBundleReader bundles, BundleGraph? graph = null)
 {
     private readonly BundleGraph _graph = graph ?? new BundleGraph(bundles);
 

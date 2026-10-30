@@ -11,6 +11,40 @@ public sealed class AddressablesCache
     public const string DirectoryName = "AddressablesCache";
     public const string DataFileName = "__data";
 
+    /// The note Unity keeps beside a cached bundle, and **the thing that makes the entry count**.
+    /// A directory holding only `__data` is not a cache hit: the game downloads the bundle again.
+    ///
+    /// Four lines, LF-terminated, the same in all 4,413 the game had written here — only the second
+    /// varies, and it is the seconds-since-epoch the data file was written:
+    ///
+    ///     -1
+    ///     1793281640
+    ///     1
+    ///     __data
+    public const string InfoFileName = "__info";
+
+    /// The note as the game writes it, for a bundle whose data was written at the given moment.
+    public static string InfoFor(DateTimeOffset written)
+        => $"-1\n{written.ToUnixTimeSeconds()}\n1\n{DataFileName}\n";
+
+    /// Writes the note beside a data file that has none, and answers whether it had to.
+    ///
+    /// Written after the data and never before it: a note standing on its own would tell the game a
+    /// bundle is cached when there is nothing there to load.
+    public static bool Register(string dataPath)
+    {
+        var info = Path.Combine(Path.GetDirectoryName(dataPath)!, InfoFileName);
+        if (File.Exists(info)) return false;
+
+        File.WriteAllText(info, InfoFor(new DateTimeOffset(File.GetLastWriteTimeUtc(dataPath), TimeSpan.Zero)));
+        return true;
+    }
+
+    /// Whether this bundle is in the cache as the game keeps one: the bytes and the note both.
+    public static bool IsCached(string dataPath)
+        => File.Exists(dataPath)
+            && File.Exists(Path.Combine(Path.GetDirectoryName(dataPath)!, InfoFileName));
+
     private AddressablesCache(string root) => Root = root;
 
     public string Root { get; }
@@ -37,6 +71,8 @@ public sealed class AddressablesCache
 
     public string PathOf(CatalogBundle bundle) => bundle.PathUnder(Root);
 
+    /// Whether the bundle's bytes are here. The tool can read one with no `__info` beside it; the
+    /// game cannot see it. See `IsCached`.
     public bool Holds(CatalogBundle bundle) => File.Exists(PathOf(bundle));
 
     /// How many bundles are in the cache, counted as the directories that hold one. A directory
@@ -66,10 +102,15 @@ public sealed class AddressableBundles
     {
         Catalog = catalog;
         Cache = cache;
+        DataDirectory = dataDirectory;
         _localDirectory = ContentCatalog.LocalBundlesIn(dataDirectory);
     }
 
     public ContentCatalog Catalog { get; }
+
+    /// The game's own `*_Data`, which the catalog was read from and which holds the serialized
+    /// files that are in no bundle.
+    public string DataDirectory { get; }
 
     /// Present once the game has downloaded anything, which on a fresh install is at once.
     public AddressablesCache? Cache { get; }

@@ -70,9 +70,9 @@ public sealed class ItemCatalog
     public static ItemCatalog FromRecords(IEnumerable<WeaponRecord> records)
         => new(records.ToDictionary(r => r.Index));
 
-    public static ItemCatalog Load(BundleSet bundles)
+    public static ItemCatalog Load(RegistryReader registries)
     {
-        var storage = bundles.MonoBehaviour("it_d", "ItemsDataStorage");
+        var storage = registries.Read(Registries.Items);
 
         var slugs = new Dictionary<int, string>();
         foreach (var e in storage["itemDatas"]["Array"].Children)

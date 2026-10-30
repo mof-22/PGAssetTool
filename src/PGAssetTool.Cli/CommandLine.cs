@@ -21,13 +21,14 @@ public sealed class CommandLine
     public static readonly IReadOnlySet<string> Valued = new HashSet<string>(StringComparer.Ordinal)
     {
         "game", "language", "out", "author", "skin", "read-memory", "from", "clip", "glb", "take", "anim",
+        "parallel", "into",
     };
 
     /// The options that are on by being there.
     public static readonly IReadOnlySet<string> Flags = new HashSet<string>(StringComparer.Ordinal)
     {
         "workspace", "force", "fast", "rebuild", "low-memory", "opaque", "whole", "protect", "apply",
-        "help", "version", "reset", "export", "all-skins",
+        "help", "version", "reset", "export", "all-skins", "dry-run", "check-cached",
     };
 
     private readonly Dictionary<string, string> _options;

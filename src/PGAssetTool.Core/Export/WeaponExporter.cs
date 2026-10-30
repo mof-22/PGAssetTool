@@ -31,7 +31,7 @@ public sealed class AlteredBundlesException(IReadOnlyList<string> bundles, strin
 /// Writes out everything belonging to one weapon, arranged so the result is browsable: images in
 /// one place, audio in another, and the object graph as a single readable document rather than a
 /// file per Transform.
-public sealed class WeaponExporter(BundleSet bundles)
+public sealed class WeaponExporter(IBundleReader bundles)
 {
     private AssetExporter? _writer;
 
@@ -776,7 +776,7 @@ public sealed class WeaponExporter(BundleSet bundles)
     /// <param name="maskUnused">As `MaskUnused`, for every look.</param>
     /// <param name="progress">Told before each look: which one, of how many, and its name.</param>
     public static IReadOnlyList<LookExport> ExportEveryLook(
-        Assets.BundleSet bundles, WeaponTree tree, string outputRoot, string author, string? gameVersion,
+        Assets.IBundleReader bundles, WeaponTree tree, string outputRoot, string author, string? gameVersion,
         bool opaque = false, bool maskUnused = true, Action<int, int, string>? progress = null)
     {
         // Not the default skin: the item as it comes already writes into it — the two default looks

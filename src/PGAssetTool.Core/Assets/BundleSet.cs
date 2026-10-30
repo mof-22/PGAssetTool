@@ -7,7 +7,9 @@ namespace PGAssetTool.Core.Assets;
 
 /// Name-addressed access to the bundle cache. Resolves a bundle's hash directory through the
 /// manifest so callers work in bundle names rather than paths.
-public sealed class BundleSet : IDisposable
+///
+/// The older of the game's two layouts; `AddressableSet` is the other. See `IBundleReader`.
+public sealed class BundleSet : IBundleReader
 {
     private readonly AssetsContext _context;
     private readonly Dictionary<string, string> _hashes;
@@ -35,6 +37,9 @@ public sealed class BundleSet : IDisposable
 
     public AssetsContext Context => _context;
     public IReadOnlyCollection<string> BundleNames => _hashes.Keys;
+    public IEnumerable<string> SerializedFiles => Game.EnumerateSerializedFiles();
+
+    public bool Knows(string bundle) => _hashes.ContainsKey(bundle);
 
     public string HashOf(string bundle) => _hashes.TryGetValue(bundle, out var hash)
         ? hash

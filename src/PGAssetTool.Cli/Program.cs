@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Cli;
+using PGAssetTool.Core.Addressables;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export;
@@ -89,6 +90,11 @@ static int Run(CommandLine line)
                                    --export writes them all with the item's models into one .glb
                                    (animations/animations.glb, or --out) to edit in Blender.
 
+              fetch                Download the content the game only fetches as it is played, into
+                                   the cache it loads it from. Everything already there is left
+                                   alone, so a run that was stopped carries on where it left off and
+                                   a run after a game update fetches only what the update changed.
+
               apply <pack>...      Install one or more .pgmod files into the game.
               verify               Check every bundle against the hash the game recorded for it.
               consolidate          Report what emptying the downloaded cache would change. --apply
@@ -105,6 +111,14 @@ static int Run(CommandLine line)
               --out <directory>    Where extract writes (default ./workspace), or where pack puts the
                                    .pgmod (a directory, or the file's own path).
               --author <name>      Recorded in the manifest by extract --workspace.
+              --parallel <n>       How many bundles fetch downloads at once (default 8).
+              --into <directory>   Where fetch writes, instead of the cache the game loads from.
+              --dry-run            With fetch: say what would be downloaded and stop.
+              --check-cached       With fetch: hash what is already there rather than taking a file
+                                   being at its path as the bundle being there. Slow: it decompresses
+                                   everything it checks. With --dry-run as well, that check is all it
+                                   does — which is how to ask whether the content on disk is still
+                                   what the game expects.
               --force              Let apply go ahead anyway: back up a bundle already modified, or
                                    install a signed pack altered after it was built.
               --fast               Squeeze rebuilt bundles less: that part is about four times quicker
@@ -153,7 +167,7 @@ static int Run(CommandLine line)
 
     // Before the game is looked for: a typo is a typo whether or not there is a game to find.
     string[] commands =
-        ["info", "consolidate", "verify", "mods", "apply", "enable", "disable", "remove", "items", "weapons", "show", "extract",
+        ["info", "consolidate", "verify", "fetch", "mods", "apply", "enable", "disable", "remove", "items", "weapons", "show", "extract",
          "animation"];
     if (!commands.Contains(line.Command))
         throw new CommandLineException($"Unknown command '{line.Command}'.");
@@ -163,27 +177,39 @@ static int Run(CommandLine line)
 
     // The game as shipped: show and extract are about the item, not about whatever mod is
     // installed over it. Anything that writes or verifies goes to the installation directly.
-    // Unpacked into memory up to a limit, because reading them from disk a block at a time is most
-    // of what resolving and extracting costs. See BundleUnpacker.
-    using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
-    {
-        UnpackBudget = line.Number("read-memory", 1024) * 1024L * 1024,
-    };
+    using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf);
+
+    // Where an item's own assets are, which since 26.15 is behind the content catalog. The old
+    // reader stands in on an installation from before the move; its 90 bundles are all such a game
+    // has. Unpacked into memory up to a limit, because reading them from disk a block at a time is
+    // most of what resolving and extracting costs. See BundleUnpacker.
+    var addressables = File.Exists(ContentCatalog.PathIn(game.DataDirectory))
+        ? AddressableBundles.For(game.DataDirectory)
+        : null;
+    using var fromCatalog = addressables is { } delivered
+        ? new AddressableSet(delivered, bundles.Context)
+        {
+            UnpackBudget = line.Number("read-memory", 1024) * 1024L * 1024,
+        }
+        : null;
+    IBundleReader content = fromCatalog is { } c ? c : bundles;
 
     // Loaded on demand: only the commands that name items pay for it.
-    var catalogs = new Lazy<GameCatalogs>(() => LoadCatalogs(bundles, line.Option("language")));
+    var catalogs = new Lazy<GameCatalogs>(
+        () => LoadCatalogs(bundles, line.Option("language"), addressables, fromCatalog));
 
     return line.Command switch
     {
-        "info" => Info(game, bundles),
+        "info" => Info(game, bundles, addressables),
         "consolidate" => Consolidate(game, line),
         "verify" => Verify(game),
+        "fetch" => Fetch(line, game),
         "mods" => Mods(game),
         "apply" or "enable" or "disable" or "remove" => Change(line, game, bundles, catalogs),
         "items" => Items(line, catalogs),
         "weapons" => Weapons(line, catalogs),
-        "show" or "extract" => ShowOrExtract(line, game, bundles, catalogs),
-        "animation" => Animations(line, bundles, catalogs),
+        "show" or "extract" => ShowOrExtract(line, game, content, catalogs),
+        "animation" => Animations(line, content, catalogs),
         _ => throw new CommandLineException($"Unknown command '{line.Command}'."),
     };
 }
@@ -228,7 +254,7 @@ static int Pack(CommandLine line)
             ? GameInstallation.Open(dir)
             : GameInstallation.OpenDetected();
         using var opened = new BundleSet(installation);
-        var named = LoadCatalogs(opened, line.Option("language"));
+        var named = LoadCatalogs(opened, line.Option("language"), null, null);
 
         foreach (var also in SharedInPack(opened, PackBuilder.ReadManifest(result.Path)))
             Console.WriteLine($"  shared: {Describe(also, named)}");
@@ -241,7 +267,7 @@ static int Pack(CommandLine line)
     return 0;
 }
 
-static int Animations(CommandLine line, BundleSet bundles, Lazy<GameCatalogs> catalogs)
+static int Animations(CommandLine line, IBundleReader bundles, Lazy<GameCatalogs> catalogs)
 {
     if (line.Positional.Count is 0 or > 2)
         throw new CommandLineException("animation takes a workspace directory, and then the animation to change.");
@@ -365,7 +391,7 @@ static int Animations(CommandLine line, BundleSet bundles, Lazy<GameCatalogs> ca
     }
 }
 
-static int Info(GameInstallation game, BundleSet bundles)
+static int Info(GameInstallation game, BundleSet bundles, AddressableBundles? addressables)
 {
     Console.WriteLine($"Install    {game.RootDirectory}");
     Console.WriteLine($"Bundles    {bundles.BundleNames.Count} in the manifest");
@@ -380,6 +406,18 @@ static int Info(GameInstallation game, BundleSet bundles)
     }
     else Console.WriteLine("Downloaded none yet; everything loads from the shipped cache");
     Console.WriteLine($"Data files {game.EnumerateSerializedFiles().Count()}");
+    if (addressables is { } delivered)
+    {
+        var catalog = delivered.Catalog;
+        var remote = catalog.Bundles.Count(b => b.IsRemote);
+        var here = delivered.Cache is { } cache
+            ? remote - BundleFetcher.Missing(catalog.Bundles, cache.Root).Count
+            : 0;
+        Console.WriteLine($"Content    {catalog.Bundles.Count} bundles in the catalog, "
+            + $"{remote} fetched rather than shipped, {here} of those here");
+        Console.WriteLine($"           {delivered.Cache?.Root ?? "the cache the game fetches into is not there yet"}");
+    }
+    else Console.WriteLine("Content    no Addressables catalog; this game keeps everything in the manifest above");
     // Two different kinds of nothing, and saying the wrong one sends somebody looking for a file
     // that is already there. The version lives in `globalgamemanagers`, which carries no type tree,
     // so it is read through the stock engine class database — and `PlayerSettings` is the one class
@@ -442,6 +480,112 @@ static int Consolidate(GameInstallation game, CommandLine line)
     var removed = CacheConsolidation.Apply(game, plan);
     Console.WriteLine($"\nRemoved {removed.Count}; the ledger now claims {game.Downloaded.Claimed.Count - removed.Count}.");
     return 0;
+}
+
+static int Fetch(CommandLine line, GameInstallation game)
+{
+    var bundles = AddressableBundles.For(game.DataDirectory);
+
+    var into = line.Option("into") is { } wanted
+        ? Path.GetFullPath(wanted)
+        : bundles.Cache?.Root
+            ?? throw new DirectoryNotFoundException(
+                "The cache the game downloads into is not there, so there is nowhere to put this. "
+                + "Starting the game once makes it, or --into names somewhere else.");
+
+    Console.WriteLine($"{bundles.Catalog.Bundles.Count:N0} bundles in the catalog, "
+        + $"{bundles.Catalog.Bundles.Count(b => b.IsRemote):N0} of them fetched rather than shipped.");
+
+    // Asked to hash what is already there, a dry run hashes it: saying "everything, because it has
+    // not been checked yet" is the one answer nobody wants.
+    if (line.Has("dry-run") && line.Has("check-cached"))
+        return Audit(bundles, into, line.Number("parallel", BundleFetcher.DefaultAtOnce));
+
+    var plan = BundleFetcher.Plan(bundles.Catalog.Bundles, into);
+    var missing = line.Has("check-cached")
+        ? bundles.Catalog.Bundles.Where(b => b.IsRemote).ToList()
+        : plan.All;
+
+    Console.WriteLine($"{plan.ToDownload.Count:N0} to download "
+        + $"({plan.Bytes / 1024.0 / 1024:N0} MB) into {into}");
+    if (plan.ToRegister.Count > 0)
+        Console.WriteLine($"{plan.ToRegister.Count:N0} are already here with no {AddressablesCache.InfoFileName} "
+            + "beside them, which is what the game reads a cached bundle by; those are put right "
+            + "without downloading anything.");
+    if (missing.Count == 0) return 0;
+    if (line.Has("dry-run")) return 0;
+
+    // Writing into the cache the game has open is the same hazard as rewriting its bundles.
+    if (line.Option("into") is null && GameProcess.IsRunning(game)) return GameIsRunning();
+
+    // Ctrl+C stops it rather than killing it, so nothing is left half-written. Stopping is safe at
+    // any point: what has been fetched stays fetched and the next run carries on.
+    using var stop = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
+
+    using var fetcher = new BundleFetcher
+    {
+        AtOnce = line.Number("parallel", BundleFetcher.DefaultAtOnce),
+        VerifyWhatIsThere = line.Has("check-cached"),
+    };
+
+    var clock = Stopwatch.StartNew();
+    var lastSaid = -1L;
+    var result = fetcher.Fetch(missing, into, p =>
+    {
+        // One line, rewritten: a line per bundle is twelve thousand of them.
+        if (clock.ElapsedMilliseconds - lastSaid < 200 && p.Done != p.Total) return;
+        lastSaid = clock.ElapsedMilliseconds;
+        Console.Write($"\r  {p.Done,6:N0}/{p.Total:N0}  {p.Bytes / 1024.0 / 1024,8:N0} MB  "
+            + $"{p.Bytes / 1024.0 / 1024 / Math.Max(clock.Elapsed.TotalSeconds, 0.001),6:N1} MB/s   ");
+    }, stop.Token);
+    Console.WriteLine();
+
+    Console.WriteLine($"{result.Fetched:N0} downloaded, {result.AlreadyThere:N0} already there, "
+        + $"{result.Failures.Count:N0} failed, in {clock.Elapsed:hh\\:mm\\:ss}"
+        + (result.Stopped ? " before it was stopped." : "."));
+    foreach (var failure in result.Failures.Take(20))
+        Console.Error.WriteLine($"  {failure.Bundle.FileName}: {failure.Trouble}");
+    if (result.Failures.Count > 20)
+        Console.Error.WriteLine($"  and {result.Failures.Count - 20:N0} more.");
+    if (result.Failures.Count > 0)
+        Console.Error.WriteLine("Running this again retries them; nothing that did arrive is fetched twice.");
+
+    return result.Failures.Count > 0 ? 1 : 0;
+}
+
+/// Every content bundle on disk, hashed against what the catalog records for it. Minutes rather
+/// than seconds, because it decompresses all of it.
+static int Audit(AddressableBundles bundles, string into, int atOnce)
+{
+    using var fetcher = new BundleFetcher { AtOnce = atOnce };
+    var clock = Stopwatch.StartNew();
+    var lastSaid = -1L;
+
+    var states = fetcher.Check(bundles.Catalog.Bundles, into, (done, total) =>
+    {
+        if (clock.ElapsedMilliseconds - lastSaid < 250 && done != total) return;
+        lastSaid = clock.ElapsedMilliseconds;
+        Console.Write($"\r  {done,6:N0}/{total:N0}   ");
+    });
+    Console.WriteLine();
+
+    var absent = states.Where(s => s.Value is BundleFetcher.BundleState.Absent).ToList();
+    var wrong = states.Where(s => s.Value is BundleFetcher.BundleState.Wrong).ToList();
+
+    Console.WriteLine($"{states.Count - absent.Count - wrong.Count:N0} of {states.Count:N0} hash to "
+        + $"what the catalog records, in {clock.Elapsed:hh\\:mm\\:ss}.");
+    Console.WriteLine($"{absent.Count:N0} not downloaded "
+        + $"({absent.Sum(s => s.Key.Size) / 1024.0 / 1024:N0} MB), {wrong.Count:N0} do not match.");
+    foreach (var (bundle, _) in wrong.Take(20))
+        Console.WriteLine($"  {bundle.FileName}");
+    if (wrong.Count > 20) Console.WriteLine($"  and {wrong.Count - 20:N0} more.");
+    if (wrong.Count > 0)
+        Console.WriteLine("A bundle that does not match is one something has written into, or one "
+            + "that arrived damaged. `fetch` leaves those alone; deleting the file makes it fetch "
+            + "the delivered bytes again.");
+
+    return wrong.Count > 0 ? 1 : 0;
 }
 
 static int Verify(GameInstallation game)
@@ -620,7 +764,7 @@ static int Weapons(CommandLine line, Lazy<GameCatalogs> lazy)
     return 0;
 }
 
-static int ShowOrExtract(CommandLine line, GameInstallation game, BundleSet bundles, Lazy<GameCatalogs> lazy)
+static int ShowOrExtract(CommandLine line, GameInstallation game, IBundleReader bundles, Lazy<GameCatalogs> lazy)
 {
     var query = line.Single(line.Command == "show"
         ? "an item: a weapon's number, prefab name or slug, or the id `items` lists"
@@ -722,7 +866,7 @@ static int ShowOrExtract(CommandLine line, GameInstallation game, BundleSet bund
 }
 
 static int Extract(
-    CommandLine line, GameInstallation game, BundleSet bundles, WeaponRecord record, WeaponTree tree, Stopwatch timer)
+    CommandLine line, GameInstallation game, IBundleReader bundles, WeaponRecord record, WeaponTree tree, Stopwatch timer)
 {
     // A skin nobody has is an error here rather than a line under Skipped: extracting the item as it
     // comes, into a directory named for the item, is not what somebody asking for a skin wanted.
@@ -841,7 +985,8 @@ static int Extract(
 ///
 /// A language the game does not ship is said by name, with the ones it does: the registry read fails
 /// on it otherwise, as a missing MonoBehaviour that names nothing a person typed.
-static GameCatalogs LoadCatalogs(BundleSet bundles, string? language)
+static GameCatalogs LoadCatalogs(
+    BundleSet bundles, string? language, AddressableBundles? addressables, AddressableSet? content)
 {
     if (language is not null && !bundles.BundleNames.Contains(language))
         throw new CommandLineException($"There is no language bundle called '{language}'. The game has: "
@@ -849,8 +994,14 @@ static GameCatalogs LoadCatalogs(BundleSet bundles, string? language)
 
     // Kept in this installation's own folder, the same one the window uses: a run of either reads
     // what the other left. See WeaponNames.
+    //
+    // Which bundle holds a logical path is the one thing the registries cannot answer for
+    // themselves any more: the table they ship names bundles the game no longer has, and the
+    // content catalog is asked instead.
     return GameCatalogs.Load(
-        bundles, language ?? GameCatalogs.DefaultLanguage, remember: new ModStore(bundles.Game).Root);
+        bundles, language ?? GameCatalogs.DefaultLanguage, remember: new ModStore(bundles.Game).Root,
+        lookup: addressables is null ? null : CatalogLookup.Of(addressables.Catalog),
+        registries: new RegistryReader(bundles, content));
 }
 
 /// A kind by the name a person would type it: `hat`, `Hat`, `hats`.
@@ -934,7 +1085,7 @@ static int GameIsRunning()
 
 /// One of the item's own meshes, decoded, so `show` can say what it is made of. Nothing when it
 /// cannot be read, since this is a remark rather than the answer.
-static PGAssetTool.Core.Export.Meshes.UnityMesh? ReadMeshOf(BundleSet bundles, WeaponTree tree, AssetNode mesh)
+static PGAssetTool.Core.Export.Meshes.UnityMesh? ReadMeshOf(IBundleReader bundles, WeaponTree tree, AssetNode mesh)
 {
     var bundle = mesh.Bundle.Length > 0 ? mesh.Bundle : tree.PrefabBundle;
     if (bundle is null) return null;
