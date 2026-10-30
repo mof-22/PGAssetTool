@@ -226,6 +226,13 @@ public sealed class AddressableSet : IBundleReader
         if (_originals?.Invoke(entry) is { } original && File.Exists(original))
             return _delivered[bundle] = true;
 
+        // No check recorded is this tool's mark on a bundle it wrote: every bundle the game ships
+        // carries a non-zero CRC, and the one written here is the only way the game will load an
+        // edited bundle. It is what lets a copy with no backups of its own — which is what a
+        // reinstall leaves — tell a modded bundle from a delivered one, since a catalog made to
+        // agree with the mod could not.
+        if (entry.Crc == BundleNumbers.Unchecked) return _delivered[bundle] = false;
+
         if (Bundles.Resolve(entry) is not { } live) return _delivered[bundle] = false;
 
         uint? crc;

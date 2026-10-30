@@ -35,14 +35,33 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
 {
     /// Where the bundles a pack names live, across both of the game's layouts. Built once per
     /// applier, because it reads the manifest and the catalog.
+    private ModTargets Targets => _targets ??= new ModTargets(game, Content);
+
+    /// The catalog and the cache, found once if they were not given.
     ///
     /// The content is found rather than required. An applier built without it cannot say where a
     /// content bundle belongs, so it restores none of them and then prunes the backups that were
     /// the way out — the game left modified with nothing to put it back. Three call sites made that
     /// mistake, which is two more than a default is worth arguing about. Passing it in is still
     /// worth doing: finding it reads a forty-megabyte catalog.
-    private ModTargets Targets
-        => _targets ??= new ModTargets(game, content ?? AddressableBundles.Find(game.DataDirectory));
+    ///
+    /// Everything here asks for them through this and not for the constructor's argument. Defaulting
+    /// in one place and reading the argument in another is how the relocation pass went on looking
+    /// for a moved asset on a path nothing of an item has been on since 26.15, while the rest of the
+    /// applier had the content.
+    private AddressableBundles? Content
+    {
+        get
+        {
+            if (_looked) return _found;
+            _found = content ?? AddressableBundles.Find(game.DataDirectory);
+            _looked = true;
+            return _found;
+        }
+    }
+
+    private AddressableBundles? _found;
+    private bool _looked;
 
     private ModTargets? _targets;
 
@@ -361,16 +380,16 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
             if (reading is not null) return;
 
             registries = new BundleSet(game, originals: store.OriginalOf);
-            fromCatalog = content is null
+            fromCatalog = Content is null
                 ? null
                 : new AddressableSet(
-                    content, registries.Context,
+                    Content, registries.Context,
                     b => store.OriginalOf(CacheKind.Content, b.FileName, b.Hash));
 
             reading = fromCatalog is { } delivered ? delivered : registries;
             catalogs = GameCatalogs.Load(
                 registries,
-                lookup: content is null ? null : CatalogLookup.Of(content.Catalog),
+                lookup: Content is null ? null : CatalogLookup.Of(Content.Catalog),
                 registries: new RegistryReader(registries, fromCatalog));
         }
 
@@ -526,11 +545,21 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
     ///
     /// The game checks a bundle against the CRC the catalog records for it and throws away one that
     /// disagrees — with nothing the player sees but the content missing. So a bundle this wrote has
-    /// to have its number written too, and a bundle it put back has to have the original number put
+    /// to have its check settled too, and a bundle it put back has to have the original number put
     /// back. Both are the same question asked of the bytes that are there now, which is why this
     /// runs over everything the tool has touched rather than over what this pass happened to do:
     /// a run that died half way leaves the catalog disagreeing with the disk, and the next one
     /// settles it either way.
+    ///
+    /// **A bundle this wrote gets a CRC of zero rather than its own**, which turns the check off
+    /// for that one bundle instead of making it pass. Writing the new number would work as well and
+    /// costs something that cannot be bought back: the catalog is the only record on disk of what
+    /// the game delivered, and once it agrees with a modded bundle, another copy of this tool —
+    /// one with no backups, which is what a reinstall leaves — cannot tell that bundle from the
+    /// game's own and would write somebody else's work out as delivered. Every one of the 17,988
+    /// entries ships non-zero, so a zero is unambiguously this tool's mark, and `AddressableSet`
+    /// reads it as "cannot vouch for this". The number the game had is kept beside the backup for
+    /// the restore, where it always was.
     ///
     /// One write of the catalog for all of them. It is forty megabytes.
     private void SettleCatalog(List<string> failed)
@@ -546,13 +575,15 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
             // A bundle that is back to the copy we put aside gets the number the game had for it,
             // not the number its bytes work out to. The two are not always the same, and the game's
             // is the one an uninstall owes it.
-            var original = string.Equals(
+            var restored = string.Equals(
                 BundleIntegrity.Md5(live), store.BackupMd5(cache, bundle, hash),
-                StringComparison.OrdinalIgnoreCase)
-                    ? store.RememberedNumbers(cache, bundle, hash)
-                    : null;
+                StringComparison.OrdinalIgnoreCase);
 
-            if ((original ?? ModTargets.NumbersFor(live)) is { } numbers) wanted[bundle] = numbers;
+            var numbers = restored
+                ? store.RememberedNumbers(cache, bundle, hash) ?? ModTargets.NumbersFor(live)
+                : ModTargets.WrittenNumbersFor(live);
+
+            if (numbers is not null) wanted[bundle] = numbers;
         }
 
         if (wanted.Count == 0) return;

@@ -131,7 +131,12 @@ public sealed class BundleFetcher : IDisposable
 
     /// What a bundle on disk is: absent, or present with bytes that do not hash to the number the
     /// catalog records for it.
-    public enum BundleState { Here, Absent, Wrong }
+    ///
+    /// `Written` is the third answer and not a kind of `Wrong`: the catalog records no check at all
+    /// for that bundle, which is this tool's own mark on one it installed a mod into. Nothing is
+    /// known about those bytes beyond the fact that they are not the game's — which is the point of
+    /// the mark — so there is nothing to hash them against.
+    public enum BundleState { Here, Absent, Wrong, Written }
 
     /// The state of each of the given bundles, hashing every one that is there.
     ///
@@ -163,6 +168,7 @@ public sealed class BundleFetcher : IDisposable
                     : wanted[at].PathIn(shipped!);
                 states[at] = !File.Exists(path)
                     ? BundleState.Absent
+                    : wanted[at].Crc == BundleNumbers.Unchecked ? BundleState.Written
                     : Crc(path) == wanted[at].Crc ? BundleState.Here : BundleState.Wrong;
 
                 progress?.Invoke(Interlocked.Increment(ref done), wanted.Length);
@@ -302,7 +308,9 @@ public sealed class BundleFetcher : IDisposable
         if (length != bundle.Size)
             return $"{length:N0} bytes came back where the catalog says {bundle.Size:N0}";
 
-        if (!Verify) return null;
+        // A bundle the tool has written to carries no check, so there is nothing for what came back
+        // to agree with — and it would not agree anyway, the catalog's length being the mod's.
+        if (!Verify || bundle.Crc == BundleNumbers.Unchecked) return null;
         var crc = Crc(writing);
         return crc == bundle.Crc
             ? null
@@ -313,7 +321,7 @@ public sealed class BundleFetcher : IDisposable
     private bool IsWhole(CatalogBundle bundle, string path)
     {
         if (new FileInfo(path).Length != bundle.Size) return false;
-        return !VerifyWhatIsThere || Crc(path) == bundle.Crc;
+        return !VerifyWhatIsThere || bundle.Crc == BundleNumbers.Unchecked || Crc(path) == bundle.Crc;
     }
 
     private static uint? Crc(string path)

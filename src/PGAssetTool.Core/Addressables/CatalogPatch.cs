@@ -6,7 +6,15 @@ namespace PGAssetTool.Core.Addressables;
 
 /// What the catalog records about a bundle's bytes: the CRC its contents must hash to, and how long
 /// the file is.
-public sealed record BundleNumbers(uint Crc, long Size);
+public sealed record BundleNumbers(uint Crc, long Size)
+{
+    /// The CRC that means "do not check this bundle", which no bundle the game ships carries.
+    ///
+    /// All 17,988 entries have a non-zero CRC, so a zero is this tool's own mark: it both lets the
+    /// game load a bundle whose bytes this wrote and leaves the catalog honest about which bundles
+    /// are no longer as delivered. See `ModApplier.SettleCatalog`.
+    public const uint Unchecked = 0;
+}
 
 /// Rewriting what the catalog says about a bundle, which is what makes an edited one loadable.
 ///

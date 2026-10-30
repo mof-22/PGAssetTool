@@ -97,11 +97,26 @@ public sealed class ModTargets
         if (target.Delivered is not { } delivered)
             return BundleIntegrity.IsPristine(target.Path, target.Hash);
 
+        // No check recorded means this tool took the check off, which it only does for a bundle it
+        // wrote. See `ModApplier.SettleCatalog`.
+        if (delivered.Crc == BundleNumbers.Unchecked) return false;
+
         try { return BundleCrc.OfBundle(target.Path) == delivered.Crc; }
         catch (Exception e) when (e is IOException or InvalidDataException or NotSupportedException)
         {
             return false;
         }
+    }
+
+    /// What the catalog is to say about a bundle this tool wrote: its length, and no check.
+    ///
+    /// The CRC is deliberately not computed. Hashing it would mean decompressing the whole bundle
+    /// for a number that is thrown away, and a number the catalog is not to carry — see
+    /// `ModApplier.SettleCatalog`.
+    public static BundleNumbers? WrittenNumbersFor(string path)
+    {
+        try { return new BundleNumbers(BundleNumbers.Unchecked, new FileInfo(path).Length); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// What the catalog would have to say about the bytes now at this target, or null for a file it

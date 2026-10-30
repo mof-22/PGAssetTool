@@ -44,33 +44,49 @@ public static class InstallationReport
     /// Hash every bundle in the manifest rather than only the ones a mod claims. That is the only
     /// way to find one changed by something else, and it reads 4.8 GB — eleven seconds — so it is
     /// something to ask for, not something to do on the way into a window.
+    ///
+    /// It covers the old path alone. Sweeping the content the same way means decompressing all
+    /// 17,988 bundles the catalog names, which is minutes rather than seconds; `fetch
+    /// --check-cached` is that sweep, with a progress count and something to stop it with. The
+    /// bundles a mod claims are read through both layouts either way, which is what this is for.
     /// </param>
-    public static IReadOnlyList<BundleReport> Read(GameInstallation game, ModStore store, bool everything = false)
+    public static IReadOnlyList<BundleReport> Read(
+        GameInstallation game, ModStore store, bool everything = false,
+        Addressables.AddressableBundles? content = null)
     {
         var byBundle = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var mod in store.Read())
             foreach (var bundle in mod.TouchedBundles.Keys)
                 (byBundle.TryGetValue(bundle, out var mods) ? mods : byBundle[bundle] = []).Add(mod.Name);
 
+        var targets = new ModTargets(game, content ?? Addressables.AddressableBundles.Find(game.DataDirectory));
         var reports = new List<BundleReport>();
-        IEnumerable<BundleEntry> manifest = game.ReadManifest();
-        if (!everything) manifest = manifest.Where(e => byBundle.ContainsKey(e.Name));
 
-        foreach (var entry in manifest)
+        // Every bundle a mod names, whichever layout holds it, and — when asked for everything —
+        // the old path's whole manifest with it. A bundle the catalog names goes through the same
+        // `ModTargets` the applier writes through, so the two cannot disagree about where it is.
+        IEnumerable<string> looking = byBundle.Keys;
+        if (everything)
+            looking = looking.Concat(game.ReadManifest().Select(e => e.Name))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var bundle in looking)
         {
-            if (game.Resolve(entry.Name, entry.Hash) is not { } resolved)
+            if (targets.Versions.GetValueOrDefault(bundle) is not { } version) continue;
+
+            if (targets.Resolve(bundle, version) is not { } target)
             {
                 // Only worth reporting when something claims it; a bundle simply not downloaded yet
                 // is the normal state for most of them.
-                if (byBundle.ContainsKey(entry.Name))
-                    reports.Add(new BundleReport(entry.Name, null, BundleState.Missing, byBundle[entry.Name]));
+                if (byBundle.TryGetValue(bundle, out var claiming))
+                    reports.Add(new BundleReport(bundle, null, BundleState.Missing, claiming));
                 continue;
             }
 
-            if (BundleIntegrity.IsPristine(resolved.Path, entry.Hash)) continue;
+            if (targets.ReadsAsDelivered(target)) continue;
 
-            var mods = byBundle.GetValueOrDefault(entry.Name, []);
-            reports.Add(new BundleReport(entry.Name, resolved.Cache,
+            var mods = byBundle.GetValueOrDefault(bundle, []);
+            reports.Add(new BundleReport(bundle, target.Cache,
                 mods.Count > 0 ? BundleState.ChangedByThisTool : BundleState.ChangedBySomethingElse,
                 mods));
         }

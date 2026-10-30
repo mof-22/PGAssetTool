@@ -573,11 +573,15 @@ static int Audit(AddressableBundles bundles, string into, int atOnce, string shi
 
     var absent = states.Where(s => s.Value is BundleFetcher.BundleState.Absent).ToList();
     var wrong = states.Where(s => s.Value is BundleFetcher.BundleState.Wrong).ToList();
+    var written = states.Count(s => s.Value is BundleFetcher.BundleState.Written);
 
-    Console.WriteLine($"{states.Count - absent.Count - wrong.Count:N0} of {states.Count:N0} hash to "
-        + $"what the catalog records, in {clock.Elapsed:hh\\:mm\\:ss}.");
+    Console.WriteLine($"{states.Count - absent.Count - wrong.Count - written:N0} of {states.Count:N0} "
+        + $"hash to what the catalog records, in {clock.Elapsed:hh\\:mm\\:ss}.");
     Console.WriteLine($"{absent.Count:N0} not downloaded "
         + $"({absent.Sum(s => s.Key.Size) / 1024.0 / 1024:N0} MB), {wrong.Count:N0} do not match.");
+    if (written > 0)
+        Console.WriteLine($"{written:N0} hold a mod this tool installed and are not checked against "
+            + "the catalog; `manager` says which, and uninstalling puts them back.");
     foreach (var (bundle, _) in wrong.Take(20))
         Console.WriteLine($"  {bundle.FileName}");
     if (wrong.Count > 20) Console.WriteLine($"  and {wrong.Count - 20:N0} more.");

@@ -2902,8 +2902,13 @@ internal static class SelfTest
         if (reader.Altered(touched) is { Count: > 0 } mine)
             return $"this copy cannot read the game as shipped: {string.Join(", ", mine)}";
 
-        using var elsewhere = new BundleSet(model.Game!);
-        var altered = elsewhere.Altered(touched);
+        // A mod lands wherever the asset is, which since 26.15 is a bundle the catalog names. Both
+        // of the second copy's readers are asked, because each answers only for the bundles it
+        // knows and between them they cover the two routes.
+        using var elsewhere = new OwnReaders(model.Game!);
+        var altered = elsewhere.Registries.Altered(touched)
+            .Concat(elsewhere.Content.Altered(touched))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         Console.WriteLine($"shipped  {touched.Count} bundle(s) written to; a copy without the backups "
             + $"calls {altered.Count} of them altered");
         if (altered.Count == 0) return "a reader with no backups saw nothing altered in a modded game";
@@ -2915,9 +2920,9 @@ internal static class SelfTest
         var temp = Directory.CreateTempSubdirectory("pgassettool-selftest-shipped").FullName;
         try
         {
-            var catalogs = Core.Catalog.GameCatalogs.Load(elsewhere);
-            var tree = new Core.Weapons.WeaponResolver(elsewhere, catalogs).Resolve(weapon.Record);
-            new Core.Export.WeaponExporter(elsewhere) { MaskUnused = true }.Export(tree, temp);
+            var catalogs = elsewhere.Catalogs();
+            var tree = new Core.Weapons.WeaponResolver(elsewhere.Content, catalogs).Resolve(weapon.Record);
+            new Core.Export.WeaponExporter(elsewhere.Content) { MaskUnused = true }.Export(tree, temp);
             return $"#{weapon.Record.GameNumber} extracted through a reader that cannot tell the game's own bytes";
         }
         catch (InvalidOperationException refused)
