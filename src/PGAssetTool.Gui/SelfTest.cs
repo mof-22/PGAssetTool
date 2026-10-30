@@ -93,9 +93,7 @@ internal static class SelfTest
             var store = new ModStore(game);
             Registries = asShipped ? new BundleSet(game, originals: store.OriginalOf) : new BundleSet(game);
 
-            var delivered = File.Exists(ContentCatalog.PathIn(game.DataDirectory))
-                ? AddressableBundles.For(game.DataDirectory)
-                : null;
+            var delivered = AddressableBundles.Find(game.DataDirectory);
             _fromCatalog = delivered is null
                 ? null
                 : new AddressableSet(
@@ -135,8 +133,13 @@ internal static class SelfTest
             File.ReadAllBytes(path), StbImageSharp.ColorComponents.RedGreenBlueAlpha);
 
         // Every pixel the same flat colour, alpha left alone so a masked export still has a shape.
+        //
+        // Green, and not the magenta a first draft used: that is the colour the mask check paints
+        // over what a model's UVs do not reach, so a texture painted it reads as the mask having
+        // cleared something the model shows. It counted 46,563 such pixels and was right — they
+        // were this edit, left in the game by a run that did not finish.
         for (var at = 0; at + 3 < image.Data.Length; at += 4)
-            (image.Data[at], image.Data[at + 1], image.Data[at + 2]) = ((byte)255, (byte)0, (byte)200);
+            (image.Data[at], image.Data[at + 1], image.Data[at + 2]) = ((byte)0, (byte)220, (byte)90);
 
         using var file = File.Create(path);
         new StbImageWriteSharp.ImageWriter().WritePng(
@@ -4108,11 +4111,7 @@ internal static class SelfTest
         var mine = store.Read().FirstOrDefault(m => m.Id == PackIdentity);
         if (mine is null || mine.TouchedBundles.Count == 0) return "this run's pack wrote into no bundle to read back";
 
-        var targets = new Core.Mods.ModTargets(
-            game,
-            File.Exists(ContentCatalog.PathIn(game.DataDirectory))
-                ? AddressableBundles.For(game.DataDirectory)
-                : null);
+        var targets = new Core.Mods.ModTargets(game, AddressableBundles.Find(game.DataDirectory));
 
         var looked = 0;
         foreach (var (bundle, hash) in mine.TouchedBundles)

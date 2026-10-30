@@ -183,9 +183,7 @@ static int Run(CommandLine line)
     // reader stands in on an installation from before the move; its 90 bundles are all such a game
     // has. Unpacked into memory up to a limit, because reading them from disk a block at a time is
     // most of what resolving and extracting costs. See BundleUnpacker.
-    var addressables = File.Exists(ContentCatalog.PathIn(game.DataDirectory))
-        ? AddressableBundles.For(game.DataDirectory)
-        : null;
+    var addressables = AddressableBundles.Find(game.DataDirectory);
     using var fromCatalog = addressables is { } delivered
         ? new AddressableSet(
             delivered, bundles.Context,

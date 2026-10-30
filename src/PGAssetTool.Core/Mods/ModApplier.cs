@@ -35,7 +35,14 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
 {
     /// Where the bundles a pack names live, across both of the game's layouts. Built once per
     /// applier, because it reads the manifest and the catalog.
-    private ModTargets Targets => _targets ??= new ModTargets(game, content);
+    ///
+    /// The content is found rather than required. An applier built without it cannot say where a
+    /// content bundle belongs, so it restores none of them and then prunes the backups that were
+    /// the way out — the game left modified with nothing to put it back. Three call sites made that
+    /// mistake, which is two more than a default is worth arguing about. Passing it in is still
+    /// worth doing: finding it reads a forty-megabyte catalog.
+    private ModTargets Targets
+        => _targets ??= new ModTargets(game, content ?? AddressableBundles.Find(game.DataDirectory));
 
     private ModTargets? _targets;
 
@@ -298,7 +305,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
             // all mean the same thing: assume nothing, and do the lot.
             var written = Rebuild ? [] : store.ReadWritten();
 
-            var settled = PutBack(recipes, written, restored);
+            var settled = PutBack(recipes, written, restored, failed);
 
             ApplyAll(byBundle, settled, recipes, written, hashes, touchedByMod,
                 applied, failed, shared, unchanged, lost, staging.FullName);
@@ -400,7 +407,10 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
                         catch (Exception e) when (e is IOException or KeyNotFoundException or InvalidDataException)
                         {
                             // Not being able to look is not the same as having looked, so nothing is
-                            // written down and the next reconcile tries again.
+                            // written down and the next reconcile tries again. Recorded even so: a
+                            // search that never happens looks exactly like one that found nothing.
+                            Settings.ErrorLog.Record(
+                                e, $"looking for '{missing.Operation.Target.Name}' outside '{from}'");
                             continue;
                         }
                     }
@@ -445,14 +455,28 @@ public sealed class ModApplier(GameInstallation game, ModStore store, Addressabl
     private HashSet<string> PutBack(
         IReadOnlyDictionary<string, string> recipes,
         Dictionary<string, WrittenBundle> written,
-        List<string> restored)
+        List<string> restored,
+        List<string> failed)
     {
         var settled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (cache, bundle, hash) in store.BackedUp())
         {
             var live = Targets.PathIn(cache, bundle, hash);
-            if (live is null || !File.Exists(live)) continue;
+
+            // A copy was put aside and there is nowhere to put it back. Said rather than passed
+            // over: the backups of bundles no mod names any more are pruned at the end of this, so
+            // skipping quietly leaves the game modified and throws away the way out of it. That is
+            // what an applier opened without the content catalog did to every content bundle.
+            if (live is null)
+            {
+                failed.Add($"'{bundle}' was written into and cannot be put back: nothing here can "
+                    + $"say where the {cache.ToString().ToLowerInvariant()} copy of it belongs.");
+                settled.Add(bundle);
+                continue;
+            }
+
+            if (!File.Exists(live)) continue;
 
             // A rebuild that never got as far as its rename, from a run that died part way. It is
             // no use to anyone and the game's own folder is no place to leave one lying.

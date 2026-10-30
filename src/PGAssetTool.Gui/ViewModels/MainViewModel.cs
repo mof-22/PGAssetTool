@@ -379,7 +379,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // The content the game downloads as it is played, which since 26.15 is nearly all
                 // of it. An installation from before the move has no catalog, and the old reader
                 // stands in: its 90 bundles are all such a game has.
-                _addressables = ReadAddressables(game);
+                _addressables = AddressableBundles.Find(game.DataDirectory);
                 _content = _addressables is { } addressables
                     // The context is shared, so the engine class database is loaded once; the
                     // registries' reader owns it and closes it.
@@ -852,7 +852,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             using (var reading = new BundleSet(game))
                 version = GameVersion.Of(reading.Context, game) ?? GameVersion.Unknown;
 
-            var content = ReadAddressables(game);
+            var content = AddressableBundles.Find(game.DataDirectory);
             result = await Task.Run(() => new ModApplier(game, store, content)
             {
                 Packing = Packing,
@@ -2110,22 +2110,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         System.Diagnostics.Process.Start("explorer.exe", target);
     }
 
-    /// The catalog and the cache, or null on an installation that has neither.
-    private static AddressableBundles? ReadAddressables(GameInstallation game)
-    {
-        try
-        {
-            return File.Exists(ContentCatalog.PathIn(game.DataDirectory))
-                ? AddressableBundles.For(game.DataDirectory)
-                : null;
-        }
-        catch (Exception e) when (e is IOException or InvalidDataException)
-        {
-            ErrorLog.Record(e, "reading the game's content catalog");
-            return null;
-        }
-    }
-
     /// Worked out on opening the game, not on being asked: after an update nothing else about the
     /// tool looks wrong. See GameUpdate.
     private static string? UpdateNoticeFor(GameInstallation game, BundleSet bundles)
@@ -2133,7 +2117,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             var stale = GameUpdate.Stale(
-                new ModStore(game).Read(), new ModTargets(game, ReadAddressables(game)).Versions);
+                new ModStore(game).Read(), new ModTargets(game, AddressableBundles.Find(game.DataDirectory)).Versions);
             if (stale.Count == 0) return null;
 
             return GameUpdate.Notice(stale, GameVersion.Of(bundles.Context, game));

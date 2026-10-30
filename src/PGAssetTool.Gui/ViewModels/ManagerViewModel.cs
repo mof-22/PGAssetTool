@@ -553,7 +553,10 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// there was nothing to do would be no answer at all.
     [RelayCommand]
     private void Reapply() => Ask("Reapply everything",
-        _ => new ModApplier(_game()!, new ModStore(_game()!)) { Packing = Packing, AtOnce = AtOnce, Rebuild = true }.Reconcile(),
+        _ => new ModApplier(
+                _game()!, new ModStore(_game()!),
+                Core.Addressables.AddressableBundles.Find(_game()!.DataDirectory))
+            { Packing = Packing, AtOnce = AtOnce, Rebuild = true }.Reconcile(),
         needsSelection: false);
 
     private ModApplier Applier() => new(_game()!, new ModStore(_game()!)) { Packing = Packing, AtOnce = AtOnce };

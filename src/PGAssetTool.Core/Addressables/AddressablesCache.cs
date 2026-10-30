@@ -119,6 +119,23 @@ public sealed class AddressableBundles
         => new(ContentCatalog.Read(ContentCatalog.PathIn(dataDirectory)),
             dataDirectory, AddressablesCache.Find(dataDirectory));
 
+    /// The same, or null for an installation from before the move or one whose catalog will not
+    /// read. The one way to ask, because anything that opens an installation without its content
+    /// is working on half a game: the applier left mods in place and deleted the backups that were
+    /// the way out of them, because the path it looked for a content bundle at came back null.
+    public static AddressableBundles? Find(string dataDirectory)
+    {
+        try
+        {
+            return File.Exists(ContentCatalog.PathIn(dataDirectory)) ? For(dataDirectory) : null;
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException)
+        {
+            Settings.ErrorLog.Record(e, "reading the game's content catalog");
+            return null;
+        }
+    }
+
     /// Where this bundle is on disk, or null for one the game has not fetched.
     ///
     /// A bundle the catalog calls remote is only ever in the cache; one it calls local is only ever
