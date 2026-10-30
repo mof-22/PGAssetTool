@@ -121,6 +121,30 @@ internal static class CatalogTables
         return length >= 0 && at + length <= extra.Length ? (at, length) : null;
     }
 
+    /// The entry table as the catalog holds it, for writing one back. Every entry is the same seven
+    /// numbers in the same order; only the offsets into the extra-data blob ever change, and they
+    /// change whenever that blob is rebuilt.
+    internal static byte[] WriteEntries(Entry[] entries)
+    {
+        var data = new byte[4 + entries.Length * 28];
+        BinaryPrimitives.WriteInt32LittleEndian(data, entries.Length);
+        for (var i = 0; i < entries.Length; i++)
+        {
+            var at = 4 + i * 28;
+            var e = entries[i];
+            foreach (var number in new[]
+                     {
+                         e.InternalId, e.Provider, e.DependencyKey, e.DependencyHash,
+                         e.DataIndex, e.PrimaryKey, e.ResourceType,
+                     })
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(at), number);
+                at += 4;
+            }
+        }
+        return data;
+    }
+
     private static int Int32At(byte[] data, int at)
         => BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(at));
 }
