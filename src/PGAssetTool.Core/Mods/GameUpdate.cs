@@ -20,9 +20,16 @@ public sealed record StaleMod(InstalledMod Mod, IReadOnlyList<string> Bundles);
 public static class GameUpdate
 {
     public static IReadOnlyList<StaleMod> Stale(IEnumerable<InstalledMod> mods, IEnumerable<BundleEntry> manifest)
+        => Stale(mods, manifest.ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase));
+
+    /// <param name="now">
+    /// Every bundle that can be written to and the version it is at, across both of the game's
+    /// layouts — see ModTargets. An update replaces the catalog as surely as it replaces the
+    /// manifest, and a mod written into a bundle neither names any more is just as stale.
+    /// </param>
+    public static IReadOnlyList<StaleMod> Stale(
+        IEnumerable<InstalledMod> mods, IReadOnlyDictionary<string, string> now)
     {
-        var now = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in manifest) now[entry.Name] = entry.Hash;
 
         return mods
             .Where(m => m.Enabled)

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using PGAssetTool.Core.Addressables;
 using PGAssetTool.Core.Game;
 
 namespace PGAssetTool.Core.Mods;
@@ -360,6 +361,46 @@ public sealed class ModStore
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         File.Copy(livePath, destination);
     }
+
+    /// What the content catalog said about a bundle before anything was written into it.
+    ///
+    /// Kept beside the backup rather than worked out from the backup's bytes, because **the game's
+    /// own catalog does not always agree with the game's own files**. A bundle that ships with the
+    /// install can be described there by the numbers of the build the delivery host serves, which
+    /// is a different file: measured on a current installation, two of them were, and the game
+    /// loads them anyway because a bundle read from disk is not checked against its CRC.
+    ///
+    /// Working the original out of the original bytes would quietly write the tool's answer over
+    /// the game's, and an uninstall would put the bytes back and leave that behind.
+    ///
+    /// Written once, when the backup is first taken. Nothing updates it, because what it records is
+    /// the state before this tool.
+    public void RememberNumbers(CacheKind cache, string bundle, string hash, BundleNumbers numbers)
+    {
+        var beside = NumbersPathFor(cache, bundle, hash);
+        if (File.Exists(beside)) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(beside)!);
+        Settings.AtomicFile.WriteAllText(beside, $"{numbers.Crc} {numbers.Size}");
+    }
+
+    public BundleNumbers? RememberedNumbers(CacheKind cache, string bundle, string hash)
+    {
+        try
+        {
+            var said = File.ReadAllText(NumbersPathFor(cache, bundle, hash)).Split(' ');
+            return said.Length == 2 && uint.TryParse(said[0], out var crc) && long.TryParse(said[1], out var size)
+                ? new BundleNumbers(crc, size)
+                : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private string NumbersPathFor(CacheKind cache, string bundle, string hash)
+        => BackupPathFor(cache, bundle, hash) + ".catalog";
+
 
     public bool RestoreIfBackedUp(CacheKind cache, string bundle, string hash, string livePath)
     {

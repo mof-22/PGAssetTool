@@ -17,6 +17,11 @@ public enum CacheKind
 
     /// Downloaded into the player's profile at runtime. Takes precedence.
     Downloaded,
+
+    /// Named by the content catalog, which since 26.15 is where everything an item is made of
+    /// lives. Found in the cache the game downloads into, or beside the install for the ones that
+    /// ship with it; see ModTargets.
+    Content,
 }
 
 public sealed record ResolvedBundle(CacheKind Cache, string Path);

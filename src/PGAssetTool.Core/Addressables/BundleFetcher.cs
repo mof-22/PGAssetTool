@@ -139,11 +139,18 @@ public sealed class BundleFetcher : IDisposable
     /// on disk is the content the game expects. A fetch does not need this: a file at the catalog's
     /// path got there by being checked, and re-hashing four and a half gigabytes to find that out
     /// again is what `VerifyWhatIsThere` is off by default for.
+    ///
+    /// The ones that ship with the install are checked too. They are content the tool writes to
+    /// like any other, the catalog records a CRC for them like any other, and leaving them out is
+    /// how damage to two of them went unnoticed through a whole session's measuring.
+    ///
+    /// <param name="shipped">Where the install keeps the bundles it ships, or null to skip them.</param>
     public IReadOnlyDictionary<CatalogBundle, BundleState> Check(
         IEnumerable<CatalogBundle> bundles, string cacheRoot,
-        Action<int, int>? progress = null, CancellationToken cancel = default)
+        Action<int, int>? progress = null, CancellationToken cancel = default,
+        string? shipped = null)
     {
-        var wanted = bundles.Where(b => b.IsRemote).ToArray();
+        var wanted = bundles.Where(b => b.IsRemote || shipped is not null).ToArray();
         var states = new BundleState[wanted.Length];
         var done = 0;
 
@@ -151,7 +158,9 @@ public sealed class BundleFetcher : IDisposable
             new ParallelOptions { MaxDegreeOfParallelism = AtOnce, CancellationToken = cancel },
             at =>
             {
-                var path = wanted[at].PathUnder(cacheRoot);
+                var path = wanted[at].IsRemote
+                    ? wanted[at].PathUnder(cacheRoot)
+                    : wanted[at].PathIn(shipped!);
                 states[at] = !File.Exists(path)
                     ? BundleState.Absent
                     : Crc(path) == wanted[at].Crc ? BundleState.Here : BundleState.Wrong;

@@ -189,9 +189,10 @@ public sealed class AddressableSet : IBundleReader
     /// the old route has 90. Anything that walks the lot pays very differently on the two, so the
     /// list is built once rather than per ask.
     public IReadOnlyCollection<string> BundleNames
-        => _names ??= [.. Catalog.Bundles.Select(b => b.FileName)];
+        => _names ??= new HashSet<string>(
+            Catalog.Bundles.Select(b => b.FileName), StringComparer.OrdinalIgnoreCase);
 
-    private string[]? _names;
+    private HashSet<string>? _names;
 
     public bool Knows(string bundle) => Catalog.ByFileName(bundle) is not null;
 
@@ -204,10 +205,11 @@ public sealed class AddressableSet : IBundleReader
 
     /// Which of these bundles this reader cannot answer for as the game delivered them.
     ///
-    /// The catalog says what each bundle's contents must hash to, so unlike the old route this needs
-    /// no manifest and no backup to tell a delivered bundle from an edited one — and a bundle that
-    /// fails is recoverable in a way the old route's are not, since the delivered bytes can simply
-    /// be fetched again. Kept per bundle, because the answer costs a decompress of the whole file.
+    /// The catalog says what each bundle's contents must hash to, shipped and downloaded alike, so
+    /// unlike the old route this needs no manifest and no backup to tell a delivered bundle from an
+    /// edited one — and a downloaded one that fails is recoverable in a way the old route's are not,
+    /// since the delivered bytes can be fetched again. Kept per bundle: the answer costs a
+    /// decompress of the whole file.
     public IReadOnlyList<string> Altered(IEnumerable<string> bundles)
         => [.. bundles.Where(b => b.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(b => Catalog.ByFileName(b) is not null && !ReadsAsDelivered(b))];

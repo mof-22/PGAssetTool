@@ -187,7 +187,9 @@ static int Run(CommandLine line)
         ? AddressableBundles.For(game.DataDirectory)
         : null;
     using var fromCatalog = addressables is { } delivered
-        ? new AddressableSet(delivered, bundles.Context)
+        ? new AddressableSet(
+            delivered, bundles.Context,
+            b => new ModStore(game).OriginalOf(CacheKind.Content, b.FileName, b.Hash))
         {
             UnpackBudget = line.Number("read-memory", 1024) * 1024L * 1024,
         }
@@ -205,7 +207,7 @@ static int Run(CommandLine line)
         "verify" => Verify(game),
         "fetch" => Fetch(line, game),
         "mods" => Mods(game),
-        "apply" or "enable" or "disable" or "remove" => Change(line, game, bundles, catalogs),
+        "apply" or "enable" or "disable" or "remove" => Change(line, game, bundles, catalogs, addressables),
         "items" => Items(line, catalogs),
         "weapons" => Weapons(line, catalogs),
         "show" or "extract" => ShowOrExtract(line, game, content, catalogs),
@@ -499,7 +501,8 @@ static int Fetch(CommandLine line, GameInstallation game)
     // Asked to hash what is already there, a dry run hashes it: saying "everything, because it has
     // not been checked yet" is the one answer nobody wants.
     if (line.Has("dry-run") && line.Has("check-cached"))
-        return Audit(bundles, into, line.Number("parallel", BundleFetcher.DefaultAtOnce));
+        return Audit(bundles, into, line.Number("parallel", BundleFetcher.DefaultAtOnce),
+            ContentCatalog.LocalBundlesIn(game.DataDirectory));
 
     var plan = BundleFetcher.Plan(bundles.Catalog.Bundles, into);
     var missing = line.Has("check-cached")
@@ -556,7 +559,7 @@ static int Fetch(CommandLine line, GameInstallation game)
 
 /// Every content bundle on disk, hashed against what the catalog records for it. Minutes rather
 /// than seconds, because it decompresses all of it.
-static int Audit(AddressableBundles bundles, string into, int atOnce)
+static int Audit(AddressableBundles bundles, string into, int atOnce, string shipped)
 {
     using var fetcher = new BundleFetcher { AtOnce = atOnce };
     var clock = Stopwatch.StartNew();
@@ -567,7 +570,7 @@ static int Audit(AddressableBundles bundles, string into, int atOnce)
         if (clock.ElapsedMilliseconds - lastSaid < 250 && done != total) return;
         lastSaid = clock.ElapsedMilliseconds;
         Console.Write($"\r  {done,6:N0}/{total:N0}   ");
-    });
+    }, shipped: shipped);
     Console.WriteLine();
 
     var absent = states.Where(s => s.Value is BundleFetcher.BundleState.Absent).ToList();
@@ -636,14 +639,16 @@ static int Mods(GameInstallation game)
     return 0;
 }
 
-static int Change(CommandLine line, GameInstallation game, BundleSet bundles, Lazy<GameCatalogs> catalogs)
+static int Change(
+    CommandLine line, GameInstallation game, BundleSet bundles, Lazy<GameCatalogs> catalogs,
+    AddressableBundles? addressables)
 {
     var command = line.Command;
     if (line.Positional.Count == 0)
         throw new CommandLineException($"{command} needs " + (command == "apply" ? "a .pgmod path." : "a mod id."));
 
     var store = new ModStore(game);
-    var applier = new ModApplier(game, store)
+    var applier = new ModApplier(game, store, addressables)
     {
         Force = line.Has("force"),
         Rebuild = line.Has("rebuild"),

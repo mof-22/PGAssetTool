@@ -384,10 +384,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     // The context is shared, so the engine class database is loaded once; the
                     // registries' reader owns it and closes it.
                     //
-                    // No kept originals yet: nothing writes into these bundles, and when something
-                    // does it will not need any — the delivered bytes can be fetched again and
-                    // checked against the catalog's CRC.
-                    ? new AddressableSet(addressables, _bundles.Context)
+                    // And the originals, for the same reason the old reader is given them: browsing
+                    // an installed item would otherwise show the mod, and extracting it would write
+                    // somebody else's work out as the game's own.
+                    ? new AddressableSet(
+                        addressables, _bundles.Context,
+                        b => store.OriginalOf(CacheKind.Content, b.FileName, b.Hash))
                     {
                         UnpackBudget = ReadMemory * 1024L * 1024,
                     }
@@ -850,7 +852,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             using (var reading = new BundleSet(game))
                 version = GameVersion.Of(reading.Context, game) ?? GameVersion.Unknown;
 
-            result = await Task.Run(() => new ModApplier(game, store) { Packing = Packing, AtOnce = AtOnce }.Install(paths, version));
+            var content = ReadAddressables(game);
+            result = await Task.Run(() => new ModApplier(game, store, content)
+            {
+                Packing = Packing,
+                AtOnce = AtOnce,
+            }.Install(paths, version));
         }
         finally
         {
@@ -2125,7 +2132,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var stale = GameUpdate.Stale(new ModStore(game).Read(), game.ReadManifest());
+            var stale = GameUpdate.Stale(
+                new ModStore(game).Read(), new ModTargets(game, ReadAddressables(game)).Versions);
             if (stale.Count == 0) return null;
 
             return GameUpdate.Notice(stale, GameVersion.Of(bundles.Context, game));

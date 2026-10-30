@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
+using PGAssetTool.Core.Addressables;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Game;
@@ -30,8 +31,14 @@ internal sealed record Misplaced(string ModId, PackOperation Operation, string K
 /// the enabled mods are then applied in the order they were installed. Toggling one mod off by
 /// restoring its bundles would also undo any other mod sharing them, and reapplying on top of
 /// already-modified bundles would stack changes; rebuilding from the originals avoids both.
-public sealed class ModApplier(GameInstallation game, ModStore store)
+public sealed class ModApplier(GameInstallation game, ModStore store, AddressableBundles? content = null)
 {
+    /// Where the bundles a pack names live, across both of the game's layouts. Built once per
+    /// applier, because it reads the manifest and the catalog.
+    private ModTargets Targets => _targets ??= new ModTargets(game, content);
+
+    private ModTargets? _targets;
+
     /// Accept a bundle that is already modified as the baseline for its backup.
     public bool Force { get; init; }
 
@@ -246,7 +253,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// what each bundle was built from are all worked out in one place, which is here.
     public ReconcileResult Reconcile()
     {
-        var hashes = game.ReadManifest().ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase);
+        var hashes = Targets.Versions;
         var (first, lost) = Pass(hashes);
         if (lost.Count == 0) return first;
 
@@ -297,6 +304,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 applied, failed, shared, unchanged, lost, staging.FullName);
 
             store.WriteWritten(written);
+            SettleCatalog(failed);
         }
         finally
         {
@@ -333,8 +341,31 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         var said = new List<string>();
         var changed = false;
 
-        BundleSet? reading = null;
+        // Opened on the first asset that has to be looked for, and the same pair the window reads
+        // through: an item's assets have not been on the old path since 26.15, so looking for one
+        // there finds nothing and every moved asset is reported as gone.
+        BundleSet? registries = null;
+        AddressableSet? fromCatalog = null;
+        IBundleReader? reading = null;
         GameCatalogs? catalogs = null;
+
+        void Open()
+        {
+            if (reading is not null) return;
+
+            registries = new BundleSet(game, originals: store.OriginalOf);
+            fromCatalog = content is null
+                ? null
+                : new AddressableSet(
+                    content, registries.Context,
+                    b => store.OriginalOf(CacheKind.Content, b.FileName, b.Hash));
+
+            reading = fromCatalog is { } delivered ? delivered : registries;
+            catalogs = GameCatalogs.Load(
+                registries,
+                lookup: content is null ? null : CatalogLookup.Of(content.Catalog),
+                registries: new RegistryReader(registries, fromCatalog));
+        }
 
         try
         {
@@ -362,10 +393,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                     {
                         try
                         {
-                            reading ??= new BundleSet(game, originals: store.OriginalOf);
-                            catalogs ??= GameCatalogs.Load(reading);
-                            candidates ??= Relocation.Candidates(reading, catalogs, subject);
-                            found = Relocation.Find(reading, candidates, missing.Operation.Target, from);
+                            Open();
+                            candidates ??= Relocation.Candidates(reading!, catalogs!, subject);
+                            found = Relocation.Find(reading!, candidates, missing.Operation.Target, from);
                         }
                         catch (Exception e) when (e is IOException or KeyNotFoundException or InvalidDataException)
                         {
@@ -388,7 +418,8 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         }
         finally
         {
-            reading?.Dispose();
+            fromCatalog?.Dispose();
+            registries?.Dispose();
         }
 
         if (changed) store.Write(mods);
@@ -420,16 +451,26 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
         foreach (var (cache, bundle, hash) in store.BackedUp())
         {
-            var live = LivePathIn(cache, bundle, hash);
+            var live = Targets.PathIn(cache, bundle, hash);
             if (live is null || !File.Exists(live)) continue;
 
             // A rebuild that never got as far as its rename, from a run that died part way. It is
             // no use to anyone and the game's own folder is no place to leave one lying.
             Discard(live + Unfinished);
 
+            // Nothing of ours is in it, by whichever record says so.
+            //
+            // The copy we put aside is the original on either path, and this only ever runs where
+            // there is one. The manifest's hash says the same thing outright, and is the game's own
+            // record — but **the catalog's number is not**: this tool rewrites it to match whatever
+            // it wrote, so for a content bundle it agrees with the modified file by construction and
+            // answers "untouched" for a bundle holding every mod installed.
             var holds = BundleIntegrity.Md5(live);
-            if (string.Equals(holds, hash, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(holds, store.BackupMd5(cache, bundle, hash), StringComparison.OrdinalIgnoreCase))
+            var target = Targets.Resolve(bundle, hash);
+
+            if (string.Equals(holds, store.BackupMd5(cache, bundle, hash), StringComparison.OrdinalIgnoreCase)
+                || (cache != CacheKind.Content
+                    && string.Equals(holds, hash, StringComparison.OrdinalIgnoreCase)))
             {
                 written.Remove(bundle);
                 continue;
@@ -441,8 +482,8 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 && string.Equals(before.Hash, holds, StringComparison.OrdinalIgnoreCase)
                 // Only the copy the game would actually load. A bundle present in both caches has
                 // one record between them, and the copy nothing loads still has to be put back.
-                && game.Resolve(bundle, hash) is { } resolved
-                && resolved.Cache == cache)
+                && target is not null
+                && target.Cache == cache)
             {
                 settled.Add(bundle);
                 continue;
@@ -455,6 +496,54 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         }
 
         return settled;
+    }
+
+    /// Makes the catalog's numbers agree with the bundles on disk.
+    ///
+    /// The game checks a bundle against the CRC the catalog records for it and throws away one that
+    /// disagrees — with nothing the player sees but the content missing. So a bundle this wrote has
+    /// to have its number written too, and a bundle it put back has to have the original number put
+    /// back. Both are the same question asked of the bytes that are there now, which is why this
+    /// runs over everything the tool has touched rather than over what this pass happened to do:
+    /// a run that died half way leaves the catalog disagreeing with the disk, and the next one
+    /// settles it either way.
+    ///
+    /// One write of the catalog for all of them. It is forty megabytes.
+    private void SettleCatalog(List<string> failed)
+    {
+        if (Targets.Catalog is not { } catalog) return;
+
+        var wanted = new Dictionary<string, BundleNumbers>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (cache, bundle, hash) in store.BackedUp())
+        {
+            if (cache != CacheKind.Content) continue;
+            if (Targets.PathIn(cache, bundle, hash) is not { } live || !File.Exists(live)) continue;
+
+            // A bundle that is back to the copy we put aside gets the number the game had for it,
+            // not the number its bytes work out to. The two are not always the same, and the game's
+            // is the one an uninstall owes it.
+            var original = string.Equals(
+                BundleIntegrity.Md5(live), store.BackupMd5(cache, bundle, hash),
+                StringComparison.OrdinalIgnoreCase)
+                    ? store.RememberedNumbers(cache, bundle, hash)
+                    : null;
+
+            if ((original ?? ModTargets.NumbersFor(live)) is { } numbers) wanted[bundle] = numbers;
+        }
+
+        if (wanted.Count == 0) return;
+
+        try
+        {
+            CatalogPatch.Write(catalog.FilePath, catalog, wanted);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // Said rather than thrown: the bundles are written and what is missing is the number
+            // beside them, which the next run settles.
+            failed.Add($"the content catalog could not be brought into step with the bundles "
+                + $"written: {e.Message}. Nothing the tool wrote will load until it is.");
+        }
     }
 
     /// What one bundle is to be built from, as a line that changes whenever the answer would.
@@ -498,15 +587,6 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
         return recipe.ToString();
     }
-
-    /// Where a backup taken from a given cache belongs, which is not necessarily the copy the game
-    /// now loads: once the downloaded cache claims a bundle it wins, and the shipped copy beneath it
-    /// still has to be put back.
-    private string? LivePathIn(CacheKind cache, string bundle, string hash) => cache switch
-    {
-        CacheKind.Downloaded => game.Downloaded?.ClaimedPath(bundle),
-        _ => Path.Combine(game.BundlesDirectory, bundle, hash, bundle),
-    };
 
     /// One mod's operations for one bundle, with the pack they came out of held open.
     ///
@@ -634,13 +714,16 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
             // Only the copy the game would actually load is worth writing to. Editing the shipped
             // copy of a bundle the downloaded cache claims changes nothing and says nothing.
-            if (game.Resolve(bundle, hash) is not { } resolved)
+            if (Targets.Resolve(bundle, hash) is not { } target)
             {
                 foreach (var part in parts)
-                    failed.Add($"{part.Mod.Id}: no copy of '{bundle}' is present in any cache");
+                    failed.Add(Targets.Catalog?.ByFileName(bundle) is not null
+                        ? $"{part.Mod.Id}: '{bundle}' has not been downloaded. Fetching the game's "
+                            + "content puts it here."
+                        : $"{part.Mod.Id}: no copy of '{bundle}' is present in any cache");
                 continue;
             }
-            var (cache, live) = (resolved.Cache, resolved.Path);
+            var (cache, live) = (target.Cache, target.Path);
 
             // Already holding exactly this. The mods still have to be told they are in it, because
             // that record is what a game update is noticed against.
@@ -653,7 +736,7 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
             // Backing up a bundle something else already edited would record that edit as the
             // original, leaving no way back to the shipped file.
-            if (!store.HasBackup(cache, bundle, hash) && !BundleIntegrity.IsPristine(live, hash) && !Force)
+            if (!store.HasBackup(cache, bundle, hash) && !Targets.ReadsAsDelivered(target) && !Force)
             {
                 foreach (var part in parts)
                     failed.Add($"{part.Mod.Id}: '{bundle}' in the {cache.ToString().ToLowerInvariant()} cache "
@@ -664,6 +747,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                 continue;
             }
             store.Backup(cache, bundle, hash, live);
+
+            // And what the catalog said about it before this tool wrote anything, which is not the
+            // same as what its bytes say. See ModStore.RememberNumbers.
+            if (target.Delivered is { } delivered)
+                store.RememberNumbers(cache, bundle, hash, new BundleNumbers(delivered.Crc, delivered.Size));
 
             jobs.Add(new Job(bundle, hash, live, new FileInfo(live).Length, parts,
                 Path.Combine(staging, jobs.Count.ToString())));

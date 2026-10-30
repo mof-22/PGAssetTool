@@ -90,14 +90,19 @@ internal static class SelfTest
 
         public OwnReaders(Core.Game.GameInstallation game, bool asShipped = false)
         {
-            Registries = asShipped
-                ? new BundleSet(game, originals: new ModStore(game).OriginalOf)
-                : new BundleSet(game);
+            var store = new ModStore(game);
+            Registries = asShipped ? new BundleSet(game, originals: store.OriginalOf) : new BundleSet(game);
 
             var delivered = File.Exists(ContentCatalog.PathIn(game.DataDirectory))
                 ? AddressableBundles.For(game.DataDirectory)
                 : null;
-            _fromCatalog = delivered is null ? null : new AddressableSet(delivered, Registries.Context);
+            _fromCatalog = delivered is null
+                ? null
+                : new AddressableSet(
+                    delivered, Registries.Context,
+                    asShipped
+                        ? b => store.OriginalOf(Core.Game.CacheKind.Content, b.FileName, b.Hash)
+                        : null);
             Content = _fromCatalog is { } reader ? reader : Registries;
             Lookup = delivered is null ? null : CatalogLookup.Of(delivered.Catalog);
         }
@@ -116,6 +121,27 @@ internal static class SelfTest
             _fromCatalog?.Dispose();
             Registries.Dispose();
         }
+    }
+
+    /// Paints a texture in a workspace, so that what is packed is a different picture.
+    ///
+    /// Appending bytes to the file makes it differ without changing a pixel: they land past the end
+    /// of the image and every decoder ignores them, so what reaches the bundle is the texture that
+    /// was already there and only the repacking makes the file differ. That is enough for the packer
+    /// and the applier, and not enough for anything asking what the picture became.
+    private static void Paint(string path)
+    {
+        var image = StbImageSharp.ImageResult.FromMemory(
+            File.ReadAllBytes(path), StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+
+        // Every pixel the same flat colour, alpha left alone so a masked export still has a shape.
+        for (var at = 0; at + 3 < image.Data.Length; at += 4)
+            (image.Data[at], image.Data[at + 1], image.Data[at + 2]) = ((byte)255, (byte)0, (byte)200);
+
+        using var file = File.Create(path);
+        new StbImageWriteSharp.ImageWriter().WritePng(
+            image.Data, image.Width, image.Height,
+            StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, file);
     }
 
     private static bool WaitWhile(Func<bool> busy, int milliseconds)
@@ -2737,6 +2763,12 @@ internal static class SelfTest
         {
             if (dressed[part] is not { } picture) { painted.Add(null); continue; }
 
+            // Only this mesh's own submeshes. The list runs on past them into the textures of the
+            // parts drawn beside it — the arms among them — and those are worn by other geometry,
+            // so masking one by this mesh's UVs clears everything it shows. Whether the arms are
+            // there at all depends on a setting, which is what made this come and go.
+            if (part >= mesh.SubMeshes.Count) { painted.Add(picture); continue; }
+
             // No margin: the tightest mask there is, and so the strictest thing to hold it to. A
             // mask that reaches further can only cover more of what the model shows, never less.
             if (Core.Export.Meshes.UvCoverage.Of([(mesh, part)], picture.Width, picture.Height, margin: 0)
@@ -2762,6 +2794,10 @@ internal static class SelfTest
 
             painted.Add(picture with { Bgra = bgra });
         }
+
+        Console.WriteLine($"mask     the row's mesh has {mesh.SubMeshes.Count} submesh(es) and "
+            + $"{mesh.VertexCount} vertices; {dressed.Count} texture slot(s); arms {(model.ShowArms ? "on" : "off")}; "
+            + $"{dressed.Count - mesh.SubMeshes.Count} slot(s) past its own submeshes");
 
         if (masked == 0)
         {
@@ -4072,10 +4108,16 @@ internal static class SelfTest
         var mine = store.Read().FirstOrDefault(m => m.Id == PackIdentity);
         if (mine is null || mine.TouchedBundles.Count == 0) return "this run's pack wrote into no bundle to read back";
 
+        var targets = new Core.Mods.ModTargets(
+            game,
+            File.Exists(ContentCatalog.PathIn(game.DataDirectory))
+                ? AddressableBundles.For(game.DataDirectory)
+                : null);
+
         var looked = 0;
         foreach (var (bundle, hash) in mine.TouchedBundles)
         {
-            if (game.Resolve(bundle, hash) is not { } live) continue;
+            if (targets.Resolve(bundle, hash) is not { } live) continue;
             if (store.OriginalOf(live.Cache, bundle, hash) is not { } original)
                 return $"'{bundle}' was written into and no original of it is kept";
 
@@ -4084,7 +4126,10 @@ internal static class SelfTest
                 return $"Browse reads '{bundle}' from {read}, the modded copy, rather than from its original";
 
             if (Core.Mods.BundleIntegrity.Md5(live.Path) == Core.Mods.BundleIntegrity.Md5(original))
-                return $"'{bundle}' is no different from its original, so reading it proves nothing";
+                return $"'{bundle}' is no different from its original, so reading it proves nothing. "
+                    + $"The game has {live.Path} at {new FileInfo(live.Path).Length:N0} bytes and the "
+                    + $"copy put aside is {original} at {new FileInfo(original).Length:N0}; whatever "
+                    + "this run packed did not change the picture that went in.";
 
             looked++;
         }
@@ -4597,7 +4642,7 @@ internal static class SelfTest
         if (texture is null) { Console.WriteLine($"batch    '{folder}' has no texture to edit"); return null; }
 
         var path = Path.Combine(directory, texture.Source);
-        File.WriteAllBytes(path, [.. File.ReadAllBytes(path), .. new byte[16]]);
+        Paint(path);
 
         Console.WriteLine($"batch    a second workspace at {Path.GetFileName(directory)}, "
             + $"editing {texture.Source}");
