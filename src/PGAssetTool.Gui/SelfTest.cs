@@ -1165,8 +1165,8 @@ internal static class SelfTest
             Console.WriteLine($"batch    {model.Status}");
             Console.WriteLine($"timing   build and apply took {applying.ElapsedMilliseconds}ms");
 
-            if (model.Status.Contains("failed") && !model.Status.Contains("0 failed"))
-                return Fail($"applying reported failures: {model.Status}");
+            if (OwnFailures(model, say: true) is { Count: > 0 } mineFailed)
+                return Fail($"applying reported failures: {string.Join("  ", mineFailed)}");
             if (!model.Status.Contains("applied")) return Fail($"the packs were not applied: {model.Status}");
 
             // Only what this run installed: someone else's mods are not this test's to touch.
@@ -1222,8 +1222,8 @@ internal static class SelfTest
             WaitWhile(() => model.Busy, 300_000);
             Console.WriteLine($"drop     installing '{Path.GetFileName(dropped)}' on its own: {model.Status}");
 
-            if (!model.Status.Contains("applied") || model.Status.Contains("1 failed"))
-                return Fail($"installing a pack by itself did not apply it: {model.Status}");
+            if (OwnFailures(model) is { Count: > 0 } aloneFailed)
+                return Fail($"installing a pack by itself did not apply it: {string.Join("  ", aloneFailed)}");
             if (new PGAssetTool.Core.Mods.ModStore(model.Game!).Read().All(m => m.Id != PackIdentity))
                 return Fail("a pack installed on its own is not in the ledger");
 
@@ -1853,6 +1853,30 @@ internal static class SelfTest
         foreach (var root in model.Manager.Folders) Walk(root);
 
         return found.FirstOrDefault(f => f.At.SequenceEqual(at, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// The failures of the last apply that belong to this test's own packs.
+    ///
+    /// Applying is a whole-game reconcile, so it reapplies the author's mods alongside this test's
+    /// and the status counts every failure in one number. An older pack of theirs can name an asset
+    /// this version of the game no longer has — `heroic_epee`'s own texture is `Weapon1110_default`
+    /// now, and nothing in that weapon's bundles is called `heroic_epee` any more — which is the
+    /// right answer and will not change. Holding a run to it would be judging the author's
+    /// collection rather than the tool.
+    /// <param name="say">Print the ones left to the author, which are worth seeing even so.</param>
+    private static List<string> OwnFailures(MainViewModel model, bool say = false)
+    {
+        var failures = model.LastApply?.Failed ?? [];
+        var mine = failures
+            .Where(f => f.StartsWith(PackIdentity + ":", StringComparison.Ordinal)
+                || f.StartsWith(PackIdentityB + ":", StringComparison.Ordinal))
+            .ToList();
+
+        if (say)
+            foreach (var theirs in failures.Except(mine, StringComparer.Ordinal))
+                Console.WriteLine($"batch    not this test's, and left to the author: {theirs}");
+
+        return mine;
     }
 
     /// A kept pack goes in the folder its weapon and its look name, and the manager shows the same

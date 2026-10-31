@@ -874,10 +874,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ? "  Followed into another bundle: " + string.Join("  ", result.Moved)
             : "";
 
+        LastApply = result;
+
         Status = $"{result.Applied.Count} applied, {result.Failed.Count} failed"
             + (result.Unchanged.Count > 0 ? $", {result.Unchanged.Count} bundle(s) left alone." : ".")
             + (result.Failed.Count > 0 ? "  " + string.Join("  ", result.Failed) : "") + moved + shared + trouble;
     }
+
+    /// What the last apply from here answered, for a test that needs more than the sentence in the
+    /// status bar.
+    ///
+    /// Only the self-test reads it. Applying is a whole-game reconcile, so it covers the mods the
+    /// author has installed as well as the packs the gesture was about, and the status counts
+    /// everyone's failures in one number — which is what a window wants and the wrong thing to
+    /// judge one pack by.
+    public ReconcileResult? LastApply { get; private set; }
 
     /// Where extraction writes. Beside the tool unless the settings say otherwise, because a
     /// window has no meaningful current directory to fall back on.
