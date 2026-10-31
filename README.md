@@ -11,6 +11,7 @@ A Windows tool that makes modding the assets of a certain pixel-styled game easy
 - **Browse** everything an item refers to — its models, textures and more — in one place
 - **Editor** to change that data and build it into a mod pack
 - **Manager** to look after the mod packs you have downloaded
+- **Download** the content the game itself only fetches as it is played
 
 Everything to do with the game's assets, made simple.
 
@@ -150,6 +151,12 @@ causes trouble, name it yourself in **File → Options** — the folder holding 
 
 **A bundle was changed by something else** - The data this tool is about to change has already been changed some other way. Put the original data back with Steam's integrity check.
 
+**An item has not been downloaded** - The game downloads a weapon or a map when it is picked and offers no way
+to ask for the rest, so on a fresh installation most of what the list shows is not on your disk. **File →
+Download the game's content** fetches what is missing, into the same place the game puts it. The whole lot is
+about twelve thousand files and four and a half gigabytes; stopping is safe, and starting again carries on from
+where it left off. Playing the item once works just as well for a single one.
+
 **The text and the buttons are too small, or too large** - *How large everything is drawn*, in
 **File → Options**, goes from 75% to 200%. The whole window is scaled rather than the text alone, so the
 column widths and the spacing grow with it.
@@ -193,6 +200,7 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `enable <id>...` / `disable <id>...` | Turn mods on, or off without uninstalling them. |
 | `remove <id>...` | Uninstall mods. A mod can be named by its id, by the start of its id, or by its name, as long as that names only one. |
 | `verify` | Check every bundle against the hash the game recorded for it. |
+| `fetch` | Download the content the game only fetches as it is played, into the cache it loads from. Stopping is safe and a later run carries on, so a run after a game update fetches only what the update changed. |
 | `consolidate` | Report what emptying the downloaded cache would change. `--apply` removes only the copies that change nothing. |
 | `animation <directory> [<clip>]` | List a workspace's animations, or change one: `--from <item>` puts in that item's animation of the same name (or `--clip <name>`), fitted to this item's bones; `--anim <file>` puts in a `.anim` from another workspace; `--glb <file>` puts in one from a glTF; `--reset` puts the original back. `--export` writes them all, with the item's models, into one `.glb` to edit. The animation always keeps this item's own length. |
 
@@ -208,6 +216,10 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `--whole` | Write the whole of every texture. By default **the part no model uses is made transparent**, leaving only what is actually seen. |
 | `--protect` | Sign the built pack, and keep it from opening as a zip. |
 | `--force` | Let `apply` go ahead anyway: back up a bundle already modified, or install a signed pack altered after it was built. |
+| `--parallel <n>` | How many bundles `fetch` downloads at once (default 8). |
+| `--into <directory>` | Where `fetch` writes, instead of the cache the game loads from. Somewhere else is a copy to look at: the tool can read it, the game cannot. |
+| `--dry-run` | With `fetch`: say what would be downloaded and stop. |
+| `--check-cached` | With `fetch`: hash what is already there rather than taking a file of the right name as right. Say it with `--dry-run` to only report. |
 | `--fast` | Compress rebuilt bundles less: that step is about four times quicker and bundles come out about 1.2 times the size. The game reads both at the same speed. |
 | `--rebuild` | Rebuild every bundle, including the ones already holding what they should. Those are normally left as they are. |
 | `--low-memory` | Rebuild bundles one at a time rather than four: about a third slower, about a third less memory at the peak. |
