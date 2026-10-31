@@ -119,6 +119,27 @@ public sealed class ModTargets
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
+    /// Whether the game will throw this bundle away rather than load it.
+    ///
+    /// The catalog records a check that the bytes on disk cannot pass. A bundle this tool wrote
+    /// carries no check at all, so this is only ever true when something has put the catalog back
+    /// without putting the bundle back — which is what a game update does. The player then loses
+    /// everything in that bundle, not only the mod in it, and for the one every weapon is resident
+    /// in that is every weapon.
+    ///
+    /// The length stands in for the CRC. Checking the CRC means decompressing the whole bundle,
+    /// seventy-five megabytes for that one, and a repacked bundle does not come out the length the
+    /// game recorded.
+    public bool WillBeRefused(string bundle)
+    {
+        if (_content?.Catalog.ByFileName(bundle) is not { } delivered) return false;
+        if (delivered.Crc == BundleNumbers.Unchecked) return false;
+        if (_content.Resolve(delivered) is not { } where) return false;
+
+        try { return new FileInfo(where.Path).Length != delivered.Size; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
     /// What the catalog would have to say about the bytes now at this target, or null for a file it
     /// cannot read. Only a bundle the catalog names has an answer.
     public static BundleNumbers? NumbersFor(string path)

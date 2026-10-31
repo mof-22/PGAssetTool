@@ -2117,7 +2117,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             var stale = GameUpdate.Stale(
-                new ModStore(game).Read(), new ModTargets(game, AddressableBundles.Find(game.DataDirectory)).Versions);
+                new ModStore(game).Read(), new ModTargets(game, AddressableBundles.Find(game.DataDirectory)));
             if (stale.Count == 0) return null;
 
             return GameUpdate.Notice(stale, GameVersion.Of(bundles.Context, game));

@@ -55,6 +55,54 @@ public class GameUpdateTests
         => Assert.Empty(GameUpdate.Stale([Mod("a", true, "26.11.0", ("DW", "AAAA"))], Manifest));
 
     [Fact]
+    public void ABundleTheGameWillRefuseMakesItsModStale()
+    {
+        // What a game update does to the content route without moving a single hash: the catalog is
+        // rewritten, the mark that turned the check off is gone, and the bundle still holds the mod.
+        var stale = GameUpdate.Stale(
+            [Mod("a", true, "26.15.1", ("dw", "aaaa"), ("bw", "bbbb"))],
+            Manifest.ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase),
+            bundle => bundle == "bw");
+
+        var only = Assert.Single(stale);
+        Assert.Empty(only.Replaced);
+        Assert.Equal(["bw"], only.Rejected);
+    }
+
+    [Fact]
+    public void ABundleThatHasMovedIsNotAlsoAskedWhetherItWillBeRefused()
+    {
+        // Its replacement is the game's own and passes its own check. Counting it twice would say
+        // the player has lost the bundle when all they have lost is the mod.
+        var stale = GameUpdate.Stale(
+            [Mod("a", true, "26.15.1", ("bw", "old"))],
+            Manifest.ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase),
+            _ => true);
+
+        var only = Assert.Single(stale);
+        Assert.Equal(["bw"], only.Replaced);
+        Assert.Empty(only.Rejected);
+    }
+
+    [Fact]
+    public void TheNoticeSaysWhenABundleWillNotLoadAtAll()
+    {
+        var stale = GameUpdate.Stale(
+            [Mod("a", true, "26.15.1", ("dw", "aaaa"), ("bw", "bbbb"))],
+            Manifest.ToDictionary(e => e.Name, e => e.Hash, StringComparer.OrdinalIgnoreCase),
+            _ => true);
+
+        var notice = GameUpdate.Notice(stale, "26.15.2")!;
+
+        Assert.Contains("2 of the bundles will not load at all", notice);
+    }
+
+    [Fact]
+    public void TheNoticeLeavesThatOutWhenEveryBundleStillLoads()
+        => Assert.DoesNotContain("will not load at all",
+            GameUpdate.Notice(GameUpdate.Stale([Mod("a", true, "26.10.2", ("bw", "old"))], Manifest), "26.11.0")!);
+
+    [Fact]
     public void NothingStaleIsNothingToSay()
         => Assert.Null(GameUpdate.Notice([], "26.11.0"));
 
